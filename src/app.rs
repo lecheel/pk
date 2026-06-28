@@ -229,7 +229,10 @@ impl MergeApp {
                 }
             };
             self.search_rows = Self::build_search_rows(hunk, &mr);
-            self.match_result = Some(mr);
+            self.match_result = Some(mr.clone());
+            // Move cursor to the hunk match position
+            self.cursor_line = Some(mr.file_start);
+            self.scroll_to_match = true;
         }
     }
 
@@ -804,13 +807,81 @@ impl MergeApp {
                 });
             });
         ui.separator();
+
+        let len = self.file_lines.len();
+        let mut go_next_hunk = false;
+        let mut go_prev_hunk = false;
+
+        if len > 0 {
+            let mut cursor_changed = false;
+            ui.input(|i| {
+                let cur = self.cursor_line.unwrap_or(0);
+                if i.key_pressed(Key::ArrowDown) {
+                    self.cursor_line = Some((cur + 1).min(len - 1));
+                    cursor_changed = true;
+                }
+                if i.key_pressed(Key::ArrowUp) {
+                    self.cursor_line = Some(cur.saturating_sub(1));
+                    cursor_changed = true;
+                }
+                if i.key_pressed(Key::PageDown) {
+                    self.cursor_line = Some((cur + 10).min(len - 1));
+                    cursor_changed = true;
+                }
+                if i.key_pressed(Key::PageUp) {
+                    self.cursor_line = Some(cur.saturating_sub(10));
+                    cursor_changed = true;
+                }
+                if i.key_pressed(Key::Home) {
+                    self.cursor_line = Some(0);
+                    cursor_changed = true;
+                }
+                if i.key_pressed(Key::End) {
+                    self.cursor_line = Some(len - 1);
+                    cursor_changed = true;
+                }
+                if i.key_pressed(Key::L) {
+                    if i.modifiers.shift {
+                        go_prev_hunk = true;
+                    } else {
+                        go_next_hunk = true;
+                    }
+                }
+                if i.key_pressed(Key::A) {
+                    apply_clicked = true;
+                }
+            });
+            if cursor_changed {
+                self.scroll_to_match = true;
+            }
+        }
+
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "DBG: hunk {}/{} | go_next={} go_prev={} | apply_clicked={} | wants_kb={}",
+                    self.current_hunk + 1,
+                    self.hunks.len(),
+                    go_next_hunk,
+                    go_prev_hunk,
+                    apply_clicked,
+                    ui.ctx().wants_keyboard_input(),
+                ))
+                .color(Color32::YELLOW)
+                .monospace()
+                .size(10.0),
+            );
+        });
+
         if prev_hunk && current_hunk_idx > 0 {
             self.current_hunk -= 1;
             self.reload_file();
+            return;
         }
         if next_hunk && current_hunk_idx < total_hunks - 1 {
             self.current_hunk += 1;
             self.reload_file();
+            return;
         }
         if clear_anchor {
             self.manual_anchor = None;
@@ -821,11 +892,13 @@ impl MergeApp {
             self.candidate_index -= 1;
             self.scroll_to_match = true;
             self.recompute_match();
+            return;
         }
         if next_candidate && self.candidate_index + 1 < candidate_count {
             self.candidate_index += 1;
             self.scroll_to_match = true;
             self.recompute_match();
+            return;
         }
         if find_text {
             let q = self.file_search_query.trim().to_lowercase();
@@ -864,44 +937,33 @@ impl MergeApp {
             self.manual_anchor = Some(self.anchor_matches[self.anchor_match_idx]);
             self.scroll_to_match = true;
         }
-        if apply_clicked {
-            self.apply_merge();
-        }
 
-        // Keyboard navigation for file buffer
-        let len = self.file_lines.len();
-        if len > 0 && !ui.ctx().wants_keyboard_input() {
-            let mut cursor_changed = false;
-            ui.input(|i| {
-                let cur = self.cursor_line.unwrap_or(0);
-                if i.key_pressed(Key::ArrowDown) {
-                    self.cursor_line = Some((cur + 1).min(len - 1));
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::ArrowUp) {
-                    self.cursor_line = Some(cur.saturating_sub(1));
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::PageDown) {
-                    self.cursor_line = Some((cur + 10).min(len - 1));
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::PageUp) {
-                    self.cursor_line = Some(cur.saturating_sub(10));
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::Home) {
-                    self.cursor_line = Some(0);
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::End) {
-                    self.cursor_line = Some(len - 1);
-                    cursor_changed = true;
-                }
-            });
-            if cursor_changed {
+        if go_next_hunk {
+            if self.current_hunk < self.hunks.len() - 1 {
+                self.current_hunk += 1;
+                self.reload_file();
+                return;
+            } else {
+                // If no next hunk, just jump cursor to the current hunk position
+                self.cursor_line = Some(mr.file_start);
                 self.scroll_to_match = true;
             }
+        }
+        if go_prev_hunk {
+            if self.current_hunk > 0 {
+                self.current_hunk -= 1;
+                self.reload_file();
+                return;
+            } else {
+                // If no prev hunk, just jump cursor to the current hunk position
+                self.cursor_line = Some(mr.file_start);
+                self.scroll_to_match = true;
+            }
+        }
+
+        if apply_clicked {
+            self.apply_merge();
+            return;
         }
 
         let file_lines = self.file_lines.clone();
@@ -1018,8 +1080,14 @@ impl MergeApp {
                     let desired = Vec2::new(ui.available_width(), row_h);
                     let (rect, row_resp) = ui.allocate_exact_size(desired, Sense::click());
 
-                    if is_cursor && scroll_to_match {
-                        ui.scroll_to_cursor(Some(Align::Center));
+                    let should_scroll_here = scroll_to_match
+                        && (cursor_line == Some(i)
+                            || (cursor_line.is_none() && manual_anchor_check == Some(i))
+                            || (cursor_line.is_none()
+                                && manual_anchor_check.is_none()
+                                && i == auto_start));
+                    if should_scroll_here {
+                        ui.scroll_to_rect(rect, Some(Align::Center));
                         did_scroll = true;
                     }
 
@@ -1126,9 +1194,6 @@ impl MergeApp {
         if let Some(cur_line) = set_cursor {
             self.cursor_line = Some(cur_line);
             self.scroll_to_match = true;
-        }
-        if apply_clicked {
-            self.apply_merge();
         }
     }
 }
