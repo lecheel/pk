@@ -773,6 +773,8 @@ impl MergeApp {
         let mut next_hunk = false;
         let mut clear_anchor = false;
         let mut find_anchor = false;
+        let mut prev_candidate = false;
+        let mut next_candidate = false;
         let mut prev_anchor_match = false;
         let mut next_anchor_match = false;
         let mut apply_clicked = false;
@@ -819,30 +821,6 @@ impl MergeApp {
                             clear_anchor = true;
                         }
                     }
-
-                    if !self.anchor_matches.is_empty() {
-                        ui.separator();
-                        ui.label(RichText::new("Replace #").color(Color32::from_gray(160)));
-                        ui.label(format!("{}", self.anchor_match_idx + 1));
-                        ui.label(format!("/{}", self.anchor_matches.len()));
-                        if ui.button("◀").clicked() {
-                            prev_anchor_match = true;
-                        }
-                        if ui.button("▶").clicked() {
-                            next_anchor_match = true;
-                        }
-                    } else if !self.anchor_search_text.is_empty() {
-                        ui.label(RichText::new("(no matches)").color(Color32::from_gray(120)));
-                    }
-
-                    ui.separator();
-
-                    // Apply Merge
-                    ui.add_enabled_ui(can_apply, |ui| {
-                        if ui.button("⚡ Apply").clicked() {
-                            apply_clicked = true;
-                        }
-                    });
                 });
             });
         ui.separator();
@@ -908,8 +886,15 @@ impl MergeApp {
             self.recompute_match();
         }
 
-        if apply_clicked {
-            self.apply_merge();
+        if prev_candidate && self.candidate_index > 0 {
+            self.candidate_index -= 1;
+            self.scroll_to_match = true;
+            self.recompute_match();
+        }
+        if next_candidate && self.candidate_index + 1 < candidate_count {
+            self.candidate_index += 1;
+            self.scroll_to_match = true;
+            self.recompute_match();
         }
 
         // --- FILE SCROLL AREA ---
@@ -970,6 +955,151 @@ impl MergeApp {
                             FontId::monospace(11.0),
                             banner_color,
                         );
+
+                        let mut right_x = banner_rect.right() - 8.0;
+                        let btn_h = row_h;
+
+                        // Apply button (Restored inside match banner)
+                        if can_apply {
+                            let apply_w = 80.0;
+                            let apply_rect = Rect::from_min_size(
+                                Pos2::new(right_x - apply_w, banner_rect.center().y - btn_h / 2.0),
+                                Vec2::new(apply_w, btn_h),
+                            );
+                            right_x -= apply_w + 6.0;
+                            let apply_resp = ui.put(
+                                apply_rect,
+                                Button::new(
+                                    RichText::new("⚡ Apply")
+                                        .color(Color32::from_rgb(255, 230, 80))
+                                        .strong()
+                                        .monospace(),
+                                )
+                                .fill(Color32::from_rgb(60, 100, 40))
+                                .stroke(Stroke::new(1.5, Color32::from_rgb(180, 220, 80))),
+                            );
+                            if apply_resp.clicked() {
+                                apply_clicked = true;
+                            }
+                        }
+
+                        // Anchor matches navigation (Replace #1/3 [◀] [▶])
+                        if manual_anchor_check.is_some() && !self.anchor_matches.is_empty() {
+                            let nav_w = 28.0;
+                            let count_text = format!(
+                                "Replace #{}/{}",
+                                self.anchor_match_idx + 1,
+                                self.anchor_matches.len()
+                            );
+                            let count_size = ui
+                                .painter()
+                                .layout(
+                                    count_text.clone(),
+                                    FontId::monospace(11.0),
+                                    Color32::from_gray(200),
+                                    f32::INFINITY,
+                                )
+                                .size();
+                            let count_rect = Rect::from_min_size(
+                                Pos2::new(
+                                    right_x - count_size.x - 4.0,
+                                    banner_rect.center().y - count_size.y / 2.0,
+                                ),
+                                Vec2::new(count_size.x + 8.0, count_size.y + 2.0),
+                            );
+                            right_x -= count_rect.width() + 4.0;
+                            ui.painter().text(
+                                count_rect.center(),
+                                Align2::CENTER_CENTER,
+                                &count_text,
+                                FontId::monospace(11.0),
+                                Color32::from_gray(200),
+                            );
+
+                            let next_rect = Rect::from_min_size(
+                                Pos2::new(right_x - nav_w, banner_rect.center().y - btn_h / 2.0),
+                                Vec2::new(nav_w, btn_h),
+                            );
+                            right_x -= nav_w + 4.0;
+                            let next_resp = ui.put(
+                                next_rect,
+                                Button::new(RichText::new("▶").monospace())
+                                    .fill(Color32::from_rgb(50, 70, 50)),
+                            );
+                            if next_resp.clicked() {
+                                next_anchor_match = true;
+                            }
+
+                            let prev_rect = Rect::from_min_size(
+                                Pos2::new(right_x - nav_w, banner_rect.center().y - btn_h / 2.0),
+                                Vec2::new(nav_w, btn_h),
+                            );
+                            let prev_resp = ui.put(
+                                prev_rect,
+                                Button::new(RichText::new("◀").monospace())
+                                    .fill(Color32::from_rgb(50, 70, 50)),
+                            );
+                            if prev_resp.clicked() {
+                                prev_anchor_match = true;
+                            }
+                        }
+                        // Auto-matched candidates navigation (1/3 [◀] [▶])
+                        else if manual_anchor_check.is_none() && candidate_count > 1 {
+                            let nav_w = 28.0;
+                            let count_text =
+                                format!("{}/{}", self.candidate_index + 1, candidate_count);
+                            let count_size = ui
+                                .painter()
+                                .layout(
+                                    count_text.clone(),
+                                    FontId::monospace(11.0),
+                                    Color32::from_gray(200),
+                                    f32::INFINITY,
+                                )
+                                .size();
+                            let count_rect = Rect::from_min_size(
+                                Pos2::new(
+                                    right_x - count_size.x - 4.0,
+                                    banner_rect.center().y - count_size.y / 2.0,
+                                ),
+                                Vec2::new(count_size.x + 8.0, count_size.y + 2.0),
+                            );
+                            right_x -= count_rect.width() + 4.0;
+                            ui.painter().text(
+                                count_rect.center(),
+                                Align2::CENTER_CENTER,
+                                &count_text,
+                                FontId::monospace(11.0),
+                                Color32::from_gray(200),
+                            );
+
+                            let next_rect = Rect::from_min_size(
+                                Pos2::new(right_x - nav_w, banner_rect.center().y - btn_h / 2.0),
+                                Vec2::new(nav_w, btn_h),
+                            );
+                            right_x -= nav_w + 4.0;
+                            let next_resp = ui.put(
+                                next_rect,
+                                Button::new(RichText::new("▶").monospace())
+                                    .fill(Color32::from_rgb(50, 70, 50)),
+                            );
+                            if next_resp.clicked() {
+                                next_candidate = true;
+                            }
+
+                            let prev_rect = Rect::from_min_size(
+                                Pos2::new(right_x - nav_w, banner_rect.center().y - btn_h / 2.0),
+                                Vec2::new(nav_w, btn_h),
+                            );
+                            let prev_resp = ui.put(
+                                prev_rect,
+                                Button::new(RichText::new("◀").monospace())
+                                    .fill(Color32::from_rgb(50, 70, 50)),
+                            );
+                            if prev_resp.clicked() {
+                                prev_candidate = true;
+                            }
+                        }
                     }
 
                     let sense = if anchor_mode {
@@ -1043,6 +1173,10 @@ impl MergeApp {
             self.anchor_mode = false;
             self.scroll_to_match = true;
             self.recompute_match();
+        }
+
+        if apply_clicked {
+            self.apply_merge();
         }
     }
 }
