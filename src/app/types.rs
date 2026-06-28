@@ -1,7 +1,7 @@
+use super::palette::pal;
 use crate::diff::RowKind;
 use eframe::egui::Color32;
-
-use super::palette::pal;
+use std::collections::HashSet;
 
 #[derive(Clone, Debug)]
 pub enum Action {
@@ -15,7 +15,6 @@ pub struct SearchRow {
     pub kind: RowKind,
 }
 
-/// Flash message with optional urgency level.
 #[derive(Clone)]
 pub struct StatusMessage {
     pub text: String,
@@ -37,28 +36,24 @@ impl StatusMessage {
             kind: MessageKind::Info,
         }
     }
-
     pub fn success(s: impl Into<String>) -> Self {
         Self {
             text: s.into(),
             kind: MessageKind::Success,
         }
     }
-
     pub fn warning(s: impl Into<String>) -> Self {
         Self {
             text: s.into(),
             kind: MessageKind::Warning,
         }
     }
-
     pub fn error(s: impl Into<String>) -> Self {
         Self {
             text: s.into(),
             kind: MessageKind::Error,
         }
     }
-
     pub fn color(&self) -> Color32 {
         match self.kind {
             MessageKind::Info => pal::ACCENT_INFO,
@@ -69,11 +64,10 @@ impl StatusMessage {
     }
 }
 
-/// Tracks per-file state for multi-file patch sets.
 #[derive(Clone)]
 pub struct FileState {
     pub lines: Vec<String>,
-    pub applied_hunks: std::collections::HashSet<usize>,
+    pub applied_hunks: HashSet<usize>,
     pub history: Vec<(Vec<String>, usize)>,
     pub merged_range: Option<(usize, usize)>,
 }

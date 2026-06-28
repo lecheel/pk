@@ -1,11 +1,9 @@
-use eframe::egui::Color32;
-
-use crate::diff::{self, MatchResult, RowKind};
-use crate::patch::PatchHunk;
-
 use super::palette::pal;
 use super::state::MergeApp;
 use super::types::SearchRow;
+use crate::diff::{self, MatchResult, RowKind};
+use crate::patch::PatchHunk;
+use eframe::egui::Color32;
 
 pub trait MergeMatching {
     fn recompute_match(&mut self);
@@ -57,7 +55,6 @@ impl MergeMatching for MergeApp {
         let patch_diff = diff::diff_patch(&hunk.search, &hunk.replace);
         let mut rows = Vec::new();
         let mut file_idx = mr.file_start;
-
         for (kind, left, _right) in &patch_diff {
             match kind {
                 RowKind::Equal => {

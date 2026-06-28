@@ -1,8 +1,6 @@
 use eframe::egui::Color32;
-
 pub mod pal {
     use super::Color32;
-
     pub const BG_BASE: Color32 = Color32::from_rgb(18, 20, 24);
     pub const BG_PANEL: Color32 = Color32::from_rgb(24, 28, 36);
     pub const BG_TOOLBAR: Color32 = Color32::from_rgb(20, 24, 30);

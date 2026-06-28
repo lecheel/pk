@@ -1,7 +1,6 @@
-use eframe::egui::*;
-
 use super::palette::pal;
 use super::state::MergeApp;
+use eframe::egui::*;
 
 pub fn render_with_minimap(app: &mut MergeApp, ui: &mut Ui) {
     let available = ui.available_size();

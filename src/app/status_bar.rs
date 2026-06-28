@@ -1,7 +1,6 @@
-use eframe::egui::*;
-
 use super::palette::pal;
 use super::state::MergeApp;
+use eframe::egui::*;
 
 pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
     TopBottomPanel::bottom("status")

@@ -1,14 +1,10 @@
-//--+ ./app/split_view.rs
-use std::collections::HashSet;
-
-use eframe::egui::*;
-
-use crate::diff::RowKind;
-
 use super::matching::MergeMatching;
 use super::palette::pal;
 use super::state::MergeApp;
 use super::types::{Action, SearchRow};
+use crate::diff::RowKind;
+use eframe::egui::*;
+use std::collections::HashSet;
 
 pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mr = match app.match_result.clone() {
@@ -39,7 +35,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let row_h = mono_h + 4.0;
     let char_w = mono_h * 0.60;
 
-    // ── Panel headers ─────────────────────────────────────────────────────
     ui.horizontal(|ui| {
         Frame::none()
             .fill(Color32::from_rgb(28, 38, 58))
@@ -61,58 +56,35 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
             .inner_margin(Margin::symmetric(8.0, 3.0))
             .show(ui, |ui| {
                 ui.set_min_width(right_w);
-                ui.set_max_width(right_w);
-                let label = if !app.file_path.is_empty() {
-                    std::path::Path::new(&app.file_path)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("FILE")
-                } else {
-                    "FILE"
-                };
                 ui.label(
-                    RichText::new(format!("FILE  ·  {}", label))
-                        .color(Color32::from_rgb(120, 220, 150))
-                        .strong()
-                        .monospace(),
+                    RichText::new(format!(
+                        "FILE  ·  {} lines  ·  match @ {}–{}",
+                        app.file_lines.len(),
+                        mr.file_start + 1,
+                        mr.file_end,
+                    ))
+                    .color(Color32::from_rgb(120, 220, 160))
+                    .strong()
+                    .monospace(),
                 );
             });
     });
 
-    ui.add_space(1.0);
+    ui.add(Separator::default());
 
-    // ── Two‑column scroll area ────────────────────────────────────────────
-    ScrollArea::vertical()
-        .id_salt("split_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                // ── LEFT: Search/Replace diff ──────────────────────────────
-                let (left_rect, _) =
-                    ui.allocate_exact_size(Vec2::new(left_w, f32::INFINITY), Sense::hover());
-                let mut left_ui = ui.child_ui(left_rect, Layout::top_down(Align::LEFT), None);
-                render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
+    let body_rect = ui.available_rect_before_wrap();
+    let mut left_rect = body_rect;
+    left_rect.set_width(left_w);
+    let mut right_rect = body_rect;
+    right_rect.min.x = body_rect.min.x + left_w + 2.0;
+    right_rect.set_width(right_w);
 
-                ui.add(Separator::default().vertical());
+    let mut left_ui = ui.child_ui(left_rect, Layout::top_down(Align::LEFT), None);
+    render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
 
-                // ── RIGHT: File content with match highlight ───────────────
-                let (right_rect, _) =
-                    ui.allocate_exact_size(Vec2::new(right_w, f32::INFINITY), Sense::hover());
-                let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
-                render_file_panel(
-                    app,
-                    &mut right_ui,
-                    &mr,
-                    row_h,
-                    char_w,
-                    right_w,
-                    left_w, // not used, but we pass for consistency
-                );
-            });
-        });
+    let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
+    render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
 }
-
-// ── Search panel ──────────────────────────────────────────────────────────────
 
 fn render_search_panel(
     app: &MergeApp,
@@ -133,7 +105,6 @@ fn render_search_panel(
             };
             let is_applied = app.applied_hunks.contains(&app.current_hunk);
 
-            // Banner
             let (banner_bg, banner_fg, _icon) = MergeApp::score_appearance(mr.score);
             let (banner_bg, banner_text) = if is_applied {
                 (
@@ -164,7 +135,6 @@ fn render_search_panel(
             );
             ui.add_space(2.0);
 
-            // Build per‑line lookup: search line → matched file index
             let search_file_map: Vec<Option<usize>> = app
                 .search_rows
                 .iter()
@@ -186,7 +156,6 @@ fn render_search_panel(
                 let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
                 ui.painter().rect_filled(rect, 0.0, bg);
 
-                // Left accent stripe
                 let bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
                 ui.painter().rect_filled(
                     bar,
@@ -198,7 +167,6 @@ fn render_search_panel(
                     },
                 );
 
-                // Line number
                 let num_text = if let Some(fi) = file_idx {
                     format!("{:>4}", fi + 1)
                 } else {
@@ -238,7 +206,6 @@ fn render_search_panel(
                 );
             }
 
-            // Replace section
             if !hunk.replace.is_empty() {
                 ui.add_space(4.0);
                 let (sep_rect, _) =
@@ -297,8 +264,6 @@ fn render_search_panel(
         });
 }
 
-// ── File panel ───────────────────────────────────────────────────────────────
-
 fn render_file_panel(
     app: &mut MergeApp,
     ui: &mut Ui,
@@ -306,11 +271,9 @@ fn render_file_panel(
     row_h: f32,
     char_w: f32,
     panel_w: f32,
-    _left_w: f32,
 ) {
     let max_chars = ((panel_w - 68.0) / char_w).floor() as usize;
 
-    // ── Deferred action flags ─────────────────────────────────────────────
     let mut prev_hunk = false;
     let mut next_hunk = false;
     let mut prev_candidate = false;
@@ -334,7 +297,6 @@ fn render_file_panel(
         mr.file_start + 1
     };
 
-    // ── Controls bar ──────────────────────────────────────────────────────
     Frame::none()
         .fill(Color32::from_rgb(25, 32, 42))
         .inner_margin(Margin::symmetric(6.0, 4.0))
@@ -342,7 +304,6 @@ fn render_file_panel(
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
 
-                // Hunk navigation
                 ui.label(RichText::new("Hunk:").color(pal::TEXT_DIM).small());
                 if ui
                     .add_enabled(current_hunk_idx > 0, Button::new("◀").small())
@@ -368,7 +329,6 @@ fn render_file_panel(
 
                 ui.add(Separator::default().vertical());
 
-                // Candidate/anchor navigation
                 if let Some(anchor) = manual_anchor {
                     ui.label(
                         RichText::new(format!("⚓ {}", anchor + 1))
@@ -407,7 +367,6 @@ fn render_file_panel(
 
                 ui.add(Separator::default().vertical());
 
-                // Text search
                 ui.label(RichText::new("🔍").monospace());
                 let resp = ui.add(
                     TextEdit::singleline(&mut app.file_search_query)
@@ -443,7 +402,6 @@ fn render_file_panel(
 
                 ui.add(Separator::default().vertical());
 
-                // Apply button — prominent
                 ui.add_enabled_ui(can_apply, |ui| {
                     let btn_text = if is_applied {
                         "✓ Applied".to_string()
@@ -466,7 +424,6 @@ fn render_file_panel(
                     }
                 });
 
-                // Skip (advance without applying)
                 if current_hunk_idx < total_hunks - 1 {
                     if ui
                         .small_button("Skip →")
@@ -481,7 +438,6 @@ fn render_file_panel(
 
     ui.add(Separator::default());
 
-    // ── Keyboard input ───────────────────────────────────────────────────
     let len = app.file_lines.len();
     let mut go_next_hunk = false;
     let mut go_prev_hunk = false;
@@ -526,7 +482,6 @@ fn render_file_panel(
                 }
             }
 
-            // A → apply when cursor is within match region
             if i.key_pressed(Key::A) {
                 let in_hunk = if let Some(anchor) = manual_anchor {
                     cur == anchor
@@ -534,11 +489,9 @@ fn render_file_panel(
                     cur >= mr.file_start && cur < mr.file_end
                 };
                 if is_applied {
-                    // message set below
                 } else if in_hunk {
                     apply_clicked = true;
                 } else {
-                    // Move cursor into the match region and re-try next press
                     app.cursor_line = Some(mr.file_start);
                     cursor_changed = true;
                 }
@@ -546,7 +499,6 @@ fn render_file_panel(
 
             for event in i.events.clone() {
                 if let Event::Text(txt) = event {
-                    // Filter out '?' and 'm' which are handled globally
                     if txt != "?" && txt != "m" && txt != "M" {
                         new_text.push_str(&txt);
                     }
@@ -554,7 +506,6 @@ fn render_file_panel(
             }
         });
 
-        // Vim buffer
         if !new_text.is_empty() {
             app.vim_buffer.push_str(&new_text);
             let buf = app.vim_buffer.trim().to_string();
@@ -613,7 +564,6 @@ fn render_file_panel(
         }
     }
 
-    // ── Deferred mutations ────────────────────────────────────────────────
     if prev_hunk && current_hunk_idx > 0 {
         app.current_hunk -= 1;
         app.load_hunk();
@@ -704,7 +654,6 @@ fn render_file_panel(
         }
     }
 
-    // ── Snapshot local state for the scroll loop ─────────────────────────
     let file_lines = app.file_lines.clone();
     let manual_anchor_check = app.manual_anchor;
     let merged_range = app.merged_range;
@@ -718,7 +667,6 @@ fn render_file_panel(
     let mut set_anchor: Option<usize> = None;
     let mut set_cursor: Option<usize> = None;
 
-    // Build a set of file-line indices that appear in the diff as deletions
     let delete_file_indices: HashSet<usize> = app
         .search_rows
         .iter()
@@ -732,7 +680,6 @@ fn render_file_panel(
         .filter_map(|r| r.file_idx)
         .collect();
 
-    // ── File line scroll area ─────────────────────────────────────────────
     ScrollArea::both()
         .id_source("file_scroll")
         .auto_shrink([false, false])
@@ -747,7 +694,6 @@ fn render_file_panel(
                 let is_search_hit = !search_query.is_empty()
                     && line.to_lowercase().contains(&search_query.to_lowercase());
 
-                // Row height: slightly taller for anchor and match-start banners
                 let row_is_tall = is_anchor
                     || (in_auto_match && i == auto_start && manual_anchor_check.is_none());
                 let desired = Vec2::new(
@@ -756,7 +702,6 @@ fn render_file_panel(
                 );
                 let (rect, row_resp) = ui.allocate_exact_size(desired, Sense::click());
 
-                // Scroll to bring this row into view
                 let should_scroll = scroll_to_match
                     && (is_cursor
                         || (cursor_line.is_none() && is_anchor)
@@ -768,10 +713,8 @@ fn render_file_panel(
                     did_scroll = true;
                 }
 
-                // ── Anchor row ────────────────────────────────────────────
                 if is_anchor {
                     ui.painter().rect_filled(rect, 2.0, pal::BG_ANCHOR);
-                    // Dashed line
                     let dash_y = rect.center().y;
                     let mut x = rect.left() + 4.0;
                     while x < rect.right() - 120.0 {
@@ -812,9 +755,7 @@ fn render_file_panel(
                     {
                         apply_clicked = true;
                     }
-                }
-                // ── Auto-match start banner ───────────────────────────────
-                else if in_auto_match && i == auto_start && manual_anchor_check.is_none() {
+                } else if in_auto_match && i == auto_start && manual_anchor_check.is_none() {
                     ui.painter()
                         .rect_filled(rect, 2.0, Color32::from_rgb(28, 60, 40));
                     ui.painter().text(
@@ -850,10 +791,7 @@ fn render_file_panel(
                     {
                         apply_clicked = true;
                     }
-                }
-                // ── Normal file row ───────────────────────────────────────
-                else {
-                    // Background
+                } else {
                     let base_bg = if in_merged {
                         pal::BG_MERGED
                     } else if is_delete {
@@ -874,7 +812,6 @@ fn render_file_panel(
                     };
                     ui.painter().rect_filled(rect, 0.0, row_bg);
 
-                    // Left accent bar
                     let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
                     let bar_color = if in_merged {
                         pal::BAR_MERGED
@@ -893,7 +830,6 @@ fn render_file_panel(
                     };
                     ui.painter().rect_filled(bar, 0.0, bar_color);
 
-                    // Inline diff prefix (+/=/-) shown within match region
                     let diff_prefix = if in_auto_match && manual_anchor_check.is_none() {
                         if is_delete {
                             Some(("-", pal::TEXT_DELETE))
@@ -906,7 +842,6 @@ fn render_file_panel(
                         None
                     };
 
-                    // Click to set cursor / anchor
                     if row_resp.clicked() {
                         set_cursor = Some(i);
                         if !search_query.is_empty() {
@@ -914,7 +849,6 @@ fn render_file_panel(
                         }
                     }
 
-                    // Line number
                     let num_color = if in_merged {
                         pal::TEXT_LNUM_ACTIVE
                     } else if is_delete {
@@ -935,7 +869,6 @@ fn render_file_panel(
                         num_color,
                     );
 
-                    // Optional diff glyph column
                     if let Some((glyph, glyph_color)) = diff_prefix {
                         ui.painter().text(
                             Pos2::new(rect.left() + 48.0, rect.center().y),
@@ -946,7 +879,6 @@ fn render_file_panel(
                         );
                     }
 
-                    // Line text
                     let text_color = if in_merged {
                         pal::TEXT_MERGED
                     } else if is_delete {
@@ -968,7 +900,6 @@ fn render_file_panel(
                     );
                 }
 
-                // Match-end separator line
                 if in_auto_match && i == auto_end.saturating_sub(1) && manual_anchor_check.is_none()
                 {
                     let (sep_rect, _) = ui

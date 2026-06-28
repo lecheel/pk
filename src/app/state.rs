@@ -1,13 +1,10 @@
-use std::collections::{HashMap, HashSet};
-
-use eframe::egui::*;
-
-use crate::diff::MatchResult;
-use crate::patch::PatchHunk;
-
 use super::constants::{DEFAULT_FILE, DEFAULT_PATCH};
 use super::matching::MergeMatching;
 use super::types::{Action, FileState, StatusMessage};
+use crate::diff::MatchResult;
+use crate::patch::PatchHunk;
+use eframe::egui::*;
+use std::collections::{HashMap, HashSet};
 
 pub struct MergeApp {
     pub patch_text: String,
@@ -122,20 +119,6 @@ impl MergeApp {
         self.last_action = None;
         self.file_path.clear();
         self.file_states.clear();
-
-        // DEBUG: Show how many hunks were parsed
-        if self.hunks.is_empty() && !self.patch_text.is_empty() {
-            self.set_message(StatusMessage::warning(format!(
-                "Parsed 0 hunks from {} bytes of patch text",
-                self.patch_text.len()
-            )));
-        } else if !self.hunks.is_empty() {
-            self.set_message(StatusMessage::info(format!(
-                "Parsed {} hunk(s)",
-                self.hunks.len()
-            )));
-        }
-
         self.load_hunk();
     }
 
@@ -261,7 +244,6 @@ impl MergeApp {
 
 impl eframe::App for MergeApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // Auto-dismiss messages after 6 seconds
         if self.message.is_some() {
             if self.message_until.is_none() {
                 self.message_until = Some(ctx.input(|i| i.time) + 6.0);
@@ -274,7 +256,6 @@ impl eframe::App for MergeApp {
             }
         }
 
-        // Global keyboard shortcuts
         if !ctx.wants_keyboard_input() {
             ctx.input(|i| {
                 if i.key_pressed(Key::Escape) {
