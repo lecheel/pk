@@ -1,6 +1,7 @@
 use crate::diff::{self, MatchResult, RowKind};
 use crate::patch::{self, PatchHunk};
 use eframe::egui::*;
+use std::collections::HashSet;
 
 const DEFAULT_PATCH: &str = r#"<patch>
 filename src/repl/mod.rs
@@ -64,6 +65,7 @@ pub(crate) fn run_repl() -> io::Result<()> {
 #[derive(Clone)]
 struct SearchRow {
     text: String,
+    /// index into file_lines that this row matched against (None = unmatched/insert)
     file_idx: Option<usize>,
     kind: RowKind,
 }
@@ -84,28 +86,17 @@ pub struct MergeApp {
     match_result: Option<MatchResult>,
     search_rows: Vec<SearchRow>,
 
+    // right-panel search / manual anchor
+    file_search_query: String,
+    file_search_matches: HashSet<usize>, // line indices that match the query
+    manual_anchor: Option<usize>,        // user-chosen insert-before line (overrides auto match)
+
     // merge result
     merged_lines: Option<Vec<String>>,
-    merged_range: Option<(usize, usize)>,
+    merged_range: Option<(usize, usize)>, // (start, end) in merged_lines
     show_merged: bool,
 
     message: Option<String>,
-
-    /// Which candidate match is selected (index into MatchResult.candidates)
-    candidate_index: usize,
-    /// Manual anchor: (search_line_idx, file_line_idx)
-    manual_anchor: Option<(usize, usize)>,
-    /// When true, clicking a line in the file panel sets the manual anchor
-    anchor_mode: bool,
-    /// When true, scroll the file panel to center on the matched region
-    scroll_to_match: bool,
-
-    /// Text input for the anchor string search (e.g. "xxxxkkkk")
-    anchor_search_text: String,
-    /// List of file line indices matching the anchor search text
-    anchor_matches: Vec<usize>,
-    /// Current selected index within anchor_matches
-    anchor_match_idx: usize,
 }
 
 impl MergeApp {
@@ -123,17 +114,13 @@ impl MergeApp {
                 .unwrap_or_default(),
             match_result: None,
             search_rows: Vec::new(),
+            file_search_query: String::new(),
+            file_search_matches: HashSet::new(),
+            manual_anchor: None,
             merged_lines: None,
             merged_range: None,
             show_merged: false,
             message: None,
-            candidate_index: 0,
-            manual_anchor: None,
-            anchor_mode: false,
-            scroll_to_match: true,
-            anchor_search_text: String::new(),
-            anchor_matches: Vec::new(),
-            anchor_match_idx: 0,
         };
 
         let mut loaded_patch = false;
@@ -167,13 +154,9 @@ impl MergeApp {
         self.merged_lines = None;
         self.merged_range = None;
         self.show_merged = false;
-        self.candidate_index = 0;
         self.manual_anchor = None;
-        self.anchor_mode = false;
-        self.scroll_to_match = true;
-        self.anchor_search_text.clear();
-        self.anchor_matches.clear();
-        self.anchor_match_idx = 0;
+        self.file_search_query.clear();
+        self.file_search_matches.clear();
         self.reload_file();
     }
 
@@ -207,13 +190,9 @@ impl MergeApp {
         self.merged_lines = None;
         self.merged_range = None;
         self.show_merged = false;
-        self.candidate_index = 0;
         self.manual_anchor = None;
-        self.anchor_mode = false;
-        self.scroll_to_match = true;
-        self.anchor_search_text.clear();
-        self.anchor_matches.clear();
-        self.anchor_match_idx = 0;
+        self.file_search_query.clear();
+        self.file_search_matches.clear();
         self.recompute_match();
     }
 
@@ -229,35 +208,15 @@ impl MergeApp {
         if self.file_lines.is_empty() {
             self.match_result = None;
             self.search_rows = Vec::new();
-            return;
-        }
-
-        let mr = if let Some((s_idx, f_idx)) = self.manual_anchor {
-            diff::find_best_match_with_anchor(&hunk.search, &self.file_lines, s_idx, f_idx)
         } else {
-            let best = diff::find_best_match(&hunk.search, &self.file_lines);
-            if best.candidates.is_empty() {
-                best
-            } else {
-                let idx = self.candidate_index.min(best.candidates.len() - 1);
-                if idx == 0 {
-                    best
-                } else {
-                    let (start, end, _) = best.candidates[idx];
-                    let cands = best.candidates.clone();
-                    let mut mr =
-                        diff::compute_match_for_window(&hunk.search, &self.file_lines, start, end);
-                    mr.candidates = cands;
-                    mr
-                }
-            }
-        };
-
-        self.search_rows = Self::build_search_rows(hunk, &mr);
-        self.match_result = Some(mr);
+            let mr = diff::find_best_match(&hunk.search, &self.file_lines);
+            self.search_rows = Self::build_search_rows(hunk, &mr);
+            self.match_result = Some(mr);
+        }
     }
 
     fn build_search_rows(hunk: &PatchHunk, mr: &MatchResult) -> Vec<SearchRow> {
+        // Align search lines against the matched file window using the diff rows
         let patch_diff = diff::diff_patch(&hunk.search, &hunk.replace);
         let mut rows = Vec::new();
         let mut file_idx = mr.file_start;
@@ -292,30 +251,58 @@ impl MergeApp {
         rows
     }
 
+    fn recompute_file_search(&mut self) {
+        let q = self.file_search_query.to_lowercase();
+        if q.is_empty() {
+            self.file_search_matches.clear();
+        } else {
+            self.file_search_matches = self
+                .file_lines
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| l.to_lowercase().contains(&q))
+                .map(|(i, _)| i)
+                .collect::<HashSet<usize>>();
+        }
+    }
+
     fn apply_merge(&mut self) {
-        let mr = match &self.match_result {
-            Some(m) => m.clone(),
-            None => return,
-        };
         let hunk = match self.hunks.get(self.current_hunk) {
             Some(h) => h.clone(),
             None => return,
         };
 
+        // Use manual anchor if set, else fall back to auto match
+        let (file_start, file_end) = if let Some(anchor) = self.manual_anchor {
+            // Insert-before semantics: replace zero lines at anchor position
+            // (pure insert), unless user clicked anchor inside matched region
+            (anchor, anchor)
+        } else {
+            match &self.match_result {
+                Some(m) => (m.file_start, m.file_end),
+                None => return,
+            }
+        };
+
         let mut output: Vec<String> = Vec::new();
-        output.extend_from_slice(&self.file_lines[..mr.file_start]);
+        output.extend_from_slice(&self.file_lines[..file_start]);
         let replace_start = output.len();
         output.extend(hunk.replace.iter().cloned());
         let replace_end = output.len();
-        output.extend_from_slice(&self.file_lines[mr.file_end..]);
+        output.extend_from_slice(&self.file_lines[file_end..]);
+
+        let mode = if self.manual_anchor.is_some() {
+            format!("anchor line {}", file_start + 1)
+        } else {
+            format!("auto match lines {}–{}", file_start + 1, file_end)
+        };
 
         self.merged_lines = Some(output);
         self.merged_range = Some((replace_start, replace_end));
         self.show_merged = true;
         self.message = Some(format!(
-            "Applied: replaced lines {}–{} with {} new lines",
-            mr.file_start + 1,
-            mr.file_end,
+            "Applied via {} → inserted {} lines",
+            mode,
             hunk.replace.len()
         ));
     }
@@ -341,7 +328,10 @@ impl MergeApp {
         self.hunks.get(self.current_hunk)
     }
 
+    #[allow(dead_code)]
     fn truncate(text: &str, max_chars: usize) -> &str {
+        // return a byte-safe prefix slice — we won't append ellipsis to keep it zero-alloc
+        // for display; callers that want "…" can wrap this
         let mut end = 0;
         for (i, (byte_pos, _)) in text.char_indices().enumerate() {
             if i >= max_chars {
@@ -427,8 +417,32 @@ impl MergeApp {
                             self.merged_lines = None;
                             self.merged_range = None;
                             self.show_merged = false;
+                            self.manual_anchor = None;
+                            self.file_search_query.clear();
+                            self.file_search_matches.clear();
                             self.recompute_match();
                         }
+                    }
+                }
+
+                ui.separator();
+
+                if !self.hunks.is_empty() {
+                    ui.label(
+                        RichText::new(format!(
+                            "Hunk {}/{}",
+                            self.current_hunk + 1,
+                            self.hunks.len()
+                        ))
+                        .strong(),
+                    );
+                    if ui.button("◀ Prev").clicked() && self.current_hunk > 0 {
+                        self.current_hunk -= 1;
+                        self.reload_file();
+                    }
+                    if ui.button("Next ▶").clicked() && self.current_hunk < self.hunks.len() - 1 {
+                        self.current_hunk += 1;
+                        self.reload_file();
                     }
                 }
 
@@ -458,6 +472,34 @@ impl MergeApp {
                     ui.separator();
                 }
 
+                // Apply / toggle merged / save
+                let can_apply = (self.match_result.is_some() || self.manual_anchor.is_some())
+                    && !self.show_merged;
+
+                if let Some(anchor) = self.manual_anchor {
+                    // Show anchor indicator badge
+                    let frame = Frame::none()
+                        .fill(Color32::from_rgb(60, 45, 15))
+                        .stroke(Stroke::new(1.0, Color32::from_rgb(220, 160, 40)))
+                        .rounding(Rounding::same(4.0))
+                        .inner_margin(Margin::symmetric(8.0, 4.0));
+                    frame.show(ui, |ui| {
+                        ui.label(
+                            RichText::new(format!("⚓ anchor @ line {}", anchor + 1))
+                                .color(Color32::from_rgb(255, 200, 60))
+                                .strong()
+                                .monospace(),
+                        );
+                    });
+                    if ui.button("✕ clear").clicked() {
+                        self.manual_anchor = None;
+                    }
+                    ui.separator();
+                }
+
+                if can_apply && ui.button("⚡ Apply").clicked() {
+                    self.apply_merge();
+                }
                 if self.merged_lines.is_some() {
                     let toggle_label = if self.show_merged {
                         "Show Diff"
@@ -480,29 +522,18 @@ impl MergeApp {
         TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
-                if self.anchor_mode {
-                    ui.colored_label(
-                        Color32::from_rgb(255, 200, 60),
-                        "⚓ Click a line in the file buffer (right panel) to anchor",
-                    );
-                } else if let Some(ref msg) = self.message {
+                if let Some(ref msg) = self.message {
                     ui.colored_label(Color32::from_rgb(220, 180, 60), msg);
                 } else if let Some(hunk) = self.current_hunk() {
                     ui.label(format!("📄 {}", hunk.filename));
                     ui.separator();
                     if let Some(ref mr) = self.match_result {
-                        let anchor_tag = if self.manual_anchor.is_some() {
-                            "  🔗"
-                        } else {
-                            ""
-                        };
                         ui.label(format!(
-                            "Match: lines {}–{}  |  search {} ln  |  replace {} ln{}",
+                            "Match: lines {}–{}  |  search {} ln  |  replace {} ln",
                             mr.file_start + 1,
                             mr.file_end,
                             hunk.search.len(),
-                            hunk.replace.len(),
-                            anchor_tag,
+                            hunk.replace.len()
                         ));
                     }
                 }
@@ -532,15 +563,17 @@ impl MergeApp {
         };
 
         let available = ui.available_size();
-        let divider = 0.38;
+        let divider = 0.38; // left panel takes 38% of width
         let left_w = (available.x * divider).floor() - 1.0;
-        let right_w = available.x - left_w - 2.0;
+        let right_w = available.x - left_w - 2.0; // 2px for separator
 
         let mono_h = ui.text_style_height(&TextStyle::Monospace);
         let row_h = mono_h + 4.0;
-        let char_w = mono_h * 0.60;
+        let char_w = mono_h * 0.60; // rough monospace char width
 
+        // ---- Column headers ----
         ui.horizontal(|ui| {
+            // Left header
             Frame::none()
                 .fill(Color32::from_rgb(35, 45, 65))
                 .inner_margin(Margin::symmetric(6.0, 3.0))
@@ -556,6 +589,7 @@ impl MergeApp {
                     );
                 });
             ui.add_space(2.0);
+            // Right header
             Frame::none()
                 .fill(Color32::from_rgb(35, 55, 45))
                 .inner_margin(Margin::symmetric(6.0, 3.0))
@@ -577,8 +611,13 @@ impl MergeApp {
 
         ui.separator();
 
+        // ---- Body: two synchronized-scroll panels ----
+        // We use a shared ScrollArea for the right (full file) panel.
+        // The left panel shows search lines anchored to the top.
+
         let body_rect = ui.available_rect_before_wrap();
 
+        // Left panel — search pattern lines (fixed, no scroll needed for typical patches)
         let mut left_rect = body_rect;
         left_rect.set_width(left_w);
 
@@ -586,9 +625,11 @@ impl MergeApp {
         right_rect.min.x = body_rect.min.x + left_w + 2.0;
         right_rect.set_width(right_w);
 
+        // Draw left panel
         let mut left_ui = ui.child_ui(left_rect, Layout::top_down(Align::LEFT), None);
         self.render_search_panel(&mut left_ui, &mr, row_h, char_w, left_w);
 
+        // Draw right panel
         let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
         self.render_file_panel(&mut right_ui, &mr, row_h, char_w, right_w);
     }
@@ -612,6 +653,7 @@ impl MergeApp {
                     None => return,
                 };
 
+                // Header: match confidence banner
                 let (banner_color, banner_text) = if mr.score >= 80.0 {
                     (
                         Color32::from_rgb(40, 90, 40),
@@ -651,7 +693,9 @@ impl MergeApp {
 
                 ui.add_space(2.0);
 
+                // Search lines
                 for (line_idx, line) in hunk.search.iter().enumerate() {
+                    // Find if this search line matched something in the file
                     let matched_file_row = self
                         .search_rows
                         .iter()
@@ -675,6 +719,7 @@ impl MergeApp {
                     let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
                     ui.painter().rect_filled(rect, 0.0, bg);
 
+                    // Line number in search block
                     let num_text = format!("{:>3} ", line_idx + 1);
                     ui.painter().text(
                         Pos2::new(rect.left() + 4.0, rect.center().y),
@@ -684,6 +729,7 @@ impl MergeApp {
                         Color32::from_gray(90),
                     );
 
+                    // Prefix symbol
                     ui.painter().text(
                         Pos2::new(rect.left() + 36.0, rect.center().y),
                         Align2::LEFT_CENTER,
@@ -692,6 +738,7 @@ impl MergeApp {
                         prefix_color,
                     );
 
+                    // Line content
                     let display = Self::truncate_owned(line, max_chars);
                     ui.painter().text(
                         Pos2::new(rect.left() + 52.0, rect.center().y),
@@ -704,6 +751,7 @@ impl MergeApp {
 
                 ui.add_space(6.0);
 
+                // Replace preview section
                 if !hunk.replace.is_empty() {
                     let sep_desired = Vec2::new(ui.available_width(), 1.0);
                     let (sep_rect, _) = ui.allocate_exact_size(sep_desired, Sense::hover());
@@ -766,377 +814,237 @@ impl MergeApp {
         panel_w: f32,
     ) {
         let max_chars = ((panel_w - 64.0) / char_w).floor() as usize;
-        let candidate_count = mr.candidates.len();
 
-        // State captures for action bar
-        let mut prev_hunk = false;
-        let mut next_hunk = false;
-        let mut clear_anchor = false;
-        let mut find_anchor = false;
-        let mut prev_candidate = false;
-        let mut next_candidate = false;
-        let mut prev_anchor_match = false;
-        let mut next_anchor_match = false;
-        let mut apply_clicked = false;
+        // ---- Search bar ----
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("🔍").monospace());
+            let search_edit = TextEdit::singleline(&mut self.file_search_query)
+                .hint_text("search file…  (click result to set insert anchor)")
+                .desired_width(ui.available_width() - 120.0)
+                .font(TextStyle::Monospace);
+            let resp = ui.add(search_edit);
+            if resp.changed() {
+                self.recompute_file_search();
+                // clear anchor when search changes
+                self.manual_anchor = None;
+            }
 
-        let current_hunk_idx = self.current_hunk;
-        let total_hunks = self.hunks.len();
-        let manual_anchor = self.manual_anchor;
-        let can_apply = self.match_result.is_some() && !self.show_merged;
-
-        // --- RIGHT WINDOW ACTION BAR (Always Visible at Top) ---
-        Frame::none()
-            .fill(Color32::from_rgb(35, 45, 55))
-            .inner_margin(Margin::symmetric(6.0, 4.0))
-            .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    // Hunk Navigation
-                    ui.label(RichText::new("Hunk:").color(Color32::from_gray(160)));
-                    if ui.button("◀").clicked() {
-                        prev_hunk = true;
-                    }
-                    ui.label(format!("{}/{}", current_hunk_idx + 1, total_hunks));
-                    if ui.button("▶").clicked() {
-                        next_hunk = true;
-                    }
-
-                    ui.separator();
-
-                    // Search/Filter Anchor Input
-                    ui.label(RichText::new("Anchor Search:").color(Color32::from_gray(160)));
-                    let response = ui.add(
-                        TextEdit::singleline(&mut self.anchor_search_text)
-                            .desired_width(80.0)
-                            .hint_text("xxxxkkkk"),
-                    );
-                    if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        find_anchor = true;
-                    }
-                    if ui.button("🔍 Find").clicked() {
-                        find_anchor = true;
-                    }
-
-                    if manual_anchor.is_some() {
-                        if ui.button("✕ Clear Anchor").clicked() {
-                            clear_anchor = true;
-                        }
-                    }
-                });
-            });
-        ui.separator();
-
-        // Handle Action Bar Clicks
-        if prev_hunk && current_hunk_idx > 0 {
-            self.current_hunk -= 1;
-            self.reload_file();
-        }
-        if next_hunk && current_hunk_idx < total_hunks - 1 {
-            self.current_hunk += 1;
-            self.reload_file();
-        }
-        if clear_anchor {
-            self.manual_anchor = None;
-            self.candidate_index = 0;
-            self.anchor_matches.clear();
-            self.scroll_to_match = true;
-            self.recompute_match();
-        }
-        if find_anchor {
-            let query = self.anchor_search_text.trim().to_string();
-            if !query.is_empty() {
-                self.anchor_matches = self
-                    .file_lines
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, l)| l.contains(&query))
-                    .map(|(i, _)| i)
-                    .collect();
-
-                if !self.anchor_matches.is_empty() {
-                    self.anchor_match_idx = 0;
-                    self.manual_anchor = Some((0, self.anchor_matches[0]));
-                    self.scroll_to_match = true;
-                    self.recompute_match();
+            let match_count = self.file_search_matches.len();
+            if !self.file_search_query.is_empty() {
+                let label = if match_count == 0 {
+                    RichText::new("no match").color(Color32::from_rgb(200, 80, 80))
                 } else {
-                    self.manual_anchor = None;
-                    self.recompute_match();
-                }
+                    RichText::new(format!(
+                        "{} hit{}",
+                        match_count,
+                        if match_count == 1 { "" } else { "s" }
+                    ))
+                    .color(Color32::from_rgb(120, 200, 120))
+                };
+                ui.label(label.monospace());
             }
-        }
 
-        if prev_anchor_match && !self.anchor_matches.is_empty() {
-            if self.anchor_match_idx > 0 {
-                self.anchor_match_idx -= 1;
-            } else {
-                self.anchor_match_idx = self.anchor_matches.len() - 1;
+            if self.manual_anchor.is_some() && ui.small_button("✕ anchor").clicked() {
+                self.manual_anchor = None;
             }
-            self.manual_anchor = Some((0, self.anchor_matches[self.anchor_match_idx]));
-            self.scroll_to_match = true;
-            self.recompute_match();
-        }
+        });
+        ui.add_space(1.0);
 
-        if next_anchor_match && !self.anchor_matches.is_empty() {
-            if self.anchor_match_idx + 1 < self.anchor_matches.len() {
-                self.anchor_match_idx += 1;
-            } else {
-                self.anchor_match_idx = 0;
-            }
-            self.manual_anchor = Some((0, self.anchor_matches[self.anchor_match_idx]));
-            self.scroll_to_match = true;
-            self.recompute_match();
-        }
-
-        if prev_candidate && self.candidate_index > 0 {
-            self.candidate_index -= 1;
-            self.scroll_to_match = true;
-            self.recompute_match();
-        }
-        if next_candidate && self.candidate_index + 1 < candidate_count {
-            self.candidate_index += 1;
-            self.scroll_to_match = true;
-            self.recompute_match();
-        }
-
-        // --- FILE SCROLL AREA ---
-        let scroll_to_match = self.scroll_to_match;
-        let mut did_scroll = false;
+        // Snapshot what we need to avoid borrow conflicts inside closure
         let file_lines = self.file_lines.clone();
-        let manual_anchor_check = self.manual_anchor;
-        let anchor_mode = self.anchor_mode;
-        let mut anchor_line_click: Option<usize> = None;
+        let file_search_matches: HashSet<usize> = self.file_search_matches.clone();
+        let manual_anchor = self.manual_anchor;
+        let auto_start = mr.file_start;
+        let auto_end = mr.file_end;
+        let auto_score = mr.score;
+        let search_query = self.file_search_query.clone();
+
+        let mut apply_clicked = false;
+        let mut set_anchor: Option<usize> = None;
 
         ScrollArea::both()
             .id_source("file_scroll")
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for (i, line) in file_lines.iter().enumerate() {
-                    let in_match = i >= mr.file_start && i < mr.file_end;
+                    let in_auto_match = i >= auto_start && i < auto_end;
+                    let is_search_hit =
+                        !search_query.is_empty() && file_search_matches.contains(&i);
+                    let is_anchor = manual_anchor == Some(i);
 
-                    if in_match && i == mr.file_start {
-                        if scroll_to_match {
-                            ui.scroll_to_cursor(Some(Align::Center));
-                            did_scroll = true;
+                    // ---- Anchor marker row (insert-before indicator) ----
+                    if is_anchor {
+                        let desired = Vec2::new(ui.available_width(), row_h + 4.0);
+                        let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                        ui.painter()
+                            .rect_filled(rect, 2.0, Color32::from_rgb(50, 40, 10));
+
+                        // dashed line across
+                        let dash_y = rect.center().y;
+                        let mut x = rect.left() + 4.0;
+                        while x < rect.right() - 90.0 {
+                            ui.painter().line_segment(
+                                [
+                                    Pos2::new(x, dash_y),
+                                    Pos2::new((x + 8.0).min(rect.right() - 90.0), dash_y),
+                                ],
+                                Stroke::new(1.5, Color32::from_rgb(220, 160, 40)),
+                            );
+                            x += 14.0;
                         }
-
-                        let desired = Vec2::new(ui.available_width(), row_h + 6.0);
-                        let (banner_rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-
-                        let banner_bg = if manual_anchor_check.is_some() {
-                            Color32::from_rgb(50, 60, 90)
-                        } else {
-                            Color32::from_rgb(40, 80, 55)
-                        };
-                        ui.painter().rect_filled(banner_rect, 2.0, banner_bg);
-
-                        let banner_text = if manual_anchor_check.is_some() {
-                            format!(
-                                "🔗 manual anchor lines {}–{}  ({:.0}%)",
-                                mr.file_start + 1,
-                                mr.file_end,
-                                mr.score
-                            )
-                        } else {
-                            format!(
-                                "▼ match lines {}–{}  ({:.0}%)",
-                                mr.file_start + 1,
-                                mr.file_end,
-                                mr.score
-                            )
-                        };
-                        let banner_color = if manual_anchor_check.is_some() {
-                            Color32::from_rgb(120, 180, 255)
-                        } else {
-                            Color32::from_rgb(120, 230, 160)
-                        };
                         ui.painter().text(
-                            Pos2::new(banner_rect.left() + 8.0, banner_rect.center().y),
+                            Pos2::new(rect.left() + 8.0, rect.center().y),
                             Align2::LEFT_CENTER,
-                            &banner_text,
+                            format!("⚓ insert before line {}", i + 1),
                             FontId::monospace(11.0),
-                            banner_color,
+                            Color32::from_rgb(255, 200, 60),
                         );
 
-                        let mut right_x = banner_rect.right() - 8.0;
-                        let btn_h = row_h;
-
-                        // Apply button (Restored inside match banner)
-                        if can_apply {
-                            let apply_w = 80.0;
-                            let apply_rect = Rect::from_min_size(
-                                Pos2::new(right_x - apply_w, banner_rect.center().y - btn_h / 2.0),
-                                Vec2::new(apply_w, btn_h),
-                            );
-                            right_x -= apply_w + 6.0;
-                            let apply_resp = ui.put(
-                                apply_rect,
-                                Button::new(
-                                    RichText::new("⚡ Apply")
-                                        .color(Color32::from_rgb(255, 230, 80))
-                                        .strong()
-                                        .monospace(),
-                                )
-                                .fill(Color32::from_rgb(60, 100, 40))
-                                .stroke(Stroke::new(1.5, Color32::from_rgb(180, 220, 80))),
-                            );
-                            if apply_resp.clicked() {
-                                apply_clicked = true;
-                            }
-                        }
-
-                        // Anchor matches navigation (Replace #1/3 [◀] [▶])
-                        if manual_anchor_check.is_some() && !self.anchor_matches.is_empty() {
-                            let nav_w = 28.0;
-                            let count_text = format!(
-                                "Replace #{}/{}",
-                                self.anchor_match_idx + 1,
-                                self.anchor_matches.len()
-                            );
-                            let count_size = ui
-                                .painter()
-                                .layout(
-                                    count_text.clone(),
-                                    FontId::monospace(11.0),
-                                    Color32::from_gray(200),
-                                    f32::INFINITY,
-                                )
-                                .size();
-                            let count_rect = Rect::from_min_size(
-                                Pos2::new(
-                                    right_x - count_size.x - 4.0,
-                                    banner_rect.center().y - count_size.y / 2.0,
-                                ),
-                                Vec2::new(count_size.x + 8.0, count_size.y + 2.0),
-                            );
-                            right_x -= count_rect.width() + 4.0;
-                            ui.painter().text(
-                                count_rect.center(),
-                                Align2::CENTER_CENTER,
-                                &count_text,
-                                FontId::monospace(11.0),
-                                Color32::from_gray(200),
-                            );
-
-                            let next_rect = Rect::from_min_size(
-                                Pos2::new(right_x - nav_w, banner_rect.center().y - btn_h / 2.0),
-                                Vec2::new(nav_w, btn_h),
-                            );
-                            right_x -= nav_w + 4.0;
-                            let next_resp = ui.put(
-                                next_rect,
-                                Button::new(RichText::new("▶").monospace())
-                                    .fill(Color32::from_rgb(50, 70, 50)),
-                            );
-                            if next_resp.clicked() {
-                                next_anchor_match = true;
-                            }
-
-                            let prev_rect = Rect::from_min_size(
-                                Pos2::new(right_x - nav_w, banner_rect.center().y - btn_h / 2.0),
-                                Vec2::new(nav_w, btn_h),
-                            );
-                            let prev_resp = ui.put(
-                                prev_rect,
-                                Button::new(RichText::new("◀").monospace())
-                                    .fill(Color32::from_rgb(50, 70, 50)),
-                            );
-                            if prev_resp.clicked() {
-                                prev_anchor_match = true;
-                            }
-                        }
-                        // Auto-matched candidates navigation (1/3 [◀] [▶])
-                        else if manual_anchor_check.is_none() && candidate_count > 1 {
-                            let nav_w = 28.0;
-                            let count_text =
-                                format!("{}/{}", self.candidate_index + 1, candidate_count);
-                            let count_size = ui
-                                .painter()
-                                .layout(
-                                    count_text.clone(),
-                                    FontId::monospace(11.0),
-                                    Color32::from_gray(200),
-                                    f32::INFINITY,
-                                )
-                                .size();
-                            let count_rect = Rect::from_min_size(
-                                Pos2::new(
-                                    right_x - count_size.x - 4.0,
-                                    banner_rect.center().y - count_size.y / 2.0,
-                                ),
-                                Vec2::new(count_size.x + 8.0, count_size.y + 2.0),
-                            );
-                            right_x -= count_rect.width() + 4.0;
-                            ui.painter().text(
-                                count_rect.center(),
-                                Align2::CENTER_CENTER,
-                                &count_text,
-                                FontId::monospace(11.0),
-                                Color32::from_gray(200),
-                            );
-
-                            let next_rect = Rect::from_min_size(
-                                Pos2::new(right_x - nav_w, banner_rect.center().y - btn_h / 2.0),
-                                Vec2::new(nav_w, btn_h),
-                            );
-                            right_x -= nav_w + 4.0;
-                            let next_resp = ui.put(
-                                next_rect,
-                                Button::new(RichText::new("▶").monospace())
-                                    .fill(Color32::from_rgb(50, 70, 50)),
-                            );
-                            if next_resp.clicked() {
-                                next_candidate = true;
-                            }
-
-                            let prev_rect = Rect::from_min_size(
-                                Pos2::new(right_x - nav_w, banner_rect.center().y - btn_h / 2.0),
-                                Vec2::new(nav_w, btn_h),
-                            );
-                            let prev_resp = ui.put(
-                                prev_rect,
-                                Button::new(RichText::new("◀").monospace())
-                                    .fill(Color32::from_rgb(50, 70, 50)),
-                            );
-                            if prev_resp.clicked() {
-                                prev_candidate = true;
-                            }
+                        // Apply here button
+                        let btn_size = Vec2::new(100.0, row_h);
+                        let btn_rect = Rect::from_min_size(
+                            Pos2::new(
+                                rect.right() - btn_size.x - 6.0,
+                                rect.center().y - btn_size.y / 2.0,
+                            ),
+                            btn_size,
+                        );
+                        let btn_resp = ui.put(
+                            btn_rect,
+                            Button::new(
+                                RichText::new("⚡ Apply here")
+                                    .color(Color32::from_rgb(255, 230, 80))
+                                    .strong()
+                                    .monospace(),
+                            )
+                            .fill(Color32::from_rgb(70, 55, 10))
+                            .stroke(Stroke::new(1.5, Color32::from_rgb(220, 160, 40))),
+                        );
+                        if btn_resp.clicked() {
+                            apply_clicked = true;
                         }
                     }
 
-                    let sense = if anchor_mode {
-                        Sense::click()
-                    } else {
-                        Sense::hover()
-                    };
-                    let desired = Vec2::new(ui.available_width(), row_h);
-                    let (rect, resp) = ui.allocate_exact_size(desired, sense);
+                    // ---- Auto-match banner (first line of auto match, only if no manual anchor) ----
+                    if in_auto_match && i == auto_start && manual_anchor.is_none() {
+                        let desired = Vec2::new(ui.available_width(), row_h + 6.0);
+                        let (banner_rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                        let banner_bg = Color32::from_rgb(40, 80, 55);
+                        ui.painter().rect_filled(banner_rect, 2.0, banner_bg);
+                        ui.painter().text(
+                            Pos2::new(banner_rect.left() + 8.0, banner_rect.center().y),
+                            Align2::LEFT_CENTER,
+                            format!(
+                                "▼ auto match  lines {}–{}  ({:.0}%)",
+                                auto_start + 1,
+                                auto_end,
+                                auto_score
+                            ),
+                            FontId::monospace(11.0),
+                            Color32::from_rgb(120, 230, 160),
+                        );
+                        let btn_size = Vec2::new(80.0, row_h);
+                        let btn_rect = Rect::from_min_size(
+                            Pos2::new(
+                                banner_rect.right() - btn_size.x - 8.0,
+                                banner_rect.center().y - btn_size.y / 2.0,
+                            ),
+                            btn_size,
+                        );
+                        let btn_resp = ui.put(
+                            btn_rect,
+                            Button::new(
+                                RichText::new("⚡ Apply")
+                                    .color(Color32::from_rgb(255, 230, 80))
+                                    .strong()
+                                    .monospace(),
+                            )
+                            .fill(Color32::from_rgb(60, 100, 40))
+                            .stroke(Stroke::new(1.5, Color32::from_rgb(180, 220, 80))),
+                        );
+                        if btn_resp.clicked() {
+                            apply_clicked = true;
+                        }
+                    }
 
-                    let bg = if anchor_mode && resp.hovered() {
-                        Color32::from_rgb(90, 70, 20)
-                    } else if in_match {
+                    // ---- File line row ----
+                    let base_bg = if in_auto_match && manual_anchor.is_none() {
                         Color32::from_rgb(30, 50, 35)
                     } else if i % 2 == 0 {
                         Color32::from_gray(24)
                     } else {
                         Color32::from_gray(27)
                     };
-                    ui.painter().rect_filled(rect, 0.0, bg);
 
-                    let num_color = if in_match {
+                    // Search hit gets a subtle yellow tint
+                    let row_bg = if is_search_hit {
+                        Color32::from_rgb(55, 50, 18)
+                    } else {
+                        base_bg
+                    };
+
+                    let desired = Vec2::new(ui.available_width(), row_h);
+                    let (rect, row_resp) = ui.allocate_exact_size(desired, Sense::click());
+                    ui.painter().rect_filled(rect, 0.0, row_bg);
+
+                    // Left accent bar: anchor line or auto-match
+                    if is_anchor {
+                        let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
+                        ui.painter()
+                            .rect_filled(bar, 0.0, Color32::from_rgb(220, 160, 40));
+                    } else if in_auto_match && manual_anchor.is_none() {
+                        let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
+                        ui.painter()
+                            .rect_filled(bar, 0.0, Color32::from_rgb(60, 160, 90));
+                    } else if is_search_hit {
+                        let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
+                        ui.painter()
+                            .rect_filled(bar, 0.0, Color32::from_rgb(180, 150, 40));
+                    }
+
+                    // Hover highlight (shows it's clickable when searching)
+                    if row_resp.hovered() && !search_query.is_empty() {
+                        ui.painter().rect_filled(
+                            rect,
+                            0.0,
+                            Color32::from_rgba_premultiplied(80, 80, 40, 30),
+                        );
+                        // Tooltip
+                        ui.painter().text(
+                            Pos2::new(rect.right() - 6.0, rect.center().y),
+                            Align2::RIGHT_CENTER,
+                            "click → set anchor",
+                            FontId::monospace(10.0),
+                            Color32::from_rgb(160, 140, 60),
+                        );
+                    }
+
+                    // Click: set manual anchor
+                    if row_resp.clicked() && !search_query.is_empty() {
+                        set_anchor = Some(i);
+                    }
+
+                    // Line number gutter
+                    let num_color = if in_auto_match && manual_anchor.is_none() {
                         Color32::from_rgb(80, 160, 100)
+                    } else if is_search_hit {
+                        Color32::from_rgb(180, 160, 60)
                     } else {
                         Color32::from_gray(70)
                     };
-                    let num_text = format!("{:>4} │", i + 1);
                     ui.painter().text(
-                        Pos2::new(rect.left() + 4.0, rect.center().y),
+                        Pos2::new(rect.left() + 6.0, rect.center().y),
                         Align2::LEFT_CENTER,
-                        &num_text,
+                        format!("{:>4} │", i + 1),
                         FontId::monospace(12.0),
                         num_color,
                     );
 
-                    let content_color = if in_match {
+                    // Content — highlight search term inline
+                    let text_color = if in_auto_match && manual_anchor.is_none() {
                         Color32::from_rgb(200, 240, 210)
+                    } else if is_search_hit {
+                        Color32::from_rgb(240, 230, 150)
                     } else {
                         Color32::from_gray(190)
                     };
@@ -1146,35 +1054,29 @@ impl MergeApp {
                         Align2::LEFT_CENTER,
                         &display,
                         FontId::monospace(12.0),
-                        content_color,
+                        text_color,
                     );
 
-                    if in_match && i == mr.file_end.saturating_sub(1) {
-                        let desired = Vec2::new(ui.available_width(), 3.0);
-                        let (sep_rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                    // Auto-match bottom border
+                    if in_auto_match && i == auto_end.saturating_sub(1) && manual_anchor.is_none() {
+                        let sep_desired = Vec2::new(ui.available_width(), 3.0);
+                        let (sep_rect, _) = ui.allocate_exact_size(sep_desired, Sense::hover());
                         ui.painter()
                             .rect_filled(sep_rect, 0.0, Color32::from_rgb(60, 140, 80));
                     }
-
-                    if resp.clicked() && anchor_mode {
-                        anchor_line_click = Some(i);
-                    }
                 }
+
                 ui.add_space(row_h * 3.0);
             });
 
-        // Handle Scroll and Anchor Clicks
-        if did_scroll {
-            self.scroll_to_match = false;
+        // Apply mutations after borrow ends
+        if let Some(anchor_line) = set_anchor {
+            self.manual_anchor = Some(anchor_line);
+            self.message = Some(format!(
+                "Anchor set at line {} — click ⚡ Apply here or toolbar Apply",
+                anchor_line + 1
+            ));
         }
-
-        if let Some(file_idx) = anchor_line_click {
-            self.manual_anchor = Some((0, file_idx)); // Default to search line 0
-            self.anchor_mode = false;
-            self.scroll_to_match = true;
-            self.recompute_match();
-        }
-
         if apply_clicked {
             self.apply_merge();
         }
@@ -1244,6 +1146,7 @@ impl MergeApp {
                     let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
                     ui.painter().rect_filled(rect, 0.0, bg);
 
+                    // Left accent bar for replaced region
                     if in_replace {
                         let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
                         ui.painter()
