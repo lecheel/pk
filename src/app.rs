@@ -92,11 +92,11 @@ pub struct MergeApp {
 }
 
 impl MergeApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, initial_patch: Option<String>) -> Self {
         cc.egui_ctx.set_visuals(Visuals::dark());
 
         let mut app = Self {
-            patch_text: DEFAULT_PATCH.to_string(),
+            patch_text: String::new(),
             hunks: Vec::new(),
             current_hunk: 0,
             file_text: String::new(),
@@ -111,6 +111,29 @@ impl MergeApp {
             show_merged: false,
             message: None,
         };
+
+        let mut loaded_patch = false;
+        if let Some(patch_file) = initial_patch {
+            let path = std::path::Path::new(&patch_file);
+            if let Ok(content) = std::fs::read_to_string(path) {
+                app.patch_text = content;
+                // Set base_dir to the patch file's directory to resolve target file paths
+                if let Some(parent) = path.parent() {
+                    app.base_dir = parent.display().to_string();
+                }
+                loaded_patch = true;
+                app.message = Some(format!("Loaded patch file: {}", path.display()));
+            } else {
+                eprintln!("Failed to read patch file: {}", patch_file);
+                app.message = Some(format!("Failed to read patch file: {}", patch_file));
+            }
+        }
+
+        if !loaded_patch {
+            app.patch_text = DEFAULT_PATCH.to_string();
+            app.message = Some("No patch file provided. Using default embedded patch.".to_string());
+        }
+
         app.reparse();
         app
     }
@@ -139,7 +162,7 @@ impl MergeApp {
             Ok(content) => {
                 self.file_text = content;
                 self.file_lines = self.file_text.lines().map(String::from).collect();
-                self.message = None;
+                self.message = Some(format!("Loaded target file: {}", path.display()));
             }
             Err(e) => {
                 // fall back to embedded sample for files matching the default
@@ -273,6 +296,9 @@ impl MergeApp {
                     {
                         if let Ok(content) = std::fs::read_to_string(&path) {
                             self.patch_text = content;
+                            if let Some(parent) = path.parent() {
+                                self.base_dir = parent.display().to_string();
+                            }
                             self.reparse();
                         }
                     }
@@ -284,6 +310,9 @@ impl MergeApp {
                             self.file_text = content;
                             self.file_lines = self.file_text.lines().map(String::from).collect();
                             self.file_path = path.display().to_string();
+                            if let Some(parent) = path.parent() {
+                                self.base_dir = parent.display().to_string();
+                            }
                             self.recompute_match();
                         }
                     }
