@@ -856,23 +856,6 @@ impl MergeApp {
             }
         }
 
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(format!(
-                    "DBG: hunk {}/{} | go_next={} go_prev={} | apply_clicked={} | wants_kb={}",
-                    self.current_hunk + 1,
-                    self.hunks.len(),
-                    go_next_hunk,
-                    go_prev_hunk,
-                    apply_clicked,
-                    ui.ctx().wants_keyboard_input(),
-                ))
-                .color(Color32::YELLOW)
-                .monospace()
-                .size(10.0),
-            );
-        });
-
         if prev_hunk && current_hunk_idx > 0 {
             self.current_hunk -= 1;
             self.reload_file();
@@ -944,7 +927,6 @@ impl MergeApp {
                 self.reload_file();
                 return;
             } else {
-                // If no next hunk, just jump cursor to the current hunk position
                 self.cursor_line = Some(mr.file_start);
                 self.scroll_to_match = true;
             }
@@ -955,7 +937,6 @@ impl MergeApp {
                 self.reload_file();
                 return;
             } else {
-                // If no prev hunk, just jump cursor to the current hunk position
                 self.cursor_line = Some(mr.file_start);
                 self.scroll_to_match = true;
             }
@@ -1001,11 +982,11 @@ impl MergeApp {
                             .rect_filled(rect, 2.0, Color32::from_rgb(50, 40, 10));
                         let dash_y = rect.center().y;
                         let mut x = rect.left() + 4.0;
-                        while x < rect.right() - 90.0 {
+                        while x < rect.right() - 120.0 {
                             ui.painter().line_segment(
                                 [
                                     Pos2::new(x, dash_y),
-                                    Pos2::new((x + 8.0).min(rect.right() - 90.0), dash_y),
+                                    Pos2::new((x + 8.0).min(rect.right() - 120.0), dash_y),
                                 ],
                                 Stroke::new(1.5, Color32::from_rgb(220, 160, 40)),
                             );
@@ -1018,7 +999,7 @@ impl MergeApp {
                             FontId::monospace(11.0),
                             Color32::from_rgb(255, 200, 60),
                         );
-                        let btn_size = Vec2::new(100.0, row_h);
+                        let btn_size = Vec2::new(110.0, row_h);
                         let btn_rect = Rect::from_min_size(
                             Pos2::new(
                                 rect.right() - btn_size.x - 6.0,
@@ -1030,12 +1011,12 @@ impl MergeApp {
                             btn_rect,
                             Button::new(
                                 RichText::new("⚡ Apply here")
-                                    .color(Color32::from_rgb(255, 230, 80))
+                                    .color(Color32::from_rgb(255, 255, 255))
                                     .strong()
                                     .monospace(),
                             )
-                            .fill(Color32::from_rgb(70, 55, 10))
-                            .stroke(Stroke::new(1.5, Color32::from_rgb(220, 160, 40))),
+                            .fill(Color32::from_rgb(100, 80, 20))
+                            .stroke(Stroke::new(1.0, Color32::from_rgb(220, 160, 40))),
                         );
                         if btn_resp.clicked() {
                             apply_clicked = true;
@@ -1062,6 +1043,29 @@ impl MergeApp {
                             FontId::monospace(11.0),
                             Color32::from_rgb(120, 230, 160),
                         );
+
+                        let btn_size = Vec2::new(110.0, row_h);
+                        let btn_rect = Rect::from_min_size(
+                            Pos2::new(
+                                banner_rect.right() - btn_size.x - 6.0,
+                                banner_rect.center().y - btn_size.y / 2.0,
+                            ),
+                            btn_size,
+                        );
+                        let btn_resp = ui.put(
+                            btn_rect,
+                            Button::new(
+                                RichText::new("⚡ Apply here")
+                                    .color(Color32::from_rgb(255, 255, 255))
+                                    .strong()
+                                    .monospace(),
+                            )
+                            .fill(Color32::from_rgb(40, 100, 60))
+                            .stroke(Stroke::new(1.0, Color32::from_rgb(60, 160, 90))),
+                        );
+                        if btn_resp.clicked() {
+                            apply_clicked = true;
+                        }
                     }
                     let base_bg = if is_cursor {
                         Color32::from_rgb(35, 45, 65)
