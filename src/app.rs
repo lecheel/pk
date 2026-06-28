@@ -62,6 +62,11 @@ pub(crate) fn run_repl() -> io::Result<()> {
 }
 "#;
 
+#[derive(Clone, Debug)]
+enum Action {
+    DeleteLines(usize),
+}
+
 #[derive(Clone)]
 struct SearchRow {
     text: String,
@@ -92,6 +97,7 @@ pub struct MergeApp {
     merged_range: Option<(usize, usize)>,
     history: Vec<(Vec<String>, usize)>,
     vim_buffer: String,
+    last_action: Option<Action>,
 }
 
 impl MergeApp {
@@ -122,6 +128,7 @@ impl MergeApp {
             merged_range: None,
             history: Vec::new(),
             vim_buffer: String::new(),
+            last_action: None,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -152,7 +159,8 @@ impl MergeApp {
         self.merged_range = None;
         self.history.clear();
         self.vim_buffer.clear();
-        self.file_path.clear(); // Force reload
+        self.last_action = None;
+        self.file_path.clear();
         self.load_hunk();
     }
 
@@ -199,6 +207,7 @@ impl MergeApp {
         self.scroll_to_match = true;
         self.cursor_line = None;
         self.vim_buffer.clear();
+        self.last_action = None;
         self.recompute_match();
     }
 
@@ -233,13 +242,18 @@ impl MergeApp {
             };
             self.search_rows = Self::build_search_rows(hunk, &mr);
             self.match_result = Some(mr.clone());
-            self.cursor_line = Some(mr.file_start);
+
+            // 👇 FIX: Only set cursor_line if it's currently None
+            if self.cursor_line.is_none() {
+                self.cursor_line = Some(mr.file_start);
+            }
             self.scroll_to_match = true;
         }
     }
 
     fn build_search_rows(hunk: &PatchHunk, mr: &MatchResult) -> Vec<SearchRow> {
         let patch_diff = diff::diff_patch(&hunk.search, &hunk.replace);
+
         let mut rows = Vec::new();
         let mut file_idx = mr.file_start;
         for (kind, left, _right) in &patch_diff {
@@ -934,6 +948,13 @@ impl MergeApp {
                 if buf == "u" {
                     self.undo();
                     clear_buffer = true;
+                } else if buf == "." {
+                    if let Some(action) = self.last_action.clone() {
+                        match action {
+                            Action::DeleteLines(count) => self.delete_lines(count),
+                        }
+                    }
+                    clear_buffer = true;
                 } else if buf.ends_with("dd") {
                     let num_part = &buf[..buf.len() - 2];
                     let count = if num_part.is_empty() {
@@ -943,6 +964,7 @@ impl MergeApp {
                     };
                     if count > 0 {
                         self.delete_lines(count);
+                        self.last_action = Some(Action::DeleteLines(count));
                     }
                     clear_buffer = true;
                 } else if buf.chars().count() > 4 {
@@ -985,12 +1007,14 @@ impl MergeApp {
         }
         if prev_candidate && self.candidate_index > 0 {
             self.candidate_index -= 1;
+            self.cursor_line = None;
             self.scroll_to_match = true;
             self.recompute_match();
             return;
         }
         if next_candidate && self.candidate_index + 1 < candidate_count {
             self.candidate_index += 1;
+            self.cursor_line = None;
             self.scroll_to_match = true;
             self.recompute_match();
             return;
@@ -1237,28 +1261,6 @@ impl MergeApp {
                             let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
                             ui.painter()
                                 .rect_filled(bar, 0.0, Color32::from_rgb(180, 150, 40));
-                        }
-
-                        if row_resp.hovered() && !search_query.is_empty() {
-                            ui.painter().rect_filled(
-                                rect,
-                                0.0,
-                                Color32::from_rgba_premultiplied(80, 80, 40, 30),
-                            );
-                            ui.painter().text(
-                                Pos2::new(rect.right() - 6.0, rect.center().y),
-                                Align2::RIGHT_CENTER,
-                                "click → set anchor",
-                                FontId::monospace(10.0),
-                                Color32::from_rgb(160, 140, 60),
-                            );
-                        }
-                        if row_resp.hovered() && search_query.is_empty() {
-                            ui.painter().rect_filled(
-                                rect,
-                                0.0,
-                                Color32::from_rgba_premultiplied(80, 80, 80, 30),
-                            );
                         }
 
                         // Unify mouse and keyboard: clicking anywhere sets cursor (and anchor if searching)
