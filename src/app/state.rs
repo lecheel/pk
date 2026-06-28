@@ -1,0 +1,323 @@
+use std::collections::{HashMap, HashSet};
+
+use eframe::egui::*;
+
+use crate::diff::MatchResult;
+use crate::patch::PatchHunk;
+
+use super::constants::{DEFAULT_FILE, DEFAULT_PATCH};
+use super::matching::MergeMatching;
+use super::types::{Action, FileState, StatusMessage};
+
+pub struct MergeApp {
+    pub patch_text: String,
+    pub hunks: Vec<PatchHunk>,
+    pub current_hunk: usize,
+    pub file_text: String,
+    pub file_lines: Vec<String>,
+    pub file_path: String,
+    pub base_dir: String,
+    pub match_result: Option<MatchResult>,
+    pub search_rows: Vec<super::types::SearchRow>,
+    pub file_search_query: String,
+    pub file_search_matches: HashSet<usize>,
+    pub manual_anchor: Option<usize>,
+    pub anchor_matches: Vec<usize>,
+    pub anchor_match_idx: usize,
+    pub candidate_index: usize,
+    pub scroll_to_match: bool,
+    pub message: Option<StatusMessage>,
+    pub message_until: Option<f64>,
+    pub cursor_line: Option<usize>,
+    pub applied_hunks: HashSet<usize>,
+    pub merged_range: Option<(usize, usize)>,
+    pub history: Vec<(Vec<String>, usize)>,
+    pub vim_buffer: String,
+    pub last_action: Option<Action>,
+    pub file_states: HashMap<String, FileState>,
+    pub show_help: bool,
+    pub show_minimap: bool,
+}
+
+impl MergeApp {
+    pub fn new(cc: &eframe::CreationContext<'_>, initial_patch: Option<String>) -> Self {
+        cc.egui_ctx.set_visuals(Visuals::dark());
+        let mut app = Self {
+            patch_text: String::new(),
+            hunks: Vec::new(),
+            current_hunk: 0,
+            file_text: String::new(),
+            file_lines: Vec::new(),
+            file_path: String::new(),
+            base_dir: std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            match_result: None,
+            search_rows: Vec::new(),
+            file_search_query: String::new(),
+            file_search_matches: HashSet::new(),
+            manual_anchor: None,
+            anchor_matches: Vec::new(),
+            anchor_match_idx: 0,
+            candidate_index: 0,
+            scroll_to_match: true,
+            message: None,
+            message_until: None,
+            cursor_line: None,
+            applied_hunks: HashSet::new(),
+            merged_range: None,
+            history: Vec::new(),
+            vim_buffer: String::new(),
+            last_action: None,
+            file_states: HashMap::new(),
+            show_help: false,
+            show_minimap: true,
+        };
+
+        let mut loaded_patch = false;
+        if let Some(patch_file) = initial_patch {
+            let path = std::path::Path::new(&patch_file);
+            if let Ok(content) = std::fs::read_to_string(path) {
+                app.patch_text = content;
+                if let Some(parent) = path.parent() {
+                    app.base_dir = parent.display().to_string();
+                }
+                loaded_patch = true;
+                app.set_message(StatusMessage::success(format!(
+                    "Loaded patch file: {}",
+                    path.display()
+                )));
+            } else {
+                app.set_message(StatusMessage::error(format!(
+                    "Failed to read patch file: {}",
+                    patch_file
+                )));
+            }
+        }
+
+        if !loaded_patch {
+            app.patch_text = DEFAULT_PATCH.to_string();
+            app.set_message(StatusMessage::info(
+                "No patch file provided — using embedded demo patch. Press ? for help.",
+            ));
+        }
+
+        app.reparse();
+        app
+    }
+
+    pub fn set_message(&mut self, msg: StatusMessage) {
+        self.message = Some(msg);
+        self.message_until = None;
+    }
+
+    pub fn reparse(&mut self) {
+        self.save_file_state();
+        self.hunks = crate::patch::parse_patches(&self.patch_text);
+        self.current_hunk = 0;
+        self.applied_hunks.clear();
+        self.merged_range = None;
+        self.history.clear();
+        self.vim_buffer.clear();
+        self.last_action = None;
+        self.file_path.clear();
+        self.file_states.clear();
+        self.load_hunk();
+    }
+
+    pub fn save_file_state(&mut self) {
+        if self.file_path.is_empty() {
+            return;
+        }
+        self.file_states.insert(
+            self.file_path.clone(),
+            FileState {
+                lines: self.file_lines.clone(),
+                applied_hunks: self.applied_hunks.clone(),
+                history: self.history.clone(),
+                merged_range: self.merged_range,
+            },
+        );
+    }
+
+    pub fn load_hunk(&mut self) {
+        let hunk = match self.hunks.get(self.current_hunk) {
+            Some(h) => h.clone(),
+            None => return,
+        };
+
+        let path = std::path::Path::new(&self.base_dir)
+            .join(&hunk.filename)
+            .display()
+            .to_string();
+
+        if path != self.file_path {
+            self.save_file_state();
+            self.file_path = path.clone();
+
+            if let Some(saved) = self.file_states.get(&path).cloned() {
+                self.file_lines = saved.lines;
+                self.applied_hunks = saved.applied_hunks;
+                self.history = saved.history;
+                self.merged_range = saved.merged_range;
+                self.set_message(StatusMessage::info(format!("Restored edits for: {}", path)));
+            } else {
+                match std::fs::read_to_string(&path) {
+                    Ok(content) => {
+                        self.file_text = content;
+                        self.file_lines = self.file_text.lines().map(String::from).collect();
+                        self.applied_hunks.clear();
+                        self.merged_range = None;
+                        self.history.clear();
+                        self.set_message(StatusMessage::success(format!("Loaded: {}", path)));
+                    }
+                    Err(e) => {
+                        if hunk.filename.ends_with("mod.rs") {
+                            self.file_text = DEFAULT_FILE.to_string();
+                            self.file_lines = self.file_text.lines().map(String::from).collect();
+                            self.applied_hunks.clear();
+                            self.merged_range = None;
+                            self.history.clear();
+                            self.set_message(StatusMessage::warning(format!(
+                                "File not found — using embedded sample ({})",
+                                e
+                            )));
+                        } else {
+                            self.file_text = String::new();
+                            self.file_lines = Vec::new();
+                            self.applied_hunks.clear();
+                            self.merged_range = None;
+                            self.history.clear();
+                            self.set_message(StatusMessage::error(format!(
+                                "Cannot read {}: {}",
+                                path, e
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+
+        self.manual_anchor = None;
+        self.anchor_matches.clear();
+        self.anchor_match_idx = 0;
+        self.file_search_query.clear();
+        self.file_search_matches.clear();
+        self.candidate_index = 0;
+        self.cursor_line = None;
+        self.scroll_to_match = true;
+        self.vim_buffer.clear();
+        self.last_action = None;
+        self.recompute_match();
+    }
+
+    pub fn current_hunk(&self) -> Option<&PatchHunk> {
+        self.hunks.get(self.current_hunk)
+    }
+
+    pub fn hunk_summary(&self) -> (usize, usize, usize) {
+        let applied = self.applied_hunks.len();
+        let total = self.hunks.len();
+        (applied, total - applied, total)
+    }
+
+    pub fn truncate_owned(text: &str, max_chars: usize) -> String {
+        if text.chars().count() > max_chars {
+            let mut s: String = text.chars().take(max_chars.saturating_sub(1)).collect();
+            s.push('…');
+            s
+        } else {
+            text.to_string()
+        }
+    }
+
+    pub fn reset_for_new_file(&mut self) {
+        self.applied_hunks.clear();
+        self.merged_range = None;
+        self.history.clear();
+        self.vim_buffer.clear();
+        self.manual_anchor = None;
+        self.file_search_query.clear();
+        self.file_search_matches.clear();
+        self.candidate_index = 0;
+        self.cursor_line = None;
+        self.scroll_to_match = true;
+    }
+}
+
+impl eframe::App for MergeApp {
+    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Auto-dismiss messages after 6 seconds
+        if self.message.is_some() {
+            if self.message_until.is_none() {
+                self.message_until = Some(ctx.input(|i| i.time) + 6.0);
+            }
+            if let Some(until) = self.message_until {
+                if ctx.input(|i| i.time) > until {
+                    self.message = None;
+                    self.message_until = None;
+                }
+            }
+        }
+
+        // Global keyboard shortcuts
+        if !ctx.wants_keyboard_input() {
+            ctx.input(|i| {
+                if i.key_pressed(Key::Escape) {
+                    if self.show_help {
+                        self.show_help = false;
+                    } else if self.manual_anchor.is_some() {
+                        self.manual_anchor = None;
+                        self.anchor_matches.clear();
+                        self.scroll_to_match = true;
+                    }
+                }
+                if i.events
+                    .iter()
+                    .any(|e| matches!(e, Event::Text(t) if t == "?"))
+                {
+                    self.show_help = !self.show_help;
+                }
+                if i.events
+                    .iter()
+                    .any(|e| matches!(e, Event::Text(t) if t == "m" || t == "M"))
+                {
+                    self.show_minimap = !self.show_minimap;
+                }
+            });
+        }
+
+        super::toolbar::render_toolbar(self, ctx);
+        super::status_bar::render_status_bar(self, ctx);
+
+        if self.show_help {
+            super::help::render_help_overlay(self, ctx);
+        }
+
+        CentralPanel::default().show(ctx, |ui| {
+            if self.hunks.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(80.0);
+                    ui.heading("No patches found");
+                    ui.label("Open a .md file containing <patch> blocks.");
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("Press ? for keyboard shortcuts")
+                            .color(super::palette::pal::TEXT_DIM)
+                            .small(),
+                    );
+                });
+                return;
+            }
+            if self.show_minimap {
+                super::minimap::render_with_minimap(self, ui);
+            } else {
+                SidePanel::left("minimap_collapsed")
+                    .resizable(false)
+                    .exact_width(0.0)
+                    .show_inside(ui, |_| {});
+                super::split_view::render_split_view(self, ui);
+            }
+        });
+    }
+}

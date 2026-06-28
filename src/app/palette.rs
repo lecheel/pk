@@ -1,0 +1,42 @@
+use eframe::egui::Color32;
+
+pub mod pal {
+    use super::Color32;
+
+    pub const BG_BASE: Color32 = Color32::from_rgb(18, 20, 24);
+    pub const BG_PANEL: Color32 = Color32::from_rgb(24, 28, 36);
+    pub const BG_TOOLBAR: Color32 = Color32::from_rgb(20, 24, 30);
+    pub const BG_ROW_EVEN: Color32 = Color32::from_rgb(22, 25, 31);
+    pub const BG_ROW_ODD: Color32 = Color32::from_rgb(25, 29, 36);
+    pub const BG_MATCH: Color32 = Color32::from_rgb(22, 44, 30);
+    pub const BG_MERGED: Color32 = Color32::from_rgb(20, 48, 28);
+    pub const BG_CURSOR: Color32 = Color32::from_rgb(28, 38, 62);
+    pub const BG_ANCHOR: Color32 = Color32::from_rgb(42, 34, 12);
+    pub const BG_SEARCH_HIT: Color32 = Color32::from_rgb(48, 42, 14);
+    pub const BG_DELETE: Color32 = Color32::from_rgb(48, 22, 22);
+    pub const BG_INSERT: Color32 = Color32::from_rgb(18, 42, 24);
+    pub const BAR_MATCH: Color32 = Color32::from_rgb(60, 160, 90);
+    pub const BAR_MERGED: Color32 = Color32::from_rgb(80, 200, 100);
+    pub const BAR_CURSOR: Color32 = Color32::from_rgb(90, 140, 220);
+    pub const BAR_ANCHOR: Color32 = Color32::from_rgb(220, 160, 40);
+    pub const BAR_SEARCH: Color32 = Color32::from_rgb(180, 150, 40);
+    pub const TEXT_NORMAL: Color32 = Color32::from_rgb(195, 200, 210);
+    pub const TEXT_DIM: Color32 = Color32::from_gray(100);
+    pub const TEXT_MATCH: Color32 = Color32::from_rgb(180, 235, 195);
+    pub const TEXT_MERGED: Color32 = Color32::from_rgb(150, 240, 165);
+    pub const TEXT_ANCHOR: Color32 = Color32::from_rgb(255, 205, 70);
+    pub const TEXT_SEARCH: Color32 = Color32::from_rgb(240, 225, 140);
+    pub const TEXT_DELETE: Color32 = Color32::from_rgb(220, 100, 100);
+    pub const TEXT_INSERT: Color32 = Color32::from_rgb(100, 210, 120);
+    pub const TEXT_LNUM: Color32 = Color32::from_gray(60);
+    pub const TEXT_LNUM_ACTIVE: Color32 = Color32::from_rgb(80, 160, 100);
+    pub const ACCENT_GOOD: Color32 = Color32::from_rgb(80, 200, 80);
+    pub const ACCENT_WARN: Color32 = Color32::from_rgb(220, 180, 50);
+    pub const ACCENT_BAD: Color32 = Color32::from_rgb(220, 80, 80);
+    pub const ACCENT_INFO: Color32 = Color32::from_rgb(100, 160, 230);
+    pub const HUNK_APPLIED: Color32 = Color32::from_rgb(60, 140, 80);
+    pub const HUNK_CURRENT: Color32 = Color32::from_rgb(100, 150, 230);
+    pub const HUNK_PENDING: Color32 = Color32::from_rgb(60, 65, 75);
+    pub const HUNK_CONFLICT: Color32 = Color32::from_rgb(180, 60, 60);
+    pub const SEPARATOR: Color32 = Color32::from_rgb(40, 45, 55);
+}
