@@ -86,11 +86,9 @@ pub struct MergeApp {
     anchor_match_idx: usize,
     candidate_index: usize,
     scroll_to_match: bool,
-    merged_lines: Option<Vec<String>>,
-    merged_range: Option<(usize, usize)>,
-    show_merged: bool,
     message: Option<String>,
     cursor_line: Option<usize>,
+    applied_hunks: HashSet<usize>,
 }
 
 impl MergeApp {
@@ -115,11 +113,9 @@ impl MergeApp {
             anchor_match_idx: 0,
             candidate_index: 0,
             scroll_to_match: true,
-            merged_lines: None,
-            merged_range: None,
-            show_merged: false,
             message: None,
             cursor_line: None,
+            applied_hunks: HashSet::new(),
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -146,53 +142,49 @@ impl MergeApp {
     fn reparse(&mut self) {
         self.hunks = patch::parse_patches(&self.patch_text);
         self.current_hunk = 0;
-        self.merged_lines = None;
-        self.merged_range = None;
-        self.show_merged = false;
-        self.manual_anchor = None;
-        self.file_search_query.clear();
-        self.file_search_matches.clear();
-        self.anchor_matches.clear();
-        self.anchor_match_idx = 0;
-        self.candidate_index = 0;
-        self.scroll_to_match = true;
-        self.cursor_line = None;
-        self.reload_file();
+        self.applied_hunks.clear();
+        self.file_path.clear(); // Force reload
+        self.load_hunk();
     }
 
-    fn reload_file(&mut self) {
+    fn load_hunk(&mut self) {
         let hunk = match self.hunks.get(self.current_hunk) {
-            Some(h) => h,
+            Some(h) => h.clone(),
             None => return,
         };
-        let path = std::path::Path::new(&self.base_dir).join(&hunk.filename);
-        self.file_path = path.display().to_string();
-        match std::fs::read_to_string(&path) {
-            Ok(content) => {
-                self.file_text = content;
-                self.file_lines = self.file_text.lines().map(String::from).collect();
-                self.message = Some(format!("Loaded: {}", path.display()));
-            }
-            Err(e) => {
-                if hunk.filename.ends_with("mod.rs") {
-                    self.file_text = DEFAULT_FILE.to_string();
+        let path = std::path::Path::new(&self.base_dir)
+            .join(&hunk.filename)
+            .display()
+            .to_string();
+
+        if path != self.file_path {
+            self.file_path = path.clone();
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    self.file_text = content;
                     self.file_lines = self.file_text.lines().map(String::from).collect();
-                    self.message = Some(format!("File not found — using embedded sample ({})", e));
-                } else {
-                    self.file_text = String::new();
-                    self.file_lines = Vec::new();
-                    self.message = Some(format!("Cannot read {}: {}", path.display(), e));
+                    self.message = Some(format!("Loaded: {}", path));
+                }
+                Err(e) => {
+                    if hunk.filename.ends_with("mod.rs") {
+                        self.file_text = DEFAULT_FILE.to_string();
+                        self.file_lines = self.file_text.lines().map(String::from).collect();
+                        self.message =
+                            Some(format!("File not found — using embedded sample ({})", e));
+                    } else {
+                        self.file_text = String::new();
+                        self.file_lines = Vec::new();
+                        self.message = Some(format!("Cannot read {}: {}", path, e));
+                    }
                 }
             }
         }
-        self.merged_lines = None;
-        self.merged_range = None;
-        self.show_merged = false;
+
         self.manual_anchor = None;
-        self.file_search_query.clear();
-        self.file_search_matches.clear();
         self.anchor_matches.clear();
         self.anchor_match_idx = 0;
+        self.file_search_query.clear();
+        self.file_search_matches.clear();
         self.candidate_index = 0;
         self.scroll_to_match = true;
         self.cursor_line = None;
@@ -230,7 +222,6 @@ impl MergeApp {
             };
             self.search_rows = Self::build_search_rows(hunk, &mr);
             self.match_result = Some(mr.clone());
-            // Move cursor to the hunk match position
             self.cursor_line = Some(mr.file_start);
             self.scroll_to_match = true;
         }
@@ -271,6 +262,10 @@ impl MergeApp {
     }
 
     fn apply_merge(&mut self) {
+        if self.applied_hunks.contains(&self.current_hunk) {
+            self.message = Some(format!("Hunk {} already applied", self.current_hunk + 1));
+            return;
+        }
         let hunk = match self.hunks.get(self.current_hunk) {
             Some(h) => h.clone(),
             None => return,
@@ -283,33 +278,29 @@ impl MergeApp {
                 None => return,
             }
         };
+
         let mut output: Vec<String> = Vec::new();
         output.extend_from_slice(&self.file_lines[..file_start]);
-        let replace_start = output.len();
         output.extend(hunk.replace.iter().cloned());
-        let replace_end = output.len();
         output.extend_from_slice(&self.file_lines[file_end..]);
-        let mode = if self.manual_anchor.is_some() {
-            format!("anchor line {}", file_start + 1)
-        } else {
-            format!("auto match lines {}–{}", file_start + 1, file_end)
-        };
-        self.merged_lines = Some(output);
-        self.merged_range = Some((replace_start, replace_end));
-        self.show_merged = true;
+
+        self.file_lines = output;
+        self.applied_hunks.insert(self.current_hunk);
+        self.manual_anchor = None;
+        self.scroll_to_match = true;
+        self.cursor_line = Some(file_start);
         self.message = Some(format!(
-            "Applied via {} → inserted {} lines",
-            mode,
+            "Applied hunk {} at line {} → inserted {} lines",
+            self.current_hunk + 1,
+            file_start + 1,
             hunk.replace.len()
         ));
+
+        self.recompute_match();
     }
 
     fn save_merged(&mut self) {
-        let lines = match &self.merged_lines {
-            Some(l) => l.clone(),
-            None => return,
-        };
-        let content = lines.join("\n");
+        let content = self.file_lines.join("\n");
         let path = if self.file_path.is_empty() {
             "merged_output.txt".to_string()
         } else {
@@ -323,18 +314,6 @@ impl MergeApp {
 
     fn current_hunk(&self) -> Option<&PatchHunk> {
         self.hunks.get(self.current_hunk)
-    }
-
-    #[allow(dead_code)]
-    fn truncate(text: &str, max_chars: usize) -> &str {
-        let mut end = 0;
-        for (i, (byte_pos, _)) in text.char_indices().enumerate() {
-            if i >= max_chars {
-                return &text[..end];
-            }
-            end = byte_pos;
-        }
-        text
     }
 
     fn truncate_owned(text: &str, max_chars: usize) -> String {
@@ -361,11 +340,7 @@ impl eframe::App for MergeApp {
                 });
                 return;
             }
-            if self.show_merged {
-                self.render_merged_view(ui);
-            } else {
-                self.render_split_view(ui);
-            }
+            self.render_split_view(ui);
         });
     }
 }
@@ -401,9 +376,7 @@ impl MergeApp {
                             if let Some(parent) = path.parent() {
                                 self.base_dir = parent.display().to_string();
                             }
-                            self.merged_lines = None;
-                            self.merged_range = None;
-                            self.show_merged = false;
+                            self.applied_hunks.clear();
                             self.manual_anchor = None;
                             self.file_search_query.clear();
                             self.file_search_matches.clear();
@@ -437,18 +410,8 @@ impl MergeApp {
                     });
                     ui.separator();
                 }
-                if self.merged_lines.is_some() {
-                    let toggle_label = if self.show_merged {
-                        "Show Diff"
-                    } else {
-                        "Show Merged"
-                    };
-                    if ui.button(toggle_label).clicked() {
-                        self.show_merged = !self.show_merged;
-                    }
-                    if ui.button("💾 Save").clicked() {
-                        self.save_merged();
-                    }
+                if ui.button("💾 Save").clicked() {
+                    self.save_merged();
                 }
             });
             ui.add_space(2.0);
@@ -566,7 +529,13 @@ impl MergeApp {
                     Some(h) => h,
                     None => return,
                 };
-                let (banner_color, banner_text) = if mr.score >= 80.0 {
+                let is_applied = self.applied_hunks.contains(&self.current_hunk);
+                let (banner_color, banner_text) = if is_applied {
+                    (
+                        Color32::from_rgb(50, 50, 50),
+                        format!("✓ Applied Hunk {}", self.current_hunk + 1),
+                    )
+                } else if mr.score >= 80.0 {
                     (
                         Color32::from_rgb(40, 90, 40),
                         format!(
@@ -644,7 +613,11 @@ impl MergeApp {
                         Align2::LEFT_CENTER,
                         &display,
                         FontId::monospace(12.0),
-                        Color32::from_gray(210),
+                        if is_applied {
+                            Color32::from_gray(100)
+                        } else {
+                            Color32::from_gray(210)
+                        },
                     );
                 }
                 ui.add_space(6.0);
@@ -691,7 +664,11 @@ impl MergeApp {
                             Align2::LEFT_CENTER,
                             &display,
                             FontId::monospace(12.0),
-                            Color32::from_rgb(160, 240, 170),
+                            if is_applied {
+                                Color32::from_gray(100)
+                            } else {
+                                Color32::from_rgb(160, 240, 170)
+                            },
                         );
                     }
                 }
@@ -721,8 +698,9 @@ impl MergeApp {
         let manual_anchor = self.manual_anchor;
         let candidate_count = mr.candidates.len();
         let candidate_idx = self.candidate_index;
+        let is_applied = self.applied_hunks.contains(&self.current_hunk);
         let can_apply =
-            (self.match_result.is_some() || self.manual_anchor.is_some()) && !self.show_merged;
+            !is_applied && (self.match_result.is_some() || self.manual_anchor.is_some());
         let apply_line = if let Some(anchor) = manual_anchor {
             anchor + 1
         } else {
@@ -746,6 +724,13 @@ impl MergeApp {
                         .clicked()
                     {
                         next_hunk = true;
+                    }
+                    if is_applied {
+                        ui.label(
+                            RichText::new("✓ Applied")
+                                .color(Color32::from_rgb(100, 200, 100))
+                                .strong(),
+                        );
                     }
                     ui.separator();
                     if let Some(anchor) = manual_anchor {
@@ -858,12 +843,12 @@ impl MergeApp {
 
         if prev_hunk && current_hunk_idx > 0 {
             self.current_hunk -= 1;
-            self.reload_file();
+            self.load_hunk();
             return;
         }
         if next_hunk && current_hunk_idx < total_hunks - 1 {
             self.current_hunk += 1;
-            self.reload_file();
+            self.load_hunk();
             return;
         }
         if clear_anchor {
@@ -924,7 +909,7 @@ impl MergeApp {
         if go_next_hunk {
             if self.current_hunk < self.hunks.len() - 1 {
                 self.current_hunk += 1;
-                self.reload_file();
+                self.load_hunk();
                 return;
             } else {
                 self.cursor_line = Some(mr.file_start);
@@ -934,7 +919,7 @@ impl MergeApp {
         if go_prev_hunk {
             if self.current_hunk > 0 {
                 self.current_hunk -= 1;
-                self.reload_file();
+                self.load_hunk();
                 return;
             } else {
                 self.cursor_line = Some(mr.file_start);
@@ -978,7 +963,17 @@ impl MergeApp {
                     } else {
                         Vec2::new(ui.available_width(), row_h)
                     };
-                    let (rect, row_resp) = ui.allocate_exact_size(desired, Sense::click());
+
+                    // Use hover sense if we have a button on this row, so the button can receive clicks
+                    let sense = if is_anchor
+                        || (in_auto_match && i == auto_start && manual_anchor_check.is_none())
+                    {
+                        Sense::hover()
+                    } else {
+                        Sense::click()
+                    };
+
+                    let (rect, row_resp) = ui.allocate_exact_size(desired, sense);
 
                     let should_scroll = scroll_to_match
                         && (is_cursor
@@ -1183,7 +1178,6 @@ impl MergeApp {
                 ui.add_space(row_h * 3.0);
             });
 
-        // Guarantee scroll_to_match is cleared so manual scrolling is never blocked
         if scroll_to_match && !did_scroll {
             did_scroll = true;
         }
@@ -1203,85 +1197,5 @@ impl MergeApp {
             self.cursor_line = Some(cur_line);
             self.scroll_to_match = true;
         }
-    }
-}
-
-impl MergeApp {
-    fn render_merged_view(&self, ui: &mut Ui) {
-        let lines = match &self.merged_lines {
-            Some(l) => l,
-            None => return,
-        };
-        let (rstart, rend) = match self.merged_range {
-            Some(r) => r,
-            None => return,
-        };
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new("✓ Merged Result")
-                    .color(Color32::from_rgb(100, 220, 100))
-                    .strong(),
-            );
-            ui.separator();
-            ui.label(format!(
-                "Inserted {} lines at {}–{}",
-                rend - rstart,
-                rstart + 1,
-                rend
-            ));
-        });
-        ui.separator();
-        let mono_h = ui.text_style_height(&TextStyle::Monospace);
-        let row_h = mono_h + 4.0;
-        let char_w = mono_h * 0.60;
-        let max_chars = ((ui.available_width() - 64.0) / char_w).floor() as usize;
-        ScrollArea::both()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for (i, line) in lines.iter().enumerate() {
-                    let in_replace = i >= rstart && i < rend;
-                    let bg = if in_replace {
-                        Color32::from_rgb(28, 52, 32)
-                    } else if i % 2 == 0 {
-                        Color32::from_gray(24)
-                    } else {
-                        Color32::from_gray(27)
-                    };
-                    let color = if in_replace {
-                        Color32::from_rgb(160, 245, 170)
-                    } else {
-                        Color32::from_gray(195)
-                    };
-                    let num_color = if in_replace {
-                        Color32::from_rgb(80, 160, 100)
-                    } else {
-                        Color32::from_gray(70)
-                    };
-                    let desired = Vec2::new(ui.available_width(), row_h);
-                    let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-                    ui.painter().rect_filled(rect, 0.0, bg);
-                    if in_replace {
-                        let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
-                        ui.painter()
-                            .rect_filled(bar, 0.0, Color32::from_rgb(80, 200, 100));
-                    }
-                    ui.painter().text(
-                        Pos2::new(rect.left() + 6.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        format!("{:>4} │", i + 1),
-                        FontId::monospace(12.0),
-                        num_color,
-                    );
-                    let display = Self::truncate_owned(line, max_chars);
-                    ui.painter().text(
-                        Pos2::new(rect.left() + 58.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        &display,
-                        FontId::monospace(12.0),
-                        color,
-                    );
-                }
-                ui.add_space(row_h * 3.0);
-            });
     }
 }
