@@ -23,6 +23,7 @@ pub struct MatchResult {
     pub file_start: usize,
     pub file_end: usize,
     pub rows: Vec<DiffRow>,
+    /// All candidate match locations: (file_start, file_end, score), sorted best-first
     pub candidates: Vec<(usize, usize, f32)>,
 }
 
@@ -38,7 +39,6 @@ fn lcs_diff(left: &[String], right: &[String]) -> Vec<(RowKind, Option<String>, 
     let m = left.len();
     let n = right.len();
 
-    // dp[i][j] = LCS length of left[0..i] and right[0..j]
     let mut dp = vec![vec![0usize; n + 1]; m + 1];
     for i in 1..=m {
         for j in 1..=n {
@@ -50,7 +50,6 @@ fn lcs_diff(left: &[String], right: &[String]) -> Vec<(RowKind, Option<String>, 
         }
     }
 
-    // backtrack to produce the diff
     let mut result = Vec::new();
     let mut i = m;
     let mut j = n;
@@ -78,9 +77,6 @@ fn lcs_diff(left: &[String], right: &[String]) -> Vec<(RowKind, Option<String>, 
 }
 
 /// Slide a window over `file` to find the region that best matches `search`.
-///
-/// Returns the match score (0–100), the line range in `file`, and the
-/// aligned diff rows for side-by-side display.
 pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
     if search.is_empty() || file.is_empty() {
         return MatchResult {
@@ -144,7 +140,6 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
     let rows = build_rows(&best_raw, 1, best_start + 1);
     let score = (best_score * 100.0).clamp(0.0, 100.0);
 
-    // Sort candidates by score desc, remove overlaps
     all_candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     let mut candidates: Vec<(usize, usize, f32)> = Vec::new();
     for (s, e, sc) in all_candidates {
@@ -162,43 +157,6 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
         rows,
         candidates,
     }
-}
-
-fn build_rows(
-    raw: &[(RowKind, Option<String>, Option<String>)],
-    left_start: usize,
-    right_start: usize,
-) -> Vec<DiffRow> {
-    let mut rows = Vec::new();
-    let mut ln = left_start;
-    let mut rn = right_start;
-
-    for (kind, left, right) in raw {
-        let left_num = if left.is_some() {
-            let n = Some(ln);
-            ln += 1;
-            n
-        } else {
-            None
-        };
-        let right_num = if right.is_some() {
-            let n = Some(rn);
-            rn += 1;
-            n
-        } else {
-            None
-        };
-
-        rows.push(DiffRow {
-            kind: *kind,
-            left: left.clone(),
-            right: right.clone(),
-            left_num,
-            right_num,
-        });
-    }
-
-    rows
 }
 
 /// Compute a MatchResult for a specific file window (used when navigating candidates).
@@ -276,4 +234,41 @@ pub fn find_best_match_with_anchor(
         rows,
         candidates: vec![(file_start, file_end, score)],
     }
+}
+
+fn build_rows(
+    raw: &[(RowKind, Option<String>, Option<String>)],
+    left_start: usize,
+    right_start: usize,
+) -> Vec<DiffRow> {
+    let mut rows = Vec::new();
+    let mut ln = left_start;
+    let mut rn = right_start;
+
+    for (kind, left, right) in raw {
+        let left_num = if left.is_some() {
+            let n = Some(ln);
+            ln += 1;
+            n
+        } else {
+            None
+        };
+        let right_num = if right.is_some() {
+            let n = Some(rn);
+            rn += 1;
+            n
+        } else {
+            None
+        };
+
+        rows.push(DiffRow {
+            kind: *kind,
+            left: left.clone(),
+            right: right.clone(),
+            left_num,
+            right_num,
+        });
+    }
+
+    rows
 }
