@@ -89,6 +89,7 @@ pub struct MergeApp {
     message: Option<String>,
     cursor_line: Option<usize>,
     applied_hunks: HashSet<usize>,
+    merged_range: Option<(usize, usize)>,
     history: Vec<(Vec<String>, usize)>,
     vim_buffer: String,
 }
@@ -118,6 +119,7 @@ impl MergeApp {
             message: None,
             cursor_line: None,
             applied_hunks: HashSet::new(),
+            merged_range: None,
             history: Vec::new(),
             vim_buffer: String::new(),
         };
@@ -147,6 +149,7 @@ impl MergeApp {
         self.hunks = patch::parse_patches(&self.patch_text);
         self.current_hunk = 0;
         self.applied_hunks.clear();
+        self.merged_range = None;
         self.history.clear();
         self.vim_buffer.clear();
         self.file_path.clear(); // Force reload
@@ -187,6 +190,7 @@ impl MergeApp {
         }
 
         self.manual_anchor = None;
+        self.merged_range = None;
         self.anchor_matches.clear();
         self.anchor_match_idx = 0;
         self.file_search_query.clear();
@@ -291,10 +295,13 @@ impl MergeApp {
 
         let mut output: Vec<String> = Vec::new();
         output.extend_from_slice(&self.file_lines[..file_start]);
+        let replace_start = output.len();
         output.extend(hunk.replace.iter().cloned());
+        let replace_end = output.len();
         output.extend_from_slice(&self.file_lines[file_end..]);
 
         self.file_lines = output;
+        self.merged_range = Some((replace_start, replace_end));
         self.applied_hunks.insert(self.current_hunk);
         self.manual_anchor = None;
         self.scroll_to_match = true;
@@ -313,6 +320,7 @@ impl MergeApp {
         if let Some((prev_lines, hunk_idx)) = self.history.pop() {
             self.file_lines = prev_lines;
             self.applied_hunks.remove(&hunk_idx);
+            self.merged_range = None;
             self.message = Some(format!("Undone action for hunk {}", hunk_idx + 1));
             self.scroll_to_match = true;
             self.recompute_match();
@@ -328,6 +336,7 @@ impl MergeApp {
                     .push((self.file_lines.clone(), self.current_hunk));
                 let end = (start + count).min(self.file_lines.len());
                 self.file_lines.drain(start..end);
+                self.merged_range = None;
 
                 let new_len = self.file_lines.len();
                 if new_len == 0 {
@@ -422,6 +431,7 @@ impl MergeApp {
                                 self.base_dir = parent.display().to_string();
                             }
                             self.applied_hunks.clear();
+                            self.merged_range = None;
                             self.history.clear();
                             self.vim_buffer.clear();
                             self.manual_anchor = None;
@@ -1046,6 +1056,7 @@ impl MergeApp {
         let file_lines = self.file_lines.clone();
         let file_search_matches: HashSet<usize> = self.file_search_matches.clone();
         let manual_anchor_check = self.manual_anchor;
+        let merged_range = self.merged_range;
         let auto_start = mr.file_start;
         let auto_end = mr.file_end;
         let auto_score = mr.score;
@@ -1066,6 +1077,11 @@ impl MergeApp {
                         !search_query.is_empty() && file_search_matches.contains(&i);
                     let is_anchor = manual_anchor_check == Some(i);
                     let is_cursor = cursor_line == Some(i);
+                    let in_merged = if let Some((rstart, rend)) = merged_range {
+                        i >= rstart && i < rend
+                    } else {
+                        false
+                    };
 
                     let desired = if is_anchor {
                         Vec2::new(ui.available_width(), row_h + 4.0)
@@ -1075,13 +1091,8 @@ impl MergeApp {
                         Vec2::new(ui.available_width(), row_h)
                     };
 
-                    let sense = if is_anchor
-                        || (in_auto_match && i == auto_start && manual_anchor_check.is_none())
-                    {
-                        Sense::hover()
-                    } else {
-                        Sense::click()
-                    };
+                    // Unify mouse and keyboard by allowing click on all lines
+                    let sense = Sense::click();
 
                     let (rect, row_resp) = ui.allocate_exact_size(desired, sense);
 
@@ -1180,7 +1191,9 @@ impl MergeApp {
                             apply_clicked = true;
                         }
                     } else {
-                        let base_bg = if is_cursor {
+                        let base_bg = if in_merged {
+                            Color32::from_rgb(28, 52, 32)
+                        } else if is_cursor {
                             Color32::from_rgb(35, 45, 65)
                         } else if in_auto_match && manual_anchor_check.is_none() {
                             Color32::from_rgb(30, 50, 35)
@@ -1196,14 +1209,17 @@ impl MergeApp {
                         };
 
                         ui.painter().rect_filled(rect, 0.0, row_bg);
-                        if is_cursor {
-                            ui.painter().rect_stroke(
-                                rect,
-                                0.0,
-                                Stroke::new(1.0, Color32::from_rgb(100, 150, 220)),
-                            );
-                        }
-                        if is_anchor {
+
+                        // Unified cursor visual
+                        if in_merged {
+                            let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
+                            ui.painter()
+                                .rect_filled(bar, 0.0, Color32::from_rgb(80, 200, 100));
+                        } else if is_cursor {
+                            let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
+                            ui.painter()
+                                .rect_filled(bar, 0.0, Color32::from_rgb(100, 150, 220));
+                        } else if is_anchor {
                             let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
                             ui.painter()
                                 .rect_filled(bar, 0.0, Color32::from_rgb(220, 160, 40));
@@ -1216,6 +1232,7 @@ impl MergeApp {
                             ui.painter()
                                 .rect_filled(bar, 0.0, Color32::from_rgb(180, 150, 40));
                         }
+
                         if row_resp.hovered() && !search_query.is_empty() {
                             ui.painter().rect_filled(
                                 rect,
@@ -1237,14 +1254,18 @@ impl MergeApp {
                                 Color32::from_rgba_premultiplied(80, 80, 80, 30),
                             );
                         }
+
+                        // Unify mouse and keyboard: clicking anywhere sets cursor (and anchor if searching)
                         if row_resp.clicked() {
-                            if search_query.is_empty() {
-                                set_cursor = Some(i);
-                            } else {
+                            set_cursor = Some(i);
+                            if !search_query.is_empty() {
                                 set_anchor = Some(i);
                             }
                         }
-                        let num_color = if in_auto_match && manual_anchor_check.is_none() {
+
+                        let num_color = if in_merged {
+                            Color32::from_rgb(80, 160, 100)
+                        } else if in_auto_match && manual_anchor_check.is_none() {
                             Color32::from_rgb(80, 160, 100)
                         } else if is_search_hit {
                             Color32::from_rgb(180, 160, 60)
@@ -1258,7 +1279,9 @@ impl MergeApp {
                             FontId::monospace(12.0),
                             num_color,
                         );
-                        let text_color = if in_auto_match && manual_anchor_check.is_none() {
+                        let text_color = if in_merged {
+                            Color32::from_rgb(160, 245, 170)
+                        } else if in_auto_match && manual_anchor_check.is_none() {
                             Color32::from_rgb(200, 240, 210)
                         } else if is_search_hit {
                             Color32::from_rgb(240, 230, 150)
@@ -1305,7 +1328,7 @@ impl MergeApp {
         }
         if let Some(cur_line) = set_cursor {
             self.cursor_line = Some(cur_line);
-            self.scroll_to_match = true;
+            // Don't force scroll if it was a mouse click, it's already visible
         }
     }
 }
