@@ -1078,11 +1078,6 @@ impl MergeApp {
             }
         }
 
-        if apply_clicked {
-            self.apply_merge();
-            return;
-        }
-
         let file_lines = self.file_lines.clone();
         let file_search_matches: HashSet<usize> = self.file_search_matches.clone();
         let manual_anchor_check = self.manual_anchor;
@@ -1121,7 +1116,6 @@ impl MergeApp {
                         Vec2::new(ui.available_width(), row_h)
                     };
 
-                    // Unify mouse and keyboard by allowing click on all lines
                     let sense = Sense::click();
 
                     let (rect, row_resp) = ui.allocate_exact_size(desired, sense);
@@ -1240,7 +1234,6 @@ impl MergeApp {
 
                         ui.painter().rect_filled(rect, 0.0, row_bg);
 
-                        // Unified cursor visual
                         if in_merged {
                             let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
                             ui.painter()
@@ -1263,7 +1256,6 @@ impl MergeApp {
                                 .rect_filled(bar, 0.0, Color32::from_rgb(180, 150, 40));
                         }
 
-                        // Unify mouse and keyboard: clicking anywhere sets cursor (and anchor if searching)
                         if row_resp.clicked() {
                             set_cursor = Some(i);
                             if !search_query.is_empty() {
@@ -1336,7 +1328,11 @@ impl MergeApp {
         }
         if let Some(cur_line) = set_cursor {
             self.cursor_line = Some(cur_line);
-            // Don't force scroll if it was a mouse click, it's already visible
+        }
+
+        // 👇 CHECK apply_clicked AT THE VERY END
+        if apply_clicked {
+            self.apply_merge();
         }
     }
 }
