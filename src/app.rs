@@ -91,6 +91,11 @@ pub struct MergeApp {
     file_search_matches: HashSet<usize>, // line indices that match the query
     manual_anchor: Option<usize>,        // user-chosen insert-before line (overrides auto match)
 
+    /// Which candidate match is selected (index into MatchResult.candidates)
+    candidate_index: usize,
+    /// When true, scroll the file panel to center on the matched region
+    scroll_to_match: bool,
+
     // merge result
     merged_lines: Option<Vec<String>>,
     merged_range: Option<(usize, usize)>, // (start, end) in merged_lines
@@ -117,6 +122,8 @@ impl MergeApp {
             file_search_query: String::new(),
             file_search_matches: HashSet::new(),
             manual_anchor: None,
+            candidate_index: 0,
+            scroll_to_match: true,
             merged_lines: None,
             merged_range: None,
             show_merged: false,
@@ -157,6 +164,8 @@ impl MergeApp {
         self.manual_anchor = None;
         self.file_search_query.clear();
         self.file_search_matches.clear();
+        self.candidate_index = 0;
+        self.scroll_to_match = true;
         self.reload_file();
     }
 
@@ -193,6 +202,8 @@ impl MergeApp {
         self.manual_anchor = None;
         self.file_search_query.clear();
         self.file_search_matches.clear();
+        self.candidate_index = 0;
+        self.scroll_to_match = true;
         self.recompute_match();
     }
 
@@ -209,7 +220,22 @@ impl MergeApp {
             self.match_result = None;
             self.search_rows = Vec::new();
         } else {
-            let mr = diff::find_best_match(&hunk.search, &self.file_lines);
+            let best = diff::find_best_match(&hunk.search, &self.file_lines);
+            let mr = if best.candidates.is_empty() {
+                best
+            } else {
+                let idx = self.candidate_index.min(best.candidates.len() - 1);
+                if idx == 0 {
+                    best
+                } else {
+                    let (start, end, _) = best.candidates[idx];
+                    let cands = best.candidates.clone();
+                    let mut mr =
+                        diff::compute_match_for_window(&hunk.search, &self.file_lines, start, end);
+                    mr.candidates = cands;
+                    mr
+                }
+            };
             self.search_rows = Self::build_search_rows(hunk, &mr);
             self.match_result = Some(mr);
         }
@@ -264,6 +290,9 @@ impl MergeApp {
                 .map(|(i, _)| i)
                 .collect::<HashSet<usize>>();
         }
+        // Reset candidate index when search changes
+        self.candidate_index = 0;
+        self.recompute_match();
     }
 
     fn apply_merge(&mut self) {
@@ -420,6 +449,8 @@ impl MergeApp {
                             self.manual_anchor = None;
                             self.file_search_query.clear();
                             self.file_search_matches.clear();
+                            self.candidate_index = 0;
+                            self.scroll_to_match = true;
                             self.recompute_match();
                         }
                     }
@@ -858,9 +889,15 @@ impl MergeApp {
         let auto_end = mr.file_end;
         let auto_score = mr.score;
         let search_query = self.file_search_query.clone();
+        let candidate_count = mr.candidates.len();
+        let candidate_idx = self.candidate_index;
+        let scroll_to_match = self.scroll_to_match;
+        let mut did_scroll = false;
 
         let mut apply_clicked = false;
         let mut set_anchor: Option<usize> = None;
+        let mut prev_candidate = false;
+        let mut next_candidate = false;
 
         ScrollArea::both()
             .id_source("file_scroll")
@@ -927,10 +964,98 @@ impl MergeApp {
 
                     // ---- Auto-match banner (first line of auto match, only if no manual anchor) ----
                     if in_auto_match && i == auto_start && manual_anchor.is_none() {
+                        if scroll_to_match {
+                            ui.scroll_to_cursor(Some(Align::Center));
+                            did_scroll = true;
+                        }
+
                         let desired = Vec2::new(ui.available_width(), row_h + 6.0);
                         let (banner_rect, _) = ui.allocate_exact_size(desired, Sense::hover());
                         let banner_bg = Color32::from_rgb(40, 80, 55);
                         ui.painter().rect_filled(banner_rect, 2.0, banner_bg);
+
+                        let mut right_x = banner_rect.right() - 8.0;
+                        let btn_h = row_h;
+
+                        // Apply button
+                        let apply_w = 80.0;
+                        let apply_rect = Rect::from_min_size(
+                            Pos2::new(right_x - apply_w, banner_rect.center().y - btn_h / 2.0),
+                            Vec2::new(apply_w, btn_h),
+                        );
+                        right_x -= apply_w + 6.0;
+                        let apply_resp = ui.put(
+                            apply_rect,
+                            Button::new(
+                                RichText::new("⚡ Apply")
+                                    .color(Color32::from_rgb(255, 230, 80))
+                                    .strong()
+                                    .monospace(),
+                            )
+                            .fill(Color32::from_rgb(60, 100, 40))
+                            .stroke(Stroke::new(1.5, Color32::from_rgb(180, 220, 80))),
+                        );
+                        if apply_resp.clicked() {
+                            apply_clicked = true;
+                        }
+
+                        // Candidate navigation
+                        if candidate_count > 1 {
+                            let nav_w = 28.0;
+                            let count_text = format!("{}/{}", candidate_idx + 1, candidate_count);
+                            let count_size = ui
+                                .painter()
+                                .layout(
+                                    count_text.clone(),
+                                    FontId::monospace(11.0),
+                                    Color32::from_gray(200),
+                                    f32::INFINITY,
+                                )
+                                .size();
+                            let count_rect = Rect::from_min_size(
+                                Pos2::new(
+                                    right_x - count_size.x - 4.0,
+                                    banner_rect.center().y - count_size.y / 2.0,
+                                ),
+                                Vec2::new(count_size.x + 8.0, count_size.y + 2.0),
+                            );
+                            right_x -= count_rect.width() + 4.0;
+                            ui.painter().text(
+                                count_rect.center(),
+                                Align2::CENTER_CENTER,
+                                &count_text,
+                                FontId::monospace(11.0),
+                                Color32::from_gray(200),
+                            );
+
+                            let next_rect = Rect::from_min_size(
+                                Pos2::new(right_x - nav_w, banner_rect.center().y - btn_h / 2.0),
+                                Vec2::new(nav_w, btn_h),
+                            );
+                            right_x -= nav_w + 4.0;
+                            let next_resp = ui.put(
+                                next_rect,
+                                Button::new(RichText::new("▶").monospace())
+                                    .fill(Color32::from_rgb(50, 70, 50)),
+                            );
+                            if next_resp.clicked() {
+                                next_candidate = true;
+                            }
+
+                            let prev_rect = Rect::from_min_size(
+                                Pos2::new(right_x - nav_w, banner_rect.center().y - btn_h / 2.0),
+                                Vec2::new(nav_w, btn_h),
+                            );
+                            let prev_resp = ui.put(
+                                prev_rect,
+                                Button::new(RichText::new("◀").monospace())
+                                    .fill(Color32::from_rgb(50, 70, 50)),
+                            );
+                            if prev_resp.clicked() {
+                                prev_candidate = true;
+                            }
+                        }
+
                         ui.painter().text(
                             Pos2::new(banner_rect.left() + 8.0, banner_rect.center().y),
                             Align2::LEFT_CENTER,
@@ -943,28 +1068,6 @@ impl MergeApp {
                             FontId::monospace(11.0),
                             Color32::from_rgb(120, 230, 160),
                         );
-                        let btn_size = Vec2::new(80.0, row_h);
-                        let btn_rect = Rect::from_min_size(
-                            Pos2::new(
-                                banner_rect.right() - btn_size.x - 8.0,
-                                banner_rect.center().y - btn_size.y / 2.0,
-                            ),
-                            btn_size,
-                        );
-                        let btn_resp = ui.put(
-                            btn_rect,
-                            Button::new(
-                                RichText::new("⚡ Apply")
-                                    .color(Color32::from_rgb(255, 230, 80))
-                                    .strong()
-                                    .monospace(),
-                            )
-                            .fill(Color32::from_rgb(60, 100, 40))
-                            .stroke(Stroke::new(1.5, Color32::from_rgb(180, 220, 80))),
-                        );
-                        if btn_resp.clicked() {
-                            apply_clicked = true;
-                        }
                     }
 
                     // ---- File line row ----
@@ -1070,6 +1173,10 @@ impl MergeApp {
             });
 
         // Apply mutations after borrow ends
+        if did_scroll {
+            self.scroll_to_match = false;
+        }
+
         if let Some(anchor_line) = set_anchor {
             self.manual_anchor = Some(anchor_line);
             self.message = Some(format!(
@@ -1079,6 +1186,16 @@ impl MergeApp {
         }
         if apply_clicked {
             self.apply_merge();
+        }
+        if prev_candidate && self.candidate_index > 0 {
+            self.candidate_index -= 1;
+            self.scroll_to_match = true;
+            self.recompute_match();
+        }
+        if next_candidate && self.candidate_index + 1 < candidate_count {
+            self.candidate_index += 1;
+            self.scroll_to_match = true;
+            self.recompute_match();
         }
     }
 }
