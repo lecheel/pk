@@ -338,17 +338,23 @@ impl MergeApp {
                 self.file_lines.drain(start..end);
                 self.merged_range = None;
 
+                // 1. Call recompute_match FIRST.
+                // It will temporarily set the cursor to mr.file_start.
+                self.recompute_match();
+
+                // 2. Now override it with the correct line index after deletion
                 let new_len = self.file_lines.len();
                 if new_len == 0 {
                     self.cursor_line = None;
                 } else if start >= new_len {
                     self.cursor_line = Some(new_len - 1);
                 } else {
+                    // Keeps the cursor on the line that shifted up into the deleted position
                     self.cursor_line = Some(start);
                 }
+
                 self.scroll_to_match = true;
                 self.message = Some(format!("Deleted {} lines", end - start));
-                self.recompute_match();
             }
         }
     }
