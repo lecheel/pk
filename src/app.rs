@@ -91,6 +91,14 @@ pub struct MergeApp {
     show_merged: bool,
 
     message: Option<String>,
+    /// Which candidate match is selected (index into MatchResult.candidates)
+    candidate_index: usize,
+    /// Manual anchor: (search_line_idx, file_line_idx)
+    manual_anchor: Option<(usize, usize)>,
+    /// Search line selected by user, waiting for a file-line click
+    pending_anchor_search: Option<usize>,
+    /// When true, scroll the file panel to center on the matched region
+    scroll_to_match: bool,
 }
 
 impl MergeApp {
@@ -112,6 +120,10 @@ impl MergeApp {
             merged_range: None,
             show_merged: false,
             message: None,
+            candidate_index: 0,
+            manual_anchor: None,
+            pending_anchor_search: None,
+            scroll_to_match: false,
         };
 
         let mut loaded_patch = false;
@@ -146,6 +158,10 @@ impl MergeApp {
         self.merged_range = None;
         self.show_merged = false;
         self.reload_file();
+        self.candidate_index = 0;
+        self.manual_anchor = None;
+        self.pending_anchor_search = None;
+        self.scroll_to_match = true;
     }
 
     fn reload_file(&mut self) {
@@ -179,6 +195,10 @@ impl MergeApp {
         self.merged_range = None;
         self.show_merged = false;
         self.recompute_match();
+        self.candidate_index = 0;
+        self.manual_anchor = None;
+        self.pending_anchor_search = None;
+        self.scroll_to_match = true;
     }
 
     fn recompute_match(&mut self) {
@@ -193,11 +213,33 @@ impl MergeApp {
         if self.file_lines.is_empty() {
             self.match_result = None;
             self.search_rows = Vec::new();
-        } else {
-            let mr = diff::find_best_match(&hunk.search, &self.file_lines);
-            self.search_rows = Self::build_search_rows(hunk, &mr);
-            self.match_result = Some(mr);
+            return;
         }
+
+        let mr = if let Some((s_idx, f_idx)) = self.manual_anchor {
+            // Manual anchor overrides everything
+            diff::find_best_match_with_anchor(&hunk.search, &self.file_lines, s_idx, f_idx)
+        } else {
+            let best = diff::find_best_match(&hunk.search, &self.file_lines);
+            if best.candidates.is_empty() {
+                best
+            } else {
+                let idx = self.candidate_index.min(best.candidates.len() - 1);
+                if idx == 0 {
+                    best
+                } else {
+                    let (start, end, _) = best.candidates[idx];
+                    let cands = best.candidates.clone();
+                    let mut mr =
+                        diff::compute_match_for_window(&hunk.search, &self.file_lines, start, end);
+                    mr.candidates = cands;
+                    mr
+                }
+            }
+        };
+
+        self.search_rows = Self::build_search_rows(hunk, &mr);
+        self.match_result = Some(mr);
     }
 
     fn build_search_rows(hunk: &PatchHunk, mr: &MatchResult) -> Vec<SearchRow> {
@@ -424,6 +466,21 @@ impl MergeApp {
                     });
                     ui.separator();
                 }
+                // Anchor controls
+                if self.manual_anchor.is_some() || self.pending_anchor_search.is_some() {
+                    let label = if self.manual_anchor.is_some() {
+                        "🔗 Clear Anchor"
+                    } else {
+                        "✕ Cancel Anchor"
+                    };
+                    if ui.button(label).clicked() {
+                        self.manual_anchor = None;
+                        self.pending_anchor_search = None;
+                        self.candidate_index = 0;
+                        self.recompute_match();
+                    }
+                    ui.separator();
+                }
 
                 // Apply / toggle merged / save
                 let can_apply = self.match_result.is_some() && !self.show_merged;
@@ -452,19 +509,34 @@ impl MergeApp {
         TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
-                if let Some(ref msg) = self.message {
+                if self.pending_anchor_search.is_some() {
+                    ui.colored_label(
+                        Color32::from_rgb(255, 200, 60),
+                        "⚓ Click a line in the file buffer (right panel) to anchor — or click the search line again to cancel",
+                    );
+                } else if let Some(ref msg) = self.message {
                     ui.colored_label(Color32::from_rgb(220, 180, 60), msg);
                 } else if let Some(hunk) = self.current_hunk() {
                     ui.label(format!("📄 {}", hunk.filename));
                     ui.separator();
                     if let Some(ref mr) = self.match_result {
+                        let anchor_tag = if self.manual_anchor.is_some() { "  🔗" } else { "" };
                         ui.label(format!(
-                            "Match: lines {}–{}  |  search {} ln  |  replace {} ln",
+                            "Match: lines {}–{}  |  search {} ln  |  replace {} ln{}",
                             mr.file_start + 1,
                             mr.file_end,
                             hunk.search.len(),
-                            hunk.replace.len()
+                            hunk.replace.len(),
+                            anchor_tag,
                         ));
+                        if !mr.candidates.is_empty() {
+                            ui.separator();
+                            ui.label(format!(
+                                "Candidates: {}/{}",
+                                self.candidate_index + 1,
+                                mr.candidates.len(),
+                            ));
+                        }
                     }
                 }
             });
@@ -565,7 +637,7 @@ impl MergeApp {
     }
 
     fn render_search_panel(
-        &self,
+        &mut self,
         ui: &mut Ui,
         mr: &MatchResult,
         row_h: f32,
@@ -574,30 +646,30 @@ impl MergeApp {
     ) {
         let max_chars = ((panel_w - 56.0) / char_w).floor() as usize;
 
+        let hunk = match self.current_hunk() {
+            Some(h) => h.clone(),
+            None => return,
+        };
+        let search_rows = self.search_rows.clone();
+        let pending = self.pending_anchor_search;
+        let manual_anchor = self.manual_anchor;
+        let mut search_click: Option<usize> = None;
+
         ScrollArea::vertical()
             .id_source("search_scroll")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let hunk = match self.current_hunk() {
-                    Some(h) => h,
-                    None => return,
-                };
-
-                // Header: match confidence banner
+                // ---- Match confidence banner ----
                 let (banner_color, banner_text) = if mr.score >= 80.0 {
                     (
                         Color32::from_rgb(40, 90, 40),
-                        format!(
-                            "✓ Match found at lines {}–{}",
-                            mr.file_start + 1,
-                            mr.file_end
-                        ),
+                        format!("✓ Match at lines {}–{}", mr.file_start + 1, mr.file_end),
                     )
                 } else if mr.score >= 50.0 {
                     (
                         Color32::from_rgb(80, 70, 20),
                         format!(
-                            "≈ Partial match ({:.0}%) at lines {}–{}",
+                            "≈ Partial ({:.0}%) lines {}–{}",
                             mr.score,
                             mr.file_start + 1,
                             mr.file_end
@@ -606,7 +678,7 @@ impl MergeApp {
                 } else {
                     (
                         Color32::from_rgb(80, 30, 30),
-                        format!("✗ Poor match ({:.0}%)", mr.score),
+                        format!("✗ Poor ({:.0}%)", mr.score),
                     )
                 };
 
@@ -621,17 +693,46 @@ impl MergeApp {
                     Color32::from_gray(220),
                 );
 
+                // Anchor hint
+                if pending.is_some() {
+                    ui.add_space(2.0);
+                    let desired = Vec2::new(ui.available_width(), row_h);
+                    let (hint_rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                    ui.painter()
+                        .rect_filled(hint_rect, 2.0, Color32::from_rgb(90, 70, 20));
+                    ui.painter().text(
+                        Pos2::new(hint_rect.left() + 8.0, hint_rect.center().y),
+                        Align2::LEFT_CENTER,
+                        "⚓ Now click a file line →",
+                        FontId::monospace(11.0),
+                        Color32::from_rgb(255, 200, 60),
+                    );
+                }
+
                 ui.add_space(2.0);
 
-                // Search lines
+                // ---- Search lines (clickable for anchor) ----
                 for (line_idx, line) in hunk.search.iter().enumerate() {
-                    // Find if this search line matched something in the file
-                    let matched_file_row = self
-                        .search_rows
+                    let matched_file_row = search_rows
                         .iter()
                         .find(|r| r.text == *line && r.file_idx.is_some());
 
-                    let (bg, prefix_color, prefix) = if matched_file_row.is_some() {
+                    let is_anchor = manual_anchor.map_or(false, |(s, _)| s == line_idx);
+                    let is_pending = pending == Some(line_idx);
+
+                    let (bg, prefix_color, prefix) = if is_pending {
+                        (
+                            Color32::from_rgb(90, 70, 20),
+                            Color32::from_rgb(255, 200, 60),
+                            "⚓ ",
+                        )
+                    } else if is_anchor {
+                        (
+                            Color32::from_rgb(50, 60, 90),
+                            Color32::from_rgb(120, 180, 255),
+                            "🔗 ",
+                        )
+                    } else if matched_file_row.is_some() {
                         (
                             Color32::from_rgb(28, 45, 28),
                             Color32::from_rgb(80, 180, 80),
@@ -646,10 +747,14 @@ impl MergeApp {
                     };
 
                     let desired = Vec2::new(ui.available_width(), row_h);
-                    let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                    let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
                     ui.painter().rect_filled(rect, 0.0, bg);
 
-                    // Line number in search block
+                    if resp.hovered() {
+                        ui.painter()
+                            .rect_filled(rect, 0.0, Color32::from_white_alpha(15));
+                    }
+
                     let num_text = format!("{:>3} ", line_idx + 1);
                     ui.painter().text(
                         Pos2::new(rect.left() + 4.0, rect.center().y),
@@ -658,8 +763,6 @@ impl MergeApp {
                         FontId::monospace(12.0),
                         Color32::from_gray(90),
                     );
-
-                    // Prefix symbol
                     ui.painter().text(
                         Pos2::new(rect.left() + 36.0, rect.center().y),
                         Align2::LEFT_CENTER,
@@ -667,8 +770,6 @@ impl MergeApp {
                         FontId::monospace(12.0),
                         prefix_color,
                     );
-
-                    // Line content
                     let display = Self::truncate_owned(line, max_chars);
                     ui.painter().text(
                         Pos2::new(rect.left() + 52.0, rect.center().y),
@@ -677,11 +778,25 @@ impl MergeApp {
                         FontId::monospace(12.0),
                         Color32::from_gray(210),
                     );
+
+                    if is_anchor {
+                        ui.painter().text(
+                            Pos2::new(rect.right() - 8.0, rect.center().y),
+                            Align2::RIGHT_CENTER,
+                            "🔗",
+                            FontId::monospace(12.0),
+                            Color32::from_rgb(120, 180, 255),
+                        );
+                    }
+
+                    if resp.clicked() {
+                        search_click = Some(line_idx);
+                    }
                 }
 
                 ui.add_space(6.0);
 
-                // Replace preview section
+                // ---- Replace preview (unchanged) ----
                 if !hunk.replace.is_empty() {
                     let sep_desired = Vec2::new(ui.available_width(), 1.0);
                     let (sep_rect, _) = ui.allocate_exact_size(sep_desired, Sense::hover());
@@ -733,6 +848,21 @@ impl MergeApp {
                     }
                 }
             });
+
+        // Handle anchor clicks after closure
+        if let Some(idx) = search_click {
+            if manual_anchor.map_or(false, |(s, _)| s == idx) {
+                // Clicking an already-anchored line clears it
+                self.manual_anchor = None;
+                self.candidate_index = 0;
+                self.recompute_match();
+            } else if pending == Some(idx) {
+                // Clicking the pending line cancels
+                self.pending_anchor_search = None;
+            } else {
+                self.pending_anchor_search = Some(idx);
+            }
+        }
     }
 
     fn render_file_panel(
