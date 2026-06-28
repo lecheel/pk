@@ -25,6 +25,13 @@ pub struct MatchResult {
     pub rows: Vec<DiffRow>,
 }
 
+pub fn diff_patch(
+    search: &[String],
+    replace: &[String],
+) -> Vec<(RowKind, Option<String>, Option<String>)> {
+    lcs_diff(search, replace)
+}
+
 /// Classic LCS-based line diff.
 fn lcs_diff(left: &[String], right: &[String]) -> Vec<(RowKind, Option<String>, Option<String>)> {
     let m = left.len();

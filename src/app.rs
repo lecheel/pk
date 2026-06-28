@@ -68,6 +68,15 @@ pub(crate) fn run_repl() -> io::Result<()> {
 }
 "#;
 
+#[derive(Clone)]
+struct InteractiveRow {
+    kind: RowKind,
+    left: String,
+    right: Option<String>,
+    right_num: Option<usize>,
+    applied: bool,
+}
+
 pub struct MergeApp {
     // patch state
     patch_text: String,
@@ -82,6 +91,7 @@ pub struct MergeApp {
 
     // computed
     match_result: Option<MatchResult>,
+    interactive_rows: Vec<InteractiveRow>,
 
     // merge result
     merged_preview: Option<String>,
@@ -106,6 +116,7 @@ impl MergeApp {
                 .map(|p| p.display().to_string())
                 .unwrap_or_default(),
             match_result: None,
+            interactive_rows: Vec::new(),
             merged_preview: None,
             merged_range: None,
             show_merged: false,
@@ -117,14 +128,12 @@ impl MergeApp {
             let path = std::path::Path::new(&patch_file);
             if let Ok(content) = std::fs::read_to_string(path) {
                 app.patch_text = content;
-                // Set base_dir to the patch file's directory to resolve target file paths
                 if let Some(parent) = path.parent() {
                     app.base_dir = parent.display().to_string();
                 }
                 loaded_patch = true;
                 app.message = Some(format!("Loaded patch file: {}", path.display()));
             } else {
-                eprintln!("Failed to read patch file: {}", patch_file);
                 app.message = Some(format!("Failed to read patch file: {}", patch_file));
             }
         }
@@ -165,7 +174,6 @@ impl MergeApp {
                 self.message = Some(format!("Loaded target file: {}", path.display()));
             }
             Err(e) => {
-                // fall back to embedded sample for files matching the default
                 if hunk.filename.ends_with("mod.rs") {
                     self.file_text = DEFAULT_FILE.to_string();
                     self.file_lines = self.file_text.lines().map(String::from).collect();
@@ -195,32 +203,108 @@ impl MergeApp {
         } else {
             self.match_result = Some(diff::find_best_match(&hunk.search, &self.file_lines));
         }
+        self.interactive_rows = self.build_interactive_rows();
+    }
+
+    fn build_interactive_rows(&self) -> Vec<InteractiveRow> {
+        let hunk = match self.current_hunk() {
+            Some(h) => h,
+            None => return Vec::new(),
+        };
+        let mr = match &self.match_result {
+            Some(m) => m,
+            None => return Vec::new(),
+        };
+
+        let patch_diff = diff::diff_patch(&hunk.search, &hunk.replace);
+        let mut rows = Vec::new();
+        let mut file_idx = mr.file_start;
+
+        for (kind, left, _right) in patch_diff {
+            match kind {
+                RowKind::Equal => {
+                    let file_line = self.file_lines.get(file_idx).cloned();
+                    let num = self.file_lines.get(file_idx).map(|_| file_idx + 1);
+                    file_idx += 1;
+                    rows.push(InteractiveRow {
+                        kind,
+                        left: left.unwrap_or_default(),
+                        right: file_line,
+                        right_num: num,
+                        applied: true,
+                    });
+                }
+                RowKind::Delete => {
+                    let file_line = self.file_lines.get(file_idx).cloned();
+                    let num = self.file_lines.get(file_idx).map(|_| file_idx + 1);
+                    file_idx += 1;
+                    rows.push(InteractiveRow {
+                        kind,
+                        left: left.unwrap_or_default(),
+                        right: file_line,
+                        right_num: num,
+                        applied: false,
+                    });
+                }
+                RowKind::Insert => {
+                    rows.push(InteractiveRow {
+                        kind,
+                        left: left.unwrap_or_default(),
+                        right: None,
+                        right_num: None,
+                        applied: false,
+                    });
+                }
+            }
+        }
+
+        // Append any leftover file lines from the matched region
+        while file_idx < mr.file_end {
+            let file_line = self.file_lines.get(file_idx).cloned();
+            let num = Some(file_idx + 1);
+            rows.push(InteractiveRow {
+                kind: RowKind::Equal,
+                left: String::new(),
+                right: file_line,
+                right_num: num,
+                applied: true,
+            });
+            file_idx += 1;
+        }
+
+        rows
     }
 
     fn apply_merge(&mut self) {
-        let hunk = match self.hunks.get(self.current_hunk) {
-            Some(h) => h,
-            None => return,
-        };
+        let mut output = Vec::new();
         let mr = match &self.match_result {
             Some(m) => m,
             None => return,
         };
 
-        let mut merged: Vec<String> = Vec::new();
+        output.extend(self.file_lines[..mr.file_start].iter().cloned());
 
-        // lines before the matched region
-        merged.extend(self.file_lines[..mr.file_start].iter().cloned());
+        let mut interactive_len = 0;
+        for row in &self.interactive_rows {
+            let in_output = match row.kind {
+                RowKind::Equal => true,
+                RowKind::Insert => row.applied,
+                RowKind::Delete => !row.applied,
+            };
+            if in_output {
+                let line = match row.kind {
+                    RowKind::Insert => row.left.clone(),
+                    _ => row.right.clone().unwrap_or_default(),
+                };
+                output.push(line);
+                interactive_len += 1;
+            }
+        }
 
-        let replace_start = merged.len();
-        merged.extend(hunk.replace.iter().cloned());
-        let replace_end = merged.len();
+        output.extend(self.file_lines[mr.file_end..].iter().cloned());
 
-        // lines after the matched region
-        merged.extend(self.file_lines[mr.file_end..].iter().cloned());
-
-        self.merged_preview = Some(merged.join("\n"));
-        self.merged_range = Some((replace_start, replace_end));
+        self.merged_preview = Some(output.join("\n"));
+        self.merged_range = Some((mr.file_start, mr.file_start + interactive_len));
         self.show_merged = true;
     }
 
@@ -240,10 +324,18 @@ impl MergeApp {
         }
     }
 
-    // ---- helpers ----
-
     fn current_hunk(&self) -> Option<&PatchHunk> {
         self.hunks.get(self.current_hunk)
+    }
+
+    fn truncate(text: &str, max_chars: usize) -> String {
+        if text.chars().count() > max_chars {
+            let mut t: String = text.chars().take(max_chars.saturating_sub(1)).collect();
+            t.push('…');
+            t
+        } else {
+            text.to_string()
+        }
     }
 }
 
@@ -276,7 +368,7 @@ impl eframe::App for MergeApp {
 }
 
 // =========================================================================
-// Toolbar
+// Toolbar & Status
 // =========================================================================
 
 impl MergeApp {
@@ -320,7 +412,6 @@ impl MergeApp {
 
                 ui.separator();
 
-                // hunk navigation
                 if !self.hunks.is_empty() {
                     ui.label(
                         RichText::new(format!(
@@ -342,7 +433,6 @@ impl MergeApp {
 
                 ui.separator();
 
-                // match score badge
                 if let Some(ref mr) = self.match_result {
                     let (color, icon) = if mr.score >= 80.0 {
                         (Color32::from_rgb(80, 200, 80), "✓")
@@ -418,15 +508,11 @@ impl MergeApp {
 }
 
 // =========================================================================
-// Diff view (side-by-side)
+// Interactive Diff View (3 Panels)
 // =========================================================================
 
 impl MergeApp {
-    fn render_diff_view(&self, ui: &mut Ui) {
-        let hunk = match self.current_hunk() {
-            Some(h) => h,
-            None => return,
-        };
+    fn render_diff_view(&mut self, ui: &mut Ui) {
         let mr = match &self.match_result {
             Some(m) => m,
             None => {
@@ -437,25 +523,28 @@ impl MergeApp {
 
         // ---- column headers ----
         ui.horizontal(|ui| {
-            let half = ui.available_width() / 2.0 - 4.0;
+            let half = (ui.available_width() / 2.0 - 15.0).max(300.0);
             Frame::none()
                 .fill(Color32::from_rgb(40, 50, 70))
                 .inner_margin(Margin::symmetric(6.0, 3.0))
                 .show(ui, |ui| {
                     ui.set_min_width(half);
                     ui.label(
-                        RichText::new("◀ SEARCH (from patch)")
+                        RichText::new("◀ TAB A (Patch)")
                             .color(Color32::from_rgb(120, 180, 255))
                             .strong(),
                     );
                 });
+
+            ui.add_space(30.0);
+
             Frame::none()
                 .fill(Color32::from_rgb(40, 60, 50))
                 .inner_margin(Margin::symmetric(6.0, 3.0))
                 .show(ui, |ui| {
                     ui.set_min_width(half);
                     ui.label(
-                        RichText::new("FILE (actual content) ▶")
+                        RichText::new("TAB B (File) ▶")
                             .color(Color32::from_rgb(120, 220, 160))
                             .strong(),
                     );
@@ -464,191 +553,199 @@ impl MergeApp {
 
         ui.separator();
 
-        // ---- compute column widths from data ----
+        let available_width = ui.available_width();
+        let half = (available_width / 2.0 - 15.0).max(300.0);
+        let left_w = half;
+        let right_w = half;
+        let gutter_w = 30.0;
+
         let char_w = 7.5_f32;
-        let num_w = 60.0_f32; // " 123 │ "
         let pad = 16.0_f32;
-
-        let max_left = mr
-            .rows
-            .iter()
-            .filter_map(|r| r.left.as_ref())
-            .map(|s| s.len())
-            .max()
-            .unwrap_or(40);
-        let max_right = mr
-            .rows
-            .iter()
-            .filter_map(|r| r.right.as_ref())
-            .map(|s| s.len())
-            .max()
-            .unwrap_or(40);
-
-        let left_w = (max_left as f32 * char_w + num_w + pad).max(350.0);
-        let right_w = (max_right as f32 * char_w + num_w + pad).max(350.0);
+        let max_chars_left = ((left_w - pad) / char_w).floor() as usize;
+        let max_chars_right = ((right_w - pad) / char_w).floor() as usize;
 
         let row_h = ui.text_style_height(&TextStyle::Monospace) + 4.0;
 
-        // ---- scrollable diff ----
         ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                // context before match
+                // Context before match
                 let ctx_start = mr.file_start.saturating_sub(3);
                 for i in ctx_start..mr.file_start {
-                    self.draw_context_row(ui, left_w, right_w, row_h, i);
+                    ui.horizontal(|ui| {
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(left_w, row_h),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                ui.label(
+                                    RichText::new("~").color(Color32::from_gray(60)).monospace(),
+                                );
+                            },
+                        );
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(gutter_w, row_h),
+                            Layout::centered_and_justified(Direction::LeftToRight),
+                            |ui| {},
+                        );
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(right_w, row_h),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{:>4} │ {}",
+                                        i + 1,
+                                        Self::truncate(&self.file_lines[i], max_chars_right)
+                                    ))
+                                    .color(Color32::from_gray(100))
+                                    .monospace(),
+                                );
+                            },
+                        );
+                    });
                 }
 
-                // diff rows
-                for row in &mr.rows {
-                    self.draw_diff_row(ui, left_w, right_w, row_h, row);
+                // Interactive rows
+                let mut i = 0;
+                while i < self.interactive_rows.len() {
+                    let row = self.interactive_rows[i].clone();
+                    let is_equal = row.kind == RowKind::Equal;
+                    let is_block_start = !is_equal
+                        && (i == 0
+                            || self.interactive_rows[i - 1].kind == RowKind::Equal
+                            || self.interactive_rows[i - 1].applied != row.applied);
+
+                    ui.horizontal(|ui| {
+                        // Left Panel
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(left_w, row_h),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                let (symbol, color) = match row.kind {
+                                    RowKind::Equal => ("=", Color32::from_gray(100)),
+                                    RowKind::Insert => (">", Color32::from_rgb(100, 200, 100)),
+                                    RowKind::Delete => ("<", Color32::from_rgb(200, 100, 100)),
+                                };
+                                let text = format!(
+                                    "{} {}",
+                                    symbol,
+                                    Self::truncate(&row.left, max_chars_left)
+                                );
+                                ui.label(RichText::new(text).color(color).monospace());
+                            },
+                        );
+
+                        // Middle Gutter
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(gutter_w, row_h),
+                            Layout::centered_and_justified(Direction::LeftToRight),
+                            |ui| {
+                                if is_block_start {
+                                    let btn_text = if row.applied { "◀" } else { "▶" };
+                                    if ui.button(btn_text).clicked() {
+                                        let new_applied = !row.applied;
+                                        let mut j = i;
+                                        while j < self.interactive_rows.len() {
+                                            let r = &self.interactive_rows[j];
+                                            if r.kind == RowKind::Equal || r.applied != row.applied
+                                            {
+                                                break;
+                                            }
+                                            self.interactive_rows[j].applied = new_applied;
+                                            j += 1;
+                                        }
+                                    }
+                                }
+                            },
+                        );
+
+                        // Right Panel
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(right_w, row_h),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                let show_right = match row.kind {
+                                    RowKind::Equal => true,
+                                    RowKind::Insert => row.applied,
+                                    RowKind::Delete => !row.applied,
+                                };
+                                if show_right {
+                                    let text = match row.kind {
+                                        RowKind::Insert => row.left.clone(),
+                                        _ => row.right.clone().unwrap_or_default(),
+                                    };
+                                    let color = match row.kind {
+                                        RowKind::Insert => Color32::from_rgb(150, 255, 150),
+                                        RowKind::Delete => Color32::from_gray(200),
+                                        _ => Color32::from_gray(200),
+                                    };
+                                    let num_str = match row.right_num {
+                                        Some(n) => format!("{:>4}", n),
+                                        None => "   ~".to_string(),
+                                    };
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{} │ {}",
+                                            num_str,
+                                            Self::truncate(&text, max_chars_right)
+                                        ))
+                                        .color(color)
+                                        .monospace(),
+                                    );
+                                } else {
+                                    ui.label(
+                                        RichText::new("   ~ │ ~")
+                                            .color(Color32::from_gray(60))
+                                            .monospace(),
+                                    );
+                                }
+                            },
+                        );
+                    });
+                    i += 1;
                 }
 
-                // context after match
+                // Context after match
                 let ctx_end = (mr.file_end + 3).min(self.file_lines.len());
                 for i in mr.file_end..ctx_end {
-                    self.draw_context_row(ui, left_w, right_w, row_h, i);
-                }
-
-                // ---- REPLACE preview ----
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new("▼ REPLACE block (will be applied)")
-                        .color(Color32::from_rgb(255, 200, 100))
-                        .strong(),
-                );
-                ui.add_space(2.0);
-
-                for (i, line) in hunk.replace.iter().enumerate() {
-                    let is_new = !hunk.search.contains(line);
-                    let bg = if is_new {
-                        Color32::from_rgb(35, 70, 35)
-                    } else {
-                        Color32::from_rgb(35, 40, 50)
-                    };
-                    let color = if is_new {
-                        Color32::from_rgb(150, 255, 150)
-                    } else {
-                        Color32::from_gray(170)
-                    };
-
-                    let desired = Vec2::new(left_w + right_w + 8.0, row_h);
-                    let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-                    ui.painter().rect_filled(rect, 0.0, bg);
-                    ui.painter().text(
-                        Pos2::new(rect.left() + 6.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        format!("{:>4} │ {}", i + 1, line),
-                        FontId::monospace(13.0),
-                        color,
-                    );
+                    ui.horizontal(|ui| {
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(left_w, row_h),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                ui.label(
+                                    RichText::new("~").color(Color32::from_gray(60)).monospace(),
+                                );
+                            },
+                        );
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(gutter_w, row_h),
+                            Layout::centered_and_justified(Direction::LeftToRight),
+                            |ui| {},
+                        );
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(right_w, row_h),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{:>4} │ {}",
+                                        i + 1,
+                                        Self::truncate(&self.file_lines[i], max_chars_right)
+                                    ))
+                                    .color(Color32::from_gray(100))
+                                    .monospace(),
+                                );
+                            },
+                        );
+                    });
                 }
             });
-    }
-
-    fn draw_context_row(
-        &self,
-        ui: &mut Ui,
-        left_w: f32,
-        right_w: f32,
-        row_h: f32,
-        file_idx: usize,
-    ) {
-        ui.horizontal(|ui| {
-            // left — empty
-            let desired = Vec2::new(left_w, row_h);
-            let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-            ui.painter().rect_filled(rect, 0.0, Color32::from_gray(24));
-            ui.painter().text(
-                Pos2::new(rect.left() + 6.0, rect.center().y),
-                Align2::LEFT_CENTER,
-                "     │ ~",
-                FontId::monospace(13.0),
-                Color32::from_gray(60),
-            );
-
-            // right — context line
-            let desired = Vec2::new(right_w, row_h);
-            let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-            ui.painter().rect_filled(rect, 0.0, Color32::from_gray(24));
-            ui.painter().text(
-                Pos2::new(rect.left() + 6.0, rect.center().y),
-                Align2::LEFT_CENTER,
-                format!("{:>4} │ {}", file_idx + 1, self.file_lines[file_idx]),
-                FontId::monospace(13.0),
-                Color32::from_gray(100),
-            );
-        });
-    }
-
-    fn draw_diff_row(
-        &self,
-        ui: &mut Ui,
-        left_w: f32,
-        right_w: f32,
-        row_h: f32,
-        row: &crate::diff::DiffRow,
-    ) {
-        ui.horizontal(|ui| {
-            // ---- left cell (SEARCH) ----
-            let left_bg = match row.kind {
-                RowKind::Delete => Color32::from_rgb(70, 35, 35),
-                _ => Color32::from_gray(30),
-            };
-            let left_text = match (&row.left, row.left_num) {
-                (Some(content), Some(num)) => format!("{:>4} │ {}", num, content),
-                (None, _) => "     │ ~".to_string(),
-                _ => String::new(),
-            };
-            let left_color = match row.kind {
-                RowKind::Delete => Color32::from_rgb(255, 150, 150),
-                _ => Color32::from_gray(200),
-            };
-
-            let desired = Vec2::new(left_w, row_h);
-            let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-            ui.painter().rect_filled(rect, 0.0, left_bg);
-            ui.painter().text(
-                Pos2::new(rect.left() + 6.0, rect.center().y),
-                Align2::LEFT_CENTER,
-                &left_text,
-                FontId::monospace(13.0),
-                left_color,
-            );
-
-            // ---- right cell (FILE) ----
-            let right_bg = match row.kind {
-                RowKind::Insert => Color32::from_rgb(35, 70, 35),
-                _ => Color32::from_gray(30),
-            };
-            let right_text = match (&row.right, row.right_num) {
-                (Some(content), Some(num)) => format!("{:>4} │ {}", num, content),
-                (None, _) => "     │ ~".to_string(),
-                _ => String::new(),
-            };
-            let right_color = match row.kind {
-                RowKind::Insert => Color32::from_rgb(150, 255, 150),
-                _ => Color32::from_gray(200),
-            };
-
-            let desired = Vec2::new(right_w, row_h);
-            let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-            ui.painter().rect_filled(rect, 0.0, right_bg);
-            ui.painter().text(
-                Pos2::new(rect.left() + 6.0, rect.center().y),
-                Align2::LEFT_CENTER,
-                &right_text,
-                FontId::monospace(13.0),
-                right_color,
-            );
-        });
     }
 }
 
 // =========================================================================
-// Merged preview
+// Merged Preview
 // =========================================================================
 
 impl MergeApp {
@@ -679,6 +776,10 @@ impl MergeApp {
         ui.separator();
 
         let row_h = ui.text_style_height(&TextStyle::Monospace) + 4.0;
+        let char_w = 7.5_f32;
+        let num_w = 60.0_f32;
+        let pad = 16.0_f32;
+        let max_chars = ((ui.available_width() - num_w - pad) / char_w).floor() as usize;
 
         ScrollArea::both()
             .auto_shrink([false, false])
@@ -703,7 +804,7 @@ impl MergeApp {
                     ui.painter().text(
                         Pos2::new(rect.left() + 6.0, rect.center().y),
                         Align2::LEFT_CENTER,
-                        format!("{:>4} │ {}", i + 1, line),
+                        format!("{:>4} │ {}", i + 1, Self::truncate(line, max_chars)),
                         FontId::monospace(13.0),
                         color,
                     );
