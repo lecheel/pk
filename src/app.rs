@@ -971,13 +971,28 @@ impl MergeApp {
                     let is_anchor = manual_anchor_check == Some(i);
                     let is_cursor = cursor_line == Some(i);
 
+                    let desired = if is_anchor {
+                        Vec2::new(ui.available_width(), row_h + 4.0)
+                    } else if in_auto_match && i == auto_start && manual_anchor_check.is_none() {
+                        Vec2::new(ui.available_width(), row_h + 6.0)
+                    } else {
+                        Vec2::new(ui.available_width(), row_h)
+                    };
+                    let (rect, row_resp) = ui.allocate_exact_size(desired, Sense::click());
+
+                    let should_scroll = scroll_to_match
+                        && (is_cursor
+                            || (cursor_line.is_none() && is_anchor)
+                            || (cursor_line.is_none()
+                                && manual_anchor_check.is_none()
+                                && i == auto_start));
+
+                    if should_scroll {
+                        ui.scroll_to_rect(rect, Some(Align::Center));
+                        did_scroll = true;
+                    }
+
                     if is_anchor {
-                        if scroll_to_match && !is_cursor {
-                            ui.scroll_to_cursor(Some(Align::Center));
-                            did_scroll = true;
-                        }
-                        let desired = Vec2::new(ui.available_width(), row_h + 4.0);
-                        let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
                         ui.painter()
                             .rect_filled(rect, 2.0, Color32::from_rgb(50, 40, 10));
                         let dash_y = rect.center().y;
@@ -1021,18 +1036,11 @@ impl MergeApp {
                         if btn_resp.clicked() {
                             apply_clicked = true;
                         }
-                    }
-                    if in_auto_match && i == auto_start && manual_anchor_check.is_none() {
-                        if scroll_to_match && !is_cursor {
-                            ui.scroll_to_cursor(Some(Align::Center));
-                            did_scroll = true;
-                        }
-                        let desired = Vec2::new(ui.available_width(), row_h + 6.0);
-                        let (banner_rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                    } else if in_auto_match && i == auto_start && manual_anchor_check.is_none() {
                         let banner_bg = Color32::from_rgb(40, 80, 55);
-                        ui.painter().rect_filled(banner_rect, 2.0, banner_bg);
+                        ui.painter().rect_filled(rect, 2.0, banner_bg);
                         ui.painter().text(
-                            Pos2::new(banner_rect.left() + 8.0, banner_rect.center().y),
+                            Pos2::new(rect.left() + 8.0, rect.center().y),
                             Align2::LEFT_CENTER,
                             format!(
                                 "▼ auto match  lines {}–{}  ({:.0}%)",
@@ -1047,8 +1055,8 @@ impl MergeApp {
                         let btn_size = Vec2::new(110.0, row_h);
                         let btn_rect = Rect::from_min_size(
                             Pos2::new(
-                                banner_rect.right() - btn_size.x - 6.0,
-                                banner_rect.center().y - btn_size.y / 2.0,
+                                rect.right() - btn_size.x - 6.0,
+                                rect.center().y - btn_size.y / 2.0,
                             ),
                             btn_size,
                         );
@@ -1066,113 +1074,102 @@ impl MergeApp {
                         if btn_resp.clicked() {
                             apply_clicked = true;
                         }
-                    }
-                    let base_bg = if is_cursor {
-                        Color32::from_rgb(35, 45, 65)
-                    } else if in_auto_match && manual_anchor_check.is_none() {
-                        Color32::from_rgb(30, 50, 35)
-                    } else if i % 2 == 0 {
-                        Color32::from_gray(24)
                     } else {
-                        Color32::from_gray(27)
-                    };
-                    let row_bg = if is_search_hit {
-                        Color32::from_rgb(55, 50, 18)
-                    } else {
-                        base_bg
-                    };
-                    let desired = Vec2::new(ui.available_width(), row_h);
-                    let (rect, row_resp) = ui.allocate_exact_size(desired, Sense::click());
-
-                    let should_scroll_here = scroll_to_match
-                        && (cursor_line == Some(i)
-                            || (cursor_line.is_none() && manual_anchor_check == Some(i))
-                            || (cursor_line.is_none()
-                                && manual_anchor_check.is_none()
-                                && i == auto_start));
-                    if should_scroll_here {
-                        ui.scroll_to_rect(rect, Some(Align::Center));
-                        did_scroll = true;
-                    }
-
-                    ui.painter().rect_filled(rect, 0.0, row_bg);
-                    if is_cursor {
-                        ui.painter().rect_stroke(
-                            rect,
-                            0.0,
-                            Stroke::new(1.0, Color32::from_rgb(100, 150, 220)),
-                        );
-                    }
-                    if is_anchor {
-                        let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
-                        ui.painter()
-                            .rect_filled(bar, 0.0, Color32::from_rgb(220, 160, 40));
-                    } else if in_auto_match && manual_anchor_check.is_none() {
-                        let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
-                        ui.painter()
-                            .rect_filled(bar, 0.0, Color32::from_rgb(60, 160, 90));
-                    } else if is_search_hit {
-                        let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
-                        ui.painter()
-                            .rect_filled(bar, 0.0, Color32::from_rgb(180, 150, 40));
-                    }
-                    if row_resp.hovered() && !search_query.is_empty() {
-                        ui.painter().rect_filled(
-                            rect,
-                            0.0,
-                            Color32::from_rgba_premultiplied(80, 80, 40, 30),
-                        );
-                        ui.painter().text(
-                            Pos2::new(rect.right() - 6.0, rect.center().y),
-                            Align2::RIGHT_CENTER,
-                            "click → set anchor",
-                            FontId::monospace(10.0),
-                            Color32::from_rgb(160, 140, 60),
-                        );
-                    }
-                    if row_resp.hovered() && search_query.is_empty() {
-                        ui.painter().rect_filled(
-                            rect,
-                            0.0,
-                            Color32::from_rgba_premultiplied(80, 80, 80, 30),
-                        );
-                    }
-                    if row_resp.clicked() {
-                        if search_query.is_empty() {
-                            set_cursor = Some(i);
+                        let base_bg = if is_cursor {
+                            Color32::from_rgb(35, 45, 65)
+                        } else if in_auto_match && manual_anchor_check.is_none() {
+                            Color32::from_rgb(30, 50, 35)
+                        } else if i % 2 == 0 {
+                            Color32::from_gray(24)
                         } else {
-                            set_anchor = Some(i);
+                            Color32::from_gray(27)
+                        };
+                        let row_bg = if is_search_hit {
+                            Color32::from_rgb(55, 50, 18)
+                        } else {
+                            base_bg
+                        };
+
+                        ui.painter().rect_filled(rect, 0.0, row_bg);
+                        if is_cursor {
+                            ui.painter().rect_stroke(
+                                rect,
+                                0.0,
+                                Stroke::new(1.0, Color32::from_rgb(100, 150, 220)),
+                            );
                         }
+                        if is_anchor {
+                            let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
+                            ui.painter()
+                                .rect_filled(bar, 0.0, Color32::from_rgb(220, 160, 40));
+                        } else if in_auto_match && manual_anchor_check.is_none() {
+                            let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
+                            ui.painter()
+                                .rect_filled(bar, 0.0, Color32::from_rgb(60, 160, 90));
+                        } else if is_search_hit {
+                            let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
+                            ui.painter()
+                                .rect_filled(bar, 0.0, Color32::from_rgb(180, 150, 40));
+                        }
+                        if row_resp.hovered() && !search_query.is_empty() {
+                            ui.painter().rect_filled(
+                                rect,
+                                0.0,
+                                Color32::from_rgba_premultiplied(80, 80, 40, 30),
+                            );
+                            ui.painter().text(
+                                Pos2::new(rect.right() - 6.0, rect.center().y),
+                                Align2::RIGHT_CENTER,
+                                "click → set anchor",
+                                FontId::monospace(10.0),
+                                Color32::from_rgb(160, 140, 60),
+                            );
+                        }
+                        if row_resp.hovered() && search_query.is_empty() {
+                            ui.painter().rect_filled(
+                                rect,
+                                0.0,
+                                Color32::from_rgba_premultiplied(80, 80, 80, 30),
+                            );
+                        }
+                        if row_resp.clicked() {
+                            if search_query.is_empty() {
+                                set_cursor = Some(i);
+                            } else {
+                                set_anchor = Some(i);
+                            }
+                        }
+                        let num_color = if in_auto_match && manual_anchor_check.is_none() {
+                            Color32::from_rgb(80, 160, 100)
+                        } else if is_search_hit {
+                            Color32::from_rgb(180, 160, 60)
+                        } else {
+                            Color32::from_gray(70)
+                        };
+                        ui.painter().text(
+                            Pos2::new(rect.left() + 6.0, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            format!("{:>4} │", i + 1),
+                            FontId::monospace(12.0),
+                            num_color,
+                        );
+                        let text_color = if in_auto_match && manual_anchor_check.is_none() {
+                            Color32::from_rgb(200, 240, 210)
+                        } else if is_search_hit {
+                            Color32::from_rgb(240, 230, 150)
+                        } else {
+                            Color32::from_gray(190)
+                        };
+                        let display = Self::truncate_owned(line, max_chars);
+                        ui.painter().text(
+                            Pos2::new(rect.left() + 56.0, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            &display,
+                            FontId::monospace(12.0),
+                            text_color,
+                        );
                     }
-                    let num_color = if in_auto_match && manual_anchor_check.is_none() {
-                        Color32::from_rgb(80, 160, 100)
-                    } else if is_search_hit {
-                        Color32::from_rgb(180, 160, 60)
-                    } else {
-                        Color32::from_gray(70)
-                    };
-                    ui.painter().text(
-                        Pos2::new(rect.left() + 6.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        format!("{:>4} │", i + 1),
-                        FontId::monospace(12.0),
-                        num_color,
-                    );
-                    let text_color = if in_auto_match && manual_anchor_check.is_none() {
-                        Color32::from_rgb(200, 240, 210)
-                    } else if is_search_hit {
-                        Color32::from_rgb(240, 230, 150)
-                    } else {
-                        Color32::from_gray(190)
-                    };
-                    let display = Self::truncate_owned(line, max_chars);
-                    ui.painter().text(
-                        Pos2::new(rect.left() + 56.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        &display,
-                        FontId::monospace(12.0),
-                        text_color,
-                    );
+
                     if in_auto_match
                         && i == auto_end.saturating_sub(1)
                         && manual_anchor_check.is_none()
@@ -1185,9 +1182,16 @@ impl MergeApp {
                 }
                 ui.add_space(row_h * 3.0);
             });
+
+        // Guarantee scroll_to_match is cleared so manual scrolling is never blocked
+        if scroll_to_match && !did_scroll {
+            did_scroll = true;
+        }
+
         if did_scroll {
             self.scroll_to_match = false;
         }
+
         if let Some(anchor_line) = set_anchor {
             self.manual_anchor = Some(anchor_line);
             self.message = Some(format!(
