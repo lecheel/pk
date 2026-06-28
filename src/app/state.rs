@@ -122,6 +122,20 @@ impl MergeApp {
         self.last_action = None;
         self.file_path.clear();
         self.file_states.clear();
+
+        // DEBUG: Show how many hunks were parsed
+        if self.hunks.is_empty() && !self.patch_text.is_empty() {
+            self.set_message(StatusMessage::warning(format!(
+                "Parsed 0 hunks from {} bytes of patch text",
+                self.patch_text.len()
+            )));
+        } else if !self.hunks.is_empty() {
+            self.set_message(StatusMessage::info(format!(
+                "Parsed {} hunk(s)",
+                self.hunks.len()
+            )));
+        }
+
         self.load_hunk();
     }
 
