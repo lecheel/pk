@@ -1,6 +1,7 @@
 use super::constants::{DEFAULT_FILE, DEFAULT_PATCH};
 use super::matching::MergeMatching;
 use super::types::{Action, FileState, StatusMessage};
+use crate::app::pal;
 use crate::diff::MatchResult;
 use crate::patch::PatchHunk;
 use eframe::egui::*;
@@ -17,10 +18,10 @@ pub struct MergeApp {
     pub match_result: Option<MatchResult>,
     pub search_rows: Vec<super::types::SearchRow>,
     pub file_search_query: String,
-    pub file_search_matches: HashSet<usize>,
+    pub search_matches: Vec<usize>,
+    pub search_match_idx: usize,
+    pub is_searching: bool,
     pub manual_anchor: Option<usize>,
-    pub anchor_matches: Vec<usize>,
-    pub anchor_match_idx: usize,
     pub candidate_index: usize,
     pub scroll_to_match: bool,
     pub message: Option<StatusMessage>,
@@ -52,10 +53,10 @@ impl MergeApp {
             match_result: None,
             search_rows: Vec::new(),
             file_search_query: String::new(),
-            file_search_matches: HashSet::new(),
+            search_matches: Vec::new(),
+            search_match_idx: 0,
+            is_searching: false,
             manual_anchor: None,
-            anchor_matches: Vec::new(),
-            anchor_match_idx: 0,
             candidate_index: 0,
             scroll_to_match: true,
             message: None,
@@ -196,10 +197,10 @@ impl MergeApp {
         }
 
         self.manual_anchor = None;
-        self.anchor_matches.clear();
-        self.anchor_match_idx = 0;
         self.file_search_query.clear();
-        self.file_search_matches.clear();
+        self.search_matches.clear();
+        self.search_match_idx = 0;
+        self.is_searching = false;
         self.candidate_index = 0;
         self.cursor_line = None;
         self.scroll_to_match = true;
@@ -235,7 +236,9 @@ impl MergeApp {
         self.vim_buffer.clear();
         self.manual_anchor = None;
         self.file_search_query.clear();
-        self.file_search_matches.clear();
+        self.search_matches.clear();
+        self.search_match_idx = 0;
+        self.is_searching = false;
         self.candidate_index = 0;
         self.cursor_line = None;
         self.scroll_to_match = true;
@@ -256,30 +259,73 @@ impl eframe::App for MergeApp {
             }
         }
 
-        if !ctx.wants_keyboard_input() {
+        if !ctx.wants_keyboard_input() || self.is_searching {
             ctx.input(|i| {
                 if i.key_pressed(Key::Escape) {
                     if self.show_help {
                         self.show_help = false;
+                    } else if self.is_searching {
+                        self.is_searching = false;
+                        self.file_search_query.clear();
+                        self.search_matches.clear();
+                        self.scroll_to_match = true;
                     } else if self.manual_anchor.is_some() {
                         self.manual_anchor = None;
-                        self.anchor_matches.clear();
                         self.scroll_to_match = true;
                     }
                 }
-                if i.events
-                    .iter()
-                    .any(|e| matches!(e, Event::Text(t) if t == "?"))
+                if !self.is_searching
+                    && i.events
+                        .iter()
+                        .any(|e| matches!(e, Event::Text(t) if t == "?"))
                 {
                     self.show_help = !self.show_help;
                 }
-                if i.events
-                    .iter()
-                    .any(|e| matches!(e, Event::Text(t) if t == "m" || t == "M"))
+                if !self.is_searching
+                    && i.events
+                        .iter()
+                        .any(|e| matches!(e, Event::Text(t) if t == "m" || t == "M"))
                 {
                     self.show_minimap = !self.show_minimap;
                 }
             });
+        }
+
+        if self.is_searching {
+            TopBottomPanel::bottom("vim_search_prompt")
+                .frame(
+                    Frame::none()
+                        .fill(pal::BG_TOOLBAR)
+                        .inner_margin(Margin::symmetric(8.0, 4.0)),
+                )
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("/")
+                                .color(pal::ACCENT_WARN)
+                                .strong()
+                                .monospace(),
+                        );
+                        ui.label(
+                            RichText::new(&self.file_search_query)
+                                .color(pal::TEXT_NORMAL)
+                                .monospace(),
+                        );
+                        let blink = (ctx.input(|i| i.time) * 2.0).floor() as i64 % 2 == 0;
+                        if blink {
+                            ui.label(RichText::new("█").color(pal::TEXT_NORMAL).monospace());
+                        } else {
+                            ui.label(RichText::new(" ").monospace());
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(
+                                RichText::new("ENTER search · ESC cancel")
+                                    .color(pal::TEXT_DIM)
+                                    .small(),
+                            );
+                        });
+                    });
+                });
         }
 
         super::toolbar::render_toolbar(self, ctx);

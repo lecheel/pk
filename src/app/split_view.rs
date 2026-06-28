@@ -281,8 +281,9 @@ fn render_file_panel(
     let mut clear_anchor = false;
     let mut apply_clicked = false;
     let mut find_text = false;
-    let mut prev_anchor_match = false;
-    let mut next_anchor_match = false;
+    let mut next_search_match = false;
+    let mut prev_search_match = false;
+    let mut clear_search = false;
 
     let current_hunk_idx = app.current_hunk;
     let total_hunks = app.hunks.len();
@@ -367,36 +368,19 @@ fn render_file_panel(
 
                 ui.add(Separator::default().vertical());
 
-                ui.label(RichText::new("🔍").monospace());
-                let resp = ui.add(
-                    TextEdit::singleline(&mut app.file_search_query)
-                        .hint_text("find…")
-                        .desired_width(72.0)
-                        .font(TextStyle::Monospace),
-                );
-                if resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                    find_text = true;
-                }
-                if ui.small_button("Go").clicked() {
-                    find_text = true;
-                }
-
-                if !app.anchor_matches.is_empty() {
+                if !app.file_search_query.is_empty() && !app.is_searching {
                     ui.label(
-                        RichText::new(format!(
-                            "{}/{}",
-                            app.anchor_match_idx + 1,
-                            app.anchor_matches.len()
-                        ))
-                        .color(pal::TEXT_ANCHOR)
-                        .small()
-                        .monospace(),
+                        RichText::new(format!("🔍 {}", app.file_search_query))
+                            .color(pal::TEXT_SEARCH)
+                            .monospace()
+                            .small(),
                     );
-                    if ui.small_button("◀").clicked() {
-                        prev_anchor_match = true;
-                    }
-                    if ui.small_button("▶").clicked() {
-                        next_anchor_match = true;
+                    if ui
+                        .small_button("✕")
+                        .on_hover_text("Clear search (Esc)")
+                        .clicked()
+                    {
+                        clear_search = true;
                     }
                 }
 
@@ -442,125 +426,174 @@ fn render_file_panel(
     let mut go_next_hunk = false;
     let mut go_prev_hunk = false;
 
-    if len > 0 && !ui.ctx().wants_keyboard_input() {
-        let mut cursor_changed = false;
-        let mut new_text = String::new();
-
-        ui.input(|i| {
-            let cur = app.cursor_line.unwrap_or(0);
-
-            if i.key_pressed(Key::ArrowDown) {
-                app.cursor_line = Some((cur + 1).min(len - 1));
-                cursor_changed = true;
-            }
-            if i.key_pressed(Key::ArrowUp) {
-                app.cursor_line = Some(cur.saturating_sub(1));
-                cursor_changed = true;
-            }
-            if i.key_pressed(Key::PageDown) {
-                app.cursor_line = Some((cur + 20).min(len - 1));
-                cursor_changed = true;
-            }
-            if i.key_pressed(Key::PageUp) {
-                app.cursor_line = Some(cur.saturating_sub(20));
-                cursor_changed = true;
-            }
-            if i.key_pressed(Key::Home) {
-                app.cursor_line = Some(0);
-                cursor_changed = true;
-            }
-            if i.key_pressed(Key::End) {
-                app.cursor_line = Some(len - 1);
-                cursor_changed = true;
-            }
-
-            if i.key_pressed(Key::L) {
-                if i.modifiers.shift {
-                    go_prev_hunk = true;
-                } else {
-                    go_next_hunk = true;
+    if len > 0 {
+        if app.is_searching {
+            ui.input(|i| {
+                if i.key_pressed(Key::Enter) {
+                    app.is_searching = false;
+                    find_text = true;
                 }
-            }
+                for event in i.events.clone() {
+                    match event {
+                        Event::Text(txt) => {
+                            if txt != "\n" && txt != "\r" {
+                                app.file_search_query.push_str(&txt);
+                            }
+                        }
+                        Event::Key {
+                            key: Key::Backspace,
+                            pressed: true,
+                            ..
+                        } => {
+                            app.file_search_query.pop();
+                        }
+                        _ => {}
+                    }
+                }
+            });
+        } else if !ui.ctx().wants_keyboard_input() {
+            let mut cursor_changed = false;
+            let mut new_text = String::new();
 
-            if i.key_pressed(Key::A) {
-                let in_hunk = if let Some(anchor) = manual_anchor {
-                    cur == anchor
-                } else {
-                    cur >= mr.file_start && cur < mr.file_end
-                };
-                if is_applied {
-                } else if in_hunk {
-                    apply_clicked = true;
-                } else {
-                    app.cursor_line = Some(mr.file_start);
+            ui.input(|i| {
+                let cur = app.cursor_line.unwrap_or(0);
+
+                if i.key_pressed(Key::ArrowDown) {
+                    app.cursor_line = Some((cur + 1).min(len - 1));
                     cursor_changed = true;
                 }
-            }
+                if i.key_pressed(Key::ArrowUp) {
+                    app.cursor_line = Some(cur.saturating_sub(1));
+                    cursor_changed = true;
+                }
+                if i.key_pressed(Key::PageDown) {
+                    app.cursor_line = Some((cur + 20).min(len - 1));
+                    cursor_changed = true;
+                }
+                if i.key_pressed(Key::PageUp) {
+                    app.cursor_line = Some(cur.saturating_sub(20));
+                    cursor_changed = true;
+                }
+                if i.key_pressed(Key::Home) {
+                    app.cursor_line = Some(0);
+                    cursor_changed = true;
+                }
+                if i.key_pressed(Key::End) {
+                    app.cursor_line = Some(len - 1);
+                    cursor_changed = true;
+                }
 
-            for event in i.events.clone() {
-                if let Event::Text(txt) = event {
-                    if txt != "?" && txt != "m" && txt != "M" {
-                        new_text.push_str(&txt);
+                if i.key_pressed(Key::L) {
+                    if i.modifiers.shift {
+                        go_prev_hunk = true;
+                    } else {
+                        go_next_hunk = true;
                     }
                 }
-            }
-        });
 
-        if !new_text.is_empty() {
-            app.vim_buffer.push_str(&new_text);
-            let buf = app.vim_buffer.trim().to_string();
-            let lower_buf = buf.to_lowercase();
-            let mut clear_buffer = false;
+                if i.key_pressed(Key::Slash) {
+                    app.is_searching = true;
+                    app.file_search_query.clear();
+                    app.search_matches.clear();
+                    clear_search = true;
+                }
 
-            if lower_buf == "u" {
-                app.undo();
-                clear_buffer = true;
-            } else if lower_buf == "." {
-                if let Some(action) = app.last_action.clone() {
-                    match action {
-                        Action::DeleteLines(count) => app.delete_lines(count),
+                if i.key_pressed(Key::Space) {
+                    if let Some(cur) = app.cursor_line {
+                        app.manual_anchor = Some(cur);
+                        app.set_message(super::types::StatusMessage::info(format!(
+                            "⚓ Anchor at line {} — press A to apply",
+                            cur + 1
+                        )));
                     }
                 }
-                clear_buffer = true;
-            } else if buf == "gg" {
-                app.cursor_line = Some(0);
-                app.scroll_to_match = true;
-                clear_buffer = true;
-            } else if buf == "G" {
-                app.cursor_line = Some(app.file_lines.len().saturating_sub(1));
-                app.scroll_to_match = true;
-                clear_buffer = true;
-            } else if lower_buf.ends_with("dd") {
-                let num_part = &lower_buf[..lower_buf.len() - 2];
-                let count = if num_part.is_empty() {
-                    1
-                } else {
-                    num_part.parse::<usize>().unwrap_or(0)
-                };
-                if count > 0 {
-                    app.delete_lines(count);
-                    app.last_action = Some(Action::DeleteLines(count));
+
+                if i.key_pressed(Key::A) {
+                    let in_hunk = if let Some(anchor) = manual_anchor {
+                        cur == anchor
+                    } else {
+                        cur >= mr.file_start && cur < mr.file_end
+                    };
+                    if is_applied {
+                    } else if in_hunk {
+                        apply_clicked = true;
+                    } else {
+                        app.cursor_line = Some(mr.file_start);
+                        cursor_changed = true;
+                    }
                 }
-                clear_buffer = true;
-            } else if buf.len() > 5 {
-                clear_buffer = true;
-            } else {
-                let allowed = buf
-                    .chars()
-                    .all(|c| c.is_ascii_digit() || c == 'd' || c == 'D' || c == 'g' || c == 'G');
-                let d_count = buf.matches('d').count() + buf.matches('D').count();
-                if !allowed || d_count > 2 {
+
+                for event in i.events.clone() {
+                    if let Event::Text(txt) = event {
+                        if txt != "?" && txt != "m" && txt != "M" {
+                            new_text.push_str(&txt);
+                        }
+                    }
+                }
+            });
+
+            if !new_text.is_empty() {
+                app.vim_buffer.push_str(&new_text);
+                let buf = app.vim_buffer.trim().to_string();
+                let lower_buf = buf.to_lowercase();
+                let mut clear_buffer = false;
+
+                if buf == "n" {
+                    next_search_match = true;
                     clear_buffer = true;
+                } else if buf == "N" {
+                    prev_search_match = true;
+                    clear_buffer = true;
+                } else if lower_buf == "u" {
+                    app.undo();
+                    clear_buffer = true;
+                } else if lower_buf == "." {
+                    if let Some(action) = app.last_action.clone() {
+                        match action {
+                            Action::DeleteLines(count) => app.delete_lines(count),
+                        }
+                    }
+                    clear_buffer = true;
+                } else if buf == "gg" {
+                    app.cursor_line = Some(0);
+                    app.scroll_to_match = true;
+                    clear_buffer = true;
+                } else if buf == "G" {
+                    app.cursor_line = Some(app.file_lines.len().saturating_sub(1));
+                    app.scroll_to_match = true;
+                    clear_buffer = true;
+                } else if lower_buf.ends_with("dd") {
+                    let num_part = &lower_buf[..lower_buf.len() - 2];
+                    let count = if num_part.is_empty() {
+                        1
+                    } else {
+                        num_part.parse::<usize>().unwrap_or(0)
+                    };
+                    if count > 0 {
+                        app.delete_lines(count);
+                        app.last_action = Some(Action::DeleteLines(count));
+                    }
+                    clear_buffer = true;
+                } else if buf.len() > 5 {
+                    clear_buffer = true;
+                } else {
+                    let allowed = buf.chars().all(|c| {
+                        c.is_ascii_digit() || c == 'd' || c == 'D' || c == 'g' || c == 'G'
+                    });
+                    let d_count = buf.matches('d').count() + buf.matches('D').count();
+                    if !allowed || d_count > 2 {
+                        clear_buffer = true;
+                    }
+                }
+
+                if clear_buffer {
+                    app.vim_buffer.clear();
                 }
             }
 
-            if clear_buffer {
-                app.vim_buffer.clear();
+            if cursor_changed {
+                app.scroll_to_match = true;
             }
-        }
-
-        if cursor_changed {
-            app.scroll_to_match = true;
         }
     }
 
@@ -577,7 +610,6 @@ fn render_file_panel(
 
     if clear_anchor {
         app.manual_anchor = None;
-        app.anchor_matches.clear();
         app.scroll_to_match = true;
     }
 
@@ -594,22 +626,30 @@ fn render_file_panel(
         return;
     }
 
+    if clear_search {
+        app.file_search_query.clear();
+        app.search_matches.clear();
+        app.scroll_to_match = true;
+    }
+
     if find_text {
         let q = app.file_search_query.trim().to_lowercase();
-        if !q.is_empty() {
-            app.anchor_matches = app
+        if q.is_empty() {
+            app.search_matches.clear();
+        } else {
+            app.search_matches = app
                 .file_lines
                 .iter()
                 .enumerate()
                 .filter(|(_, l)| l.to_lowercase().contains(&q))
                 .map(|(i, _)| i)
                 .collect();
-            if !app.anchor_matches.is_empty() {
-                app.anchor_match_idx = 0;
-                app.manual_anchor = Some(app.anchor_matches[0]);
+            if !app.search_matches.is_empty() {
+                app.search_match_idx = 0;
+                app.cursor_line = Some(app.search_matches[0]);
                 app.scroll_to_match = true;
             } else {
-                app.manual_anchor = None;
+                app.search_matches.clear();
                 app.set_message(super::types::StatusMessage::warning(format!(
                     "No matches for '{}'",
                     q
@@ -618,18 +658,18 @@ fn render_file_panel(
         }
     }
 
-    if prev_anchor_match && !app.anchor_matches.is_empty() {
-        if app.anchor_match_idx > 0 {
-            app.anchor_match_idx -= 1;
-        } else {
-            app.anchor_match_idx = app.anchor_matches.len() - 1;
-        }
-        app.manual_anchor = Some(app.anchor_matches[app.anchor_match_idx]);
+    if next_search_match && !app.search_matches.is_empty() {
+        app.search_match_idx = (app.search_match_idx + 1) % app.search_matches.len();
+        app.cursor_line = Some(app.search_matches[app.search_match_idx]);
         app.scroll_to_match = true;
     }
-    if next_anchor_match && !app.anchor_matches.is_empty() {
-        app.anchor_match_idx = (app.anchor_match_idx + 1) % app.anchor_matches.len();
-        app.manual_anchor = Some(app.anchor_matches[app.anchor_match_idx]);
+    if prev_search_match && !app.search_matches.is_empty() {
+        if app.search_match_idx > 0 {
+            app.search_match_idx -= 1;
+        } else {
+            app.search_match_idx = app.search_matches.len() - 1;
+        }
+        app.cursor_line = Some(app.search_matches[app.search_match_idx]);
         app.scroll_to_match = true;
     }
 
@@ -661,10 +701,10 @@ fn render_file_panel(
     let auto_end = mr.file_end;
     let auto_score = mr.score;
     let search_query = app.file_search_query.clone();
+    let current_search_line = app.search_matches.get(app.search_match_idx).copied();
     let scroll_to_match = app.scroll_to_match;
     let cursor_line = app.cursor_line;
     let mut did_scroll = false;
-    let mut set_anchor: Option<usize> = None;
     let mut set_cursor: Option<usize> = None;
 
     let delete_file_indices: HashSet<usize> = app
@@ -693,6 +733,7 @@ fn render_file_panel(
                 let is_equal = in_auto_match && equal_file_indices.contains(&i);
                 let is_search_hit = !search_query.is_empty()
                     && line.to_lowercase().contains(&search_query.to_lowercase());
+                let is_current_search = is_search_hit && current_search_line == Some(i);
 
                 let row_is_tall = is_anchor
                     || (in_auto_match && i == auto_start && manual_anchor_check.is_none());
@@ -805,7 +846,9 @@ fn render_file_panel(
                     } else {
                         pal::BG_ROW_ODD
                     };
-                    let row_bg = if is_search_hit {
+                    let row_bg = if is_current_search {
+                        Color32::from_rgb(70, 60, 15)
+                    } else if is_search_hit {
                         pal::BG_SEARCH_HIT
                     } else {
                         base_bg
@@ -823,6 +866,8 @@ fn render_file_panel(
                         pal::BAR_ANCHOR
                     } else if in_auto_match && manual_anchor_check.is_none() {
                         pal::BAR_MATCH
+                    } else if is_current_search {
+                        pal::ACCENT_WARN
                     } else if is_search_hit {
                         pal::BAR_SEARCH
                     } else {
@@ -844,9 +889,6 @@ fn render_file_panel(
 
                     if row_resp.clicked() {
                         set_cursor = Some(i);
-                        if !search_query.is_empty() {
-                            set_anchor = Some(i);
-                        }
                     }
 
                     let num_color = if in_merged {
@@ -918,15 +960,11 @@ fn render_file_panel(
         app.scroll_to_match = false;
     }
 
-    if let Some(anchor_line) = set_anchor {
-        app.manual_anchor = Some(anchor_line);
-        app.set_message(super::types::StatusMessage::info(format!(
-            "⚓ Anchor at line {} — click ⚡ Apply here or press A",
-            anchor_line + 1
-        )));
-    }
     if let Some(cur_line) = set_cursor {
         app.cursor_line = Some(cur_line);
+        if let Some(idx) = app.search_matches.iter().position(|&x| x == cur_line) {
+            app.search_match_idx = idx;
+        }
     }
 
     if apply_clicked {
