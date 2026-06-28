@@ -89,6 +89,8 @@ pub struct MergeApp {
     message: Option<String>,
     cursor_line: Option<usize>,
     applied_hunks: HashSet<usize>,
+    history: Vec<(Vec<String>, usize)>,
+    vim_buffer: String,
 }
 
 impl MergeApp {
@@ -116,6 +118,8 @@ impl MergeApp {
             message: None,
             cursor_line: None,
             applied_hunks: HashSet::new(),
+            history: Vec::new(),
+            vim_buffer: String::new(),
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -143,6 +147,8 @@ impl MergeApp {
         self.hunks = patch::parse_patches(&self.patch_text);
         self.current_hunk = 0;
         self.applied_hunks.clear();
+        self.history.clear();
+        self.vim_buffer.clear();
         self.file_path.clear(); // Force reload
         self.load_hunk();
     }
@@ -188,6 +194,7 @@ impl MergeApp {
         self.candidate_index = 0;
         self.scroll_to_match = true;
         self.cursor_line = None;
+        self.vim_buffer.clear();
         self.recompute_match();
     }
 
@@ -279,6 +286,9 @@ impl MergeApp {
             }
         };
 
+        self.history
+            .push((self.file_lines.clone(), self.current_hunk));
+
         let mut output: Vec<String> = Vec::new();
         output.extend_from_slice(&self.file_lines[..file_start]);
         output.extend(hunk.replace.iter().cloned());
@@ -297,6 +307,41 @@ impl MergeApp {
         ));
 
         self.recompute_match();
+    }
+
+    fn undo(&mut self) {
+        if let Some((prev_lines, hunk_idx)) = self.history.pop() {
+            self.file_lines = prev_lines;
+            self.applied_hunks.remove(&hunk_idx);
+            self.message = Some(format!("Undone action for hunk {}", hunk_idx + 1));
+            self.scroll_to_match = true;
+            self.recompute_match();
+        } else {
+            self.message = Some("Nothing to undo".to_string());
+        }
+    }
+
+    fn delete_lines(&mut self, count: usize) {
+        if let Some(start) = self.cursor_line {
+            if start < self.file_lines.len() {
+                self.history
+                    .push((self.file_lines.clone(), self.current_hunk));
+                let end = (start + count).min(self.file_lines.len());
+                self.file_lines.drain(start..end);
+
+                let new_len = self.file_lines.len();
+                if new_len == 0 {
+                    self.cursor_line = None;
+                } else if start >= new_len {
+                    self.cursor_line = Some(new_len - 1);
+                } else {
+                    self.cursor_line = Some(start);
+                }
+                self.scroll_to_match = true;
+                self.message = Some(format!("Deleted {} lines", end - start));
+                self.recompute_match();
+            }
+        }
     }
 
     fn save_merged(&mut self) {
@@ -377,6 +422,8 @@ impl MergeApp {
                                 self.base_dir = parent.display().to_string();
                             }
                             self.applied_hunks.clear();
+                            self.history.clear();
+                            self.vim_buffer.clear();
                             self.manual_anchor = None;
                             self.file_search_query.clear();
                             self.file_search_matches.clear();
@@ -436,6 +483,13 @@ impl MergeApp {
                             hunk.replace.len()
                         ));
                     }
+                }
+                if !self.vim_buffer.is_empty() {
+                    ui.separator();
+                    ui.label(
+                        RichText::new(format!("Key Buffer: {}", self.vim_buffer))
+                            .color(Color32::from_rgb(200, 200, 100)),
+                    );
                 }
             });
             ui.add_space(2.0);
@@ -797,8 +851,9 @@ impl MergeApp {
         let mut go_next_hunk = false;
         let mut go_prev_hunk = false;
 
-        if len > 0 {
+        if len > 0 && !ui.ctx().wants_keyboard_input() {
             let mut cursor_changed = false;
+            let mut new_text = String::new();
             ui.input(|i| {
                 let cur = self.cursor_line.unwrap_or(0);
                 if i.key_pressed(Key::ArrowDown) {
@@ -833,9 +888,65 @@ impl MergeApp {
                     }
                 }
                 if i.key_pressed(Key::A) {
-                    apply_clicked = true;
+                    let in_hunk = if let Some(anchor) = manual_anchor {
+                        cur == anchor
+                    } else {
+                        cur >= mr.file_start && cur < mr.file_end
+                    };
+
+                    if is_applied {
+                        self.message =
+                            Some(format!("Hunk {} already applied", self.current_hunk + 1));
+                    } else if in_hunk {
+                        apply_clicked = true;
+                    } else {
+                        self.message = Some("Move cursor to the hunk block to apply".to_string());
+                    }
+                }
+                for event in i.events.clone() {
+                    if let Event::Text(txt) = event {
+                        new_text.push_str(&txt);
+                    }
                 }
             });
+
+            if !new_text.is_empty() {
+                self.vim_buffer.push_str(&new_text);
+                let buf = self.vim_buffer.trim().to_lowercase();
+                let mut clear_buffer = false;
+
+                if buf == "u" {
+                    self.undo();
+                    clear_buffer = true;
+                } else if buf.ends_with("dd") {
+                    let num_part = &buf[..buf.len() - 2];
+                    let count = if num_part.is_empty() {
+                        1
+                    } else {
+                        num_part.parse::<usize>().unwrap_or(0)
+                    };
+                    if count > 0 {
+                        self.delete_lines(count);
+                    }
+                    clear_buffer = true;
+                } else if buf.chars().count() > 4 {
+                    clear_buffer = true;
+                } else {
+                    let valid = buf.chars().all(|c| c.is_ascii_digit() || c == 'd')
+                        && buf.matches('d').count() <= 2
+                        && (buf.is_empty()
+                            || buf.chars().all(|c| c.is_ascii_digit())
+                            || buf.ends_with('d'));
+                    if !valid {
+                        clear_buffer = true;
+                    }
+                }
+
+                if clear_buffer {
+                    self.vim_buffer.clear();
+                }
+            }
+
             if cursor_changed {
                 self.scroll_to_match = true;
             }
@@ -964,7 +1075,6 @@ impl MergeApp {
                         Vec2::new(ui.available_width(), row_h)
                     };
 
-                    // Use hover sense if we have a button on this row, so the button can receive clicks
                     let sense = if is_anchor
                         || (in_auto_match && i == auto_start && manual_anchor_check.is_none())
                     {
