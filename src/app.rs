@@ -942,21 +942,30 @@ impl MergeApp {
 
             if !new_text.is_empty() {
                 self.vim_buffer.push_str(&new_text);
-                let buf = self.vim_buffer.trim().to_lowercase();
+                let buf = self.vim_buffer.trim();
+                let lower_buf = buf.to_lowercase();
                 let mut clear_buffer = false;
 
-                if buf == "u" {
+                if lower_buf == "u" {
                     self.undo();
                     clear_buffer = true;
-                } else if buf == "." {
+                } else if lower_buf == "." {
                     if let Some(action) = self.last_action.clone() {
                         match action {
                             Action::DeleteLines(count) => self.delete_lines(count),
                         }
                     }
                     clear_buffer = true;
-                } else if buf.ends_with("dd") {
-                    let num_part = &buf[..buf.len() - 2];
+                } else if buf == "gg" {
+                    self.cursor_line = Some(0);
+                    self.scroll_to_match = true;
+                    clear_buffer = true;
+                } else if buf == "G" {
+                    self.cursor_line = Some(self.file_lines.len().saturating_sub(1));
+                    self.scroll_to_match = true;
+                    clear_buffer = true;
+                } else if lower_buf.ends_with("dd") {
+                    let num_part = &lower_buf[..lower_buf.len() - 2];
                     let count = if num_part.is_empty() {
                         1
                     } else {
@@ -967,15 +976,15 @@ impl MergeApp {
                         self.last_action = Some(Action::DeleteLines(count));
                     }
                     clear_buffer = true;
-                } else if buf.chars().count() > 4 {
+                } else if buf.len() > 4 {
                     clear_buffer = true;
                 } else {
-                    let valid = buf.chars().all(|c| c.is_ascii_digit() || c == 'd')
-                        && buf.matches('d').count() <= 2
-                        && (buf.is_empty()
-                            || buf.chars().all(|c| c.is_ascii_digit())
-                            || buf.ends_with('d'));
-                    if !valid {
+                    // Allow digits, d/D, and g/G. Single 'g' stays in buffer to form 'gg'
+                    let allowed_chars = buf.chars().all(|c| {
+                        c.is_ascii_digit() || c == 'd' || c == 'D' || c == 'g' || c == 'G'
+                    });
+                    let d_count = buf.matches('d').count() + buf.matches('D').count();
+                    if !allowed_chars || d_count > 2 {
                         clear_buffer = true;
                     }
                 }
