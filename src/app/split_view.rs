@@ -1,7 +1,7 @@
 use super::matching::MergeMatching;
 use super::palette::pal;
-use super::state::MergeApp;
-use super::types::{Action, SearchRow};
+use super::state::{MarkPending, MergeApp};
+use super::types::{Action, FileAnchor, SearchRow, StatusMessage};
 use crate::diff::RowKind;
 use eframe::egui::*;
 use std::collections::HashSet;
@@ -26,6 +26,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
             return;
         }
     };
+
     let available = ui.available_size();
     let divider = 0.38_f32;
     let left_w = (available.x * divider).floor() - 1.0;
@@ -33,6 +34,8 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mono_h = ui.text_style_height(&TextStyle::Monospace);
     let row_h = mono_h + 4.0;
     let char_w = mono_h * 0.60;
+
+    // ── column headers ────────────────────────────────────────────────────────
     ui.horizontal(|ui| {
         Frame::none()
             .fill(Color32::from_rgb(28, 38, 58))
@@ -54,12 +57,18 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
             .inner_margin(Margin::symmetric(8.0, 3.0))
             .show(ui, |ui| {
                 ui.set_min_width(right_w);
+                // show active marks in header
+                let mark_label = match app.file_anchor {
+                    None => String::new(),
+                    Some(fa) => format!("  ·  {}", fa.label()),
+                };
                 ui.label(
                     RichText::new(format!(
-                        "FILE  ·  {} lines  ·  match @ {}–{}",
+                        "FILE  ·  {} lines  ·  match @ {}–{}{}",
                         app.file_lines.len(),
                         mr.file_start + 1,
                         mr.file_end,
+                        mark_label,
                     ))
                     .color(Color32::from_rgb(120, 220, 160))
                     .strong()
@@ -67,18 +76,26 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                 );
             });
     });
+
     ui.add(Separator::default());
+
     let body_rect = ui.available_rect_before_wrap();
     let mut left_rect = body_rect;
     left_rect.set_width(left_w);
     let mut right_rect = body_rect;
     right_rect.min.x = body_rect.min.x + left_w + 2.0;
     right_rect.set_width(right_w);
+
     let mut left_ui = ui.child_ui(left_rect, Layout::top_down(Align::LEFT), None);
     render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
+
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
     render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEFT panel  (search / replace preview)
+// ─────────────────────────────────────────────────────────────────────────────
 
 fn render_search_panel(
     app: &mut MergeApp,
@@ -117,6 +134,7 @@ fn render_search_panel(
                     ),
                 )
             };
+
             let desired = Vec2::new(ui.available_width(), row_h + 2.0);
             let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
             ui.painter().rect_filled(rect, 2.0, banner_bg);
@@ -128,6 +146,7 @@ fn render_search_panel(
                 if is_applied { pal::TEXT_DIM } else { banner_fg },
             );
             ui.add_space(2.0);
+
             let search_file_map: Vec<Option<usize>> = app
                 .search_rows
                 .iter()
@@ -135,13 +154,14 @@ fn render_search_panel(
                 .map(|r| r.file_idx)
                 .collect();
 
-            let pointer_down = ui.input(|i| i.pointer.primary_down());
-            let pointer_pressed = ui.input(|i| i.pointer.primary_pressed());
+            let pointer_down     = ui.input(|i| i.pointer.primary_down());
+            let pointer_pressed  = ui.input(|i| i.pointer.primary_pressed());
             let pointer_dragging = ui.input(|i| i.pointer.is_decidedly_dragging());
 
             for (line_idx, line) in hunk.search.iter().enumerate() {
                 let file_idx = search_file_map.get(line_idx).copied().flatten();
                 let is_matched = file_idx.is_some();
+
                 let (base_bg, prefix_color, prefix) = if is_matched {
                     (pal::BG_MATCH, pal::TEXT_INSERT, "= ")
                 } else {
@@ -151,13 +171,8 @@ fn render_search_panel(
                 let is_selected = app
                     .left_selection
                     .map_or(false, |(s, e)| line_idx >= s && line_idx <= e);
-                let is_marked = app
-                    .mark_a
-                    .map_or(false, |(s, e)| line_idx >= s && line_idx <= e);
 
-                let bg = if is_marked {
-                    Color32::from_rgb(80, 60, 10)
-                } else if is_selected {
+                let bg = if is_selected {
                     Color32::from_rgb(50, 50, 70)
                 } else {
                     base_bg
@@ -171,8 +186,10 @@ fn render_search_panel(
                         set_selection = Some((line_idx, line_idx));
                     } else if pointer_dragging && pointer_down {
                         if let Some(start_sel) = app.left_selection {
-                            set_selection =
-                                Some((start_sel.0.min(line_idx), start_sel.1.max(line_idx)));
+                            set_selection = Some((
+                                start_sel.0.min(line_idx),
+                                start_sel.1.max(line_idx),
+                            ));
                         }
                     }
                 }
@@ -182,12 +199,9 @@ fn render_search_panel(
                 ui.painter().rect_filled(
                     bar,
                     0.0,
-                    if is_matched {
-                        pal::BAR_MATCH
-                    } else {
-                        pal::TEXT_DELETE
-                    },
+                    if is_matched { pal::BAR_MATCH } else { pal::TEXT_DELETE },
                 );
+
                 let num_text = if let Some(fi) = file_idx {
                     format!("{:>4}", fi + 1)
                 } else {
@@ -198,11 +212,7 @@ fn render_search_panel(
                     Align2::LEFT_CENTER,
                     &num_text,
                     FontId::monospace(11.0),
-                    if is_matched {
-                        pal::TEXT_LNUM_ACTIVE
-                    } else {
-                        pal::TEXT_DIM
-                    },
+                    if is_matched { pal::TEXT_LNUM_ACTIVE } else { pal::TEXT_DIM },
                 );
                 ui.painter().text(
                     Pos2::new(rect.left() + 38.0, rect.center().y),
@@ -217,19 +227,18 @@ fn render_search_panel(
                     Align2::LEFT_CENTER,
                     &display,
                     FontId::monospace(11.0),
-                    if is_applied {
-                        pal::TEXT_DIM
-                    } else {
-                        pal::TEXT_NORMAL
-                    },
+                    if is_applied { pal::TEXT_DIM } else { pal::TEXT_NORMAL },
                 );
             }
+
+            // ── REPLACE preview section ───────────────────────────────────────
             if !hunk.replace.is_empty() {
                 ui.add_space(4.0);
                 let (sep_rect, _) =
                     ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
                 ui.painter().rect_filled(sep_rect, 0.0, pal::SEPARATOR);
                 ui.add_space(2.0);
+
                 let (hdr_rect, _) =
                     ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::hover());
                 ui.painter()
@@ -242,6 +251,7 @@ fn render_search_panel(
                     pal::TEXT_INSERT,
                 );
 
+                // ">" apply-at-mark button — links left selection → file_anchor
                 let btn_size = Vec2::new(24.0, row_h - 4.0);
                 let btn_rect = Rect::from_min_size(
                     Pos2::new(
@@ -258,16 +268,21 @@ fn render_search_panel(
                 )
                 .fill(Color32::from_rgb(40, 90, 55))
                 .min_size(btn_size);
+
                 if ui.put(btn_rect, btn).clicked() {
-                    let sel = app.mark_a.or(app.left_selection);
-                    if let Some((s, _)) = sel {
-                        if let Some(row) = app.search_rows.get(s) {
-                            if let Some(idx) = row.file_idx {
-                                app.manual_anchor = Some(idx);
-                                app.apply_merge();
+                    // Use file_anchor if already set; otherwise derive from
+                    // left_selection → first matched file line.
+                    if app.file_anchor.is_none() {
+                        let sel = app.left_selection;
+                        if let Some((s, _)) = sel {
+                            if let Some(row) = app.search_rows.get(s) {
+                                if let Some(idx) = row.file_idx {
+                                    app.file_anchor = Some(FileAnchor::start_only(idx));
+                                }
                             }
                         }
                     }
+                    app.apply_merge();
                 }
 
                 for (line_idx, line) in hunk.replace.iter().enumerate() {
@@ -311,6 +326,10 @@ fn render_search_panel(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// RIGHT panel  (file buffer)
+// ─────────────────────────────────────────────────────────────────────────────
+
 fn render_file_panel(
     app: &mut MergeApp,
     ui: &mut Ui,
@@ -320,34 +339,42 @@ fn render_file_panel(
     panel_w: f32,
 ) {
     let max_chars = ((panel_w - 68.0) / char_w).floor() as usize;
-    let mut prev_hunk = false;
-    let mut next_hunk = false;
-    let mut prev_candidate = false;
-    let mut next_candidate = false;
-    let mut clear_anchor = false;
-    let mut apply_clicked = false;
-    let mut find_text = false;
+
+    // deferred-action flags
+    let mut prev_hunk       = false;
+    let mut next_hunk       = false;
+    let mut prev_candidate  = false;
+    let mut next_candidate  = false;
+    let mut clear_marks_flag = false;
+    let mut apply_clicked   = false;
+    let mut find_text       = false;
     let mut next_search_match = false;
     let mut prev_search_match = false;
-    let mut clear_search = false;
-    let current_hunk_idx = app.current_hunk;
-    let total_hunks = app.hunks.len();
-    let manual_anchor = app.manual_anchor;
-    let candidate_count = mr.candidates.len();
-    let candidate_idx = app.candidate_index;
-    let is_applied = app.applied_hunks.contains(&app.current_hunk);
-    let can_apply = !is_applied && (app.match_result.is_some() || app.manual_anchor.is_some());
-    let apply_line = if let Some(anchor) = manual_anchor {
-        anchor + 1
-    } else {
-        mr.file_start + 1
+    let mut clear_search    = false;
+
+    let current_hunk_idx  = app.current_hunk;
+    let total_hunks       = app.hunks.len();
+    let file_anchor       = app.file_anchor;
+    let candidate_count   = mr.candidates.len();
+    let candidate_idx     = app.candidate_index;
+    let is_applied        = app.applied_hunks.contains(&app.current_hunk);
+    let can_apply         = !is_applied
+        && (app.match_result.is_some() || app.file_anchor.is_some());
+
+    let apply_line = match file_anchor {
+        Some(fa) => fa.file_start() + 1,
+        None     => mr.file_start + 1,
     };
+
+    // ── toolbar row ───────────────────────────────────────────────────────────
     Frame::none()
         .fill(Color32::from_rgb(25, 32, 42))
         .inner_margin(Margin::symmetric(6.0, 4.0))
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
+
+                // hunk nav
                 ui.label(RichText::new("Hunk:").color(pal::TEXT_DIM).small());
                 if ui
                     .add_enabled(current_hunk_idx > 0, Button::new("◀").small())
@@ -357,7 +384,8 @@ fn render_file_panel(
                     prev_hunk = true;
                 }
                 ui.label(
-                    RichText::new(format!("{}/{}", current_hunk_idx + 1, total_hunks)).monospace(),
+                    RichText::new(format!("{}/{}", current_hunk_idx + 1, total_hunks))
+                        .monospace(),
                 );
                 if ui
                     .add_enabled(current_hunk_idx < total_hunks - 1, Button::new("▶").small())
@@ -370,18 +398,21 @@ fn render_file_panel(
                     ui.label(RichText::new("✓").color(pal::ACCENT_GOOD).strong());
                 }
                 ui.add(Separator::default().vertical());
-                if let Some(anchor) = manual_anchor {
+
+                // marks display / candidate nav
+                if let Some(fa) = file_anchor {
+                    // show mark badge + clear button
                     ui.label(
-                        RichText::new(format!("⚓ {}", anchor + 1))
+                        RichText::new(format!("⚓ {}", fa.label()))
                             .color(pal::TEXT_ANCHOR)
                             .monospace(),
                     );
                     if ui
                         .small_button("✕")
-                        .on_hover_text("Clear anchor (Esc)")
+                        .on_hover_text("Clear marks (Esc)")
                         .clicked()
                     {
-                        clear_anchor = true;
+                        clear_marks_flag = true;
                     }
                 } else {
                     ui.label(RichText::new("Cand:").color(pal::TEXT_DIM).small());
@@ -392,8 +423,12 @@ fn render_file_panel(
                         prev_candidate = true;
                     }
                     ui.label(
-                        RichText::new(format!("{}/{}", candidate_idx + 1, candidate_count.max(1)))
-                            .monospace(),
+                        RichText::new(format!(
+                            "{}/{}",
+                            candidate_idx + 1,
+                            candidate_count.max(1)
+                        ))
+                        .monospace(),
                     );
                     if ui
                         .add_enabled(
@@ -406,6 +441,8 @@ fn render_file_panel(
                     }
                 }
                 ui.add(Separator::default().vertical());
+
+                // search indicator
                 if !app.file_search_query.is_empty() && !app.is_searching {
                     ui.label(
                         RichText::new(format!("🔍 {}", app.file_search_query))
@@ -422,27 +459,33 @@ fn render_file_panel(
                     }
                 }
                 ui.add(Separator::default().vertical());
+
+                // apply button
                 ui.add_enabled_ui(can_apply, |ui| {
                     let btn_text = if is_applied {
                         "✓ Applied".to_string()
                     } else {
                         format!("⚡ Apply @ {}", apply_line)
                     };
-                    let btn = Button::new(RichText::new(&btn_text).strong().monospace()).fill(
-                        if can_apply {
-                            Color32::from_rgb(40, 90, 55)
-                        } else {
-                            Color32::from_gray(35)
-                        },
-                    );
+                    let btn = Button::new(
+                        RichText::new(&btn_text).strong().monospace(),
+                    )
+                    .fill(if can_apply {
+                        Color32::from_rgb(40, 90, 55)
+                    } else {
+                        Color32::from_gray(35)
+                    });
                     if ui
                         .add(btn)
-                        .on_hover_text("Apply this hunk to the file (A when cursor is in match)")
+                        .on_hover_text(
+                            "Apply this hunk to the file (A when cursor is in match)",
+                        )
                         .clicked()
                     {
                         apply_clicked = true;
                     }
                 });
+
                 if current_hunk_idx < total_hunks - 1 {
                     if ui
                         .small_button("Skip →")
@@ -454,10 +497,14 @@ fn render_file_panel(
                 }
             });
         });
+
     ui.add(Separator::default());
+
+    // ── keyboard handling ─────────────────────────────────────────────────────
     let len = app.file_lines.len();
     let mut go_next_hunk = false;
     let mut go_prev_hunk = false;
+
     if len > 0 {
         if app.is_searching {
             ui.input(|i| {
@@ -472,11 +519,7 @@ fn render_file_panel(
                                 app.file_search_query.push_str(&txt);
                             }
                         }
-                        Event::Key {
-                            key: Key::Backspace,
-                            pressed: true,
-                            ..
-                        } => {
+                        Event::Key { key: Key::Backspace, pressed: true, .. } => {
                             app.file_search_query.pop();
                         }
                         _ => {}
@@ -486,61 +529,43 @@ fn render_file_panel(
         } else if !ui.ctx().wants_keyboard_input() {
             let mut cursor_changed = false;
             let mut new_text = String::new();
+
             ui.input(|i| {
                 let cur = app.cursor_line.unwrap_or(0);
-                if i.key_pressed(Key::ArrowDown) {
-                    app.cursor_line = Some((cur + 1).min(len - 1));
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::ArrowUp) {
-                    app.cursor_line = Some(cur.saturating_sub(1));
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::PageDown) {
-                    app.cursor_line = Some((cur + 20).min(len - 1));
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::PageUp) {
-                    app.cursor_line = Some(cur.saturating_sub(20));
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::Home) {
-                    app.cursor_line = Some(0);
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::End) {
-                    app.cursor_line = Some(len - 1);
-                    cursor_changed = true;
-                }
+
+                if i.key_pressed(Key::ArrowDown)  { app.cursor_line = Some((cur + 1).min(len - 1)); cursor_changed = true; }
+                if i.key_pressed(Key::ArrowUp)    { app.cursor_line = Some(cur.saturating_sub(1)); cursor_changed = true; }
+                if i.key_pressed(Key::PageDown)   { app.cursor_line = Some((cur + 20).min(len - 1)); cursor_changed = true; }
+                if i.key_pressed(Key::PageUp)     { app.cursor_line = Some(cur.saturating_sub(20)); cursor_changed = true; }
+                if i.key_pressed(Key::Home)       { app.cursor_line = Some(0); cursor_changed = true; }
+                if i.key_pressed(Key::End)        { app.cursor_line = Some(len - 1); cursor_changed = true; }
+
                 if i.key_pressed(Key::L) {
-                    if i.modifiers.shift {
-                        go_prev_hunk = true;
-                    } else {
-                        go_next_hunk = true;
-                    }
+                    if i.modifiers.shift { go_prev_hunk = true; } else { go_next_hunk = true; }
                 }
+
                 if i.key_pressed(Key::Slash) {
                     app.is_searching = true;
                     app.file_search_query.clear();
                     app.search_matches.clear();
                     clear_search = true;
                 }
+
+                // Space → set ma at cursor (quick single-key anchor)
                 if i.key_pressed(Key::Space) {
                     if let Some(cur) = app.cursor_line {
-                        app.manual_anchor = Some(cur);
-                        app.set_message(super::types::StatusMessage::info(format!(
-                            "⚓ Anchor at line {} — press A to apply",
-                            cur + 1
-                        )));
+                        app.set_mark_a(cur);
                     }
                 }
+
+                // A → apply (must be inside match range or on anchor)
                 if i.key_pressed(Key::A) {
-                    let in_hunk = if let Some(anchor) = manual_anchor {
-                        cur == anchor
-                    } else {
-                        cur >= mr.file_start && cur < mr.file_end
+                    let in_hunk = match file_anchor {
+                        Some(fa) => cur == fa.file_start(),
+                        None     => cur >= mr.file_start && cur < mr.file_end,
                     };
                     if is_applied {
+                        // already done, ignore
                     } else if in_hunk {
                         apply_clicked = true;
                     } else {
@@ -548,123 +573,87 @@ fn render_file_panel(
                         cursor_changed = true;
                     }
                 }
+
                 for event in i.events.clone() {
                     if let Event::Text(txt) = event {
+                        // 'm' enters mark-pending mode
                         if txt == "m" {
-                            app.mark_mode = true;
-                        } else if app.mark_mode && txt == "a" {
-                            if app.left_selection.is_some() {
-                                app.mark_a = app.left_selection;
-                                app.set_message(super::types::StatusMessage::info(format!(
-                                    "⚓ Mark 'a' set"
-                                )));
-                            } else {
-                                app.set_message(super::types::StatusMessage::warning(
-                                    "No selection to mark",
-                                ));
+                            app.mark_pending = Some(MarkPending::WaitingKey);
+                        } else if app.mark_pending == Some(MarkPending::WaitingKey) {
+                            // consume next char as mark target
+                            match txt.as_str() {
+                                "a" => {
+                                    if let Some(cur) = app.cursor_line {
+                                        app.set_mark_a(cur);
+                                    }
+                                    app.mark_pending = None;
+                                }
+                                "b" => {
+                                    if let Some(cur) = app.cursor_line {
+                                        app.set_mark_b(cur);
+                                    }
+                                    app.mark_pending = None;
+                                }
+                                _ => {
+                                    app.mark_pending = None; // unknown key, cancel
+                                }
                             }
-                            app.mark_mode = false;
-                        } else if app.mark_mode {
-                            app.mark_mode = false;
-                        }
-                        if txt != "?" && txt != "m" && txt != "M" && txt != "o" && txt != "O" {
+                        } else if txt != "?" && txt != "m" && txt != "o" && txt != "O" {
                             new_text.push_str(&txt);
                         }
                     }
                 }
             });
+
+            // vim command buffer
             if !new_text.is_empty() {
                 app.vim_buffer.push_str(&new_text);
                 let buf = app.vim_buffer.trim().to_string();
                 let lower_buf = buf.to_lowercase();
                 let mut clear_buffer = false;
-                if buf == "n" {
-                    next_search_match = true;
-                    clear_buffer = true;
-                } else if buf == "N" {
-                    prev_search_match = true;
-                    clear_buffer = true;
-                } else if lower_buf == "u" {
-                    app.undo();
-                    clear_buffer = true;
-                } else if lower_buf == "." {
+
+                if buf == "n"       { next_search_match = true; clear_buffer = true; }
+                else if buf == "N"  { prev_search_match = true; clear_buffer = true; }
+                else if lower_buf == "u" { app.undo(); clear_buffer = true; }
+                else if lower_buf == "." {
                     if let Some(action) = app.last_action.clone() {
-                        match action {
-                            Action::DeleteLines(count) => app.delete_lines(count),
-                        }
+                        match action { Action::DeleteLines(count) => app.delete_lines(count) }
                     }
                     clear_buffer = true;
-                } else if buf == "gg" {
-                    app.cursor_line = Some(0);
-                    app.scroll_to_match = true;
-                    clear_buffer = true;
-                } else if buf == "G" {
-                    app.cursor_line = Some(app.file_lines.len().saturating_sub(1));
-                    app.scroll_to_match = true;
-                    clear_buffer = true;
-                } else if lower_buf.ends_with("dd") {
+                }
+                else if buf == "gg" { app.cursor_line = Some(0); app.scroll_to_match = true; clear_buffer = true; }
+                else if buf == "G"  { app.cursor_line = Some(app.file_lines.len().saturating_sub(1)); app.scroll_to_match = true; clear_buffer = true; }
+                else if lower_buf.ends_with("dd") {
                     let num_part = &lower_buf[..lower_buf.len() - 2];
-                    let count = if num_part.is_empty() {
-                        1
-                    } else {
-                        num_part.parse::<usize>().unwrap_or(0)
-                    };
+                    let count = if num_part.is_empty() { 1 } else { num_part.parse::<usize>().unwrap_or(0) };
                     if count > 0 {
                         app.delete_lines(count);
                         app.last_action = Some(Action::DeleteLines(count));
                     }
                     clear_buffer = true;
-                } else if buf.len() > 5 {
-                    clear_buffer = true;
-                } else {
-                    let allowed = buf.chars().all(|c| {
-                        c.is_ascii_digit() || c == 'd' || c == 'D' || c == 'g' || c == 'G'
-                    });
+                }
+                else if buf.len() > 5 { clear_buffer = true; }
+                else {
+                    let allowed = buf.chars().all(|c| c.is_ascii_digit() || c == 'd' || c == 'D' || c == 'g' || c == 'G');
                     let d_count = buf.matches('d').count() + buf.matches('D').count();
-                    if !allowed || d_count > 2 {
-                        clear_buffer = true;
-                    }
+                    if !allowed || d_count > 2 { clear_buffer = true; }
                 }
-                if clear_buffer {
-                    app.vim_buffer.clear();
-                }
+
+                if clear_buffer { app.vim_buffer.clear(); }
             }
-            if cursor_changed {
-                app.scroll_to_match = true;
-            }
+
+            if cursor_changed { app.scroll_to_match = true; }
         }
     }
-    if prev_hunk && current_hunk_idx > 0 {
-        app.current_hunk -= 1;
-        app.load_hunk();
-        return;
-    }
-    if next_hunk && current_hunk_idx < total_hunks - 1 {
-        app.current_hunk += 1;
-        app.load_hunk();
-        return;
-    }
-    if clear_anchor {
-        app.manual_anchor = None;
-        app.scroll_to_match = true;
-    }
-    if prev_candidate && app.candidate_index > 0 {
-        app.candidate_index -= 1;
-        app.scroll_to_match = true;
-        app.recompute_match();
-        return;
-    }
-    if next_candidate && app.candidate_index + 1 < candidate_count {
-        app.candidate_index += 1;
-        app.scroll_to_match = true;
-        app.recompute_match();
-        return;
-    }
-    if clear_search {
-        app.file_search_query.clear();
-        app.search_matches.clear();
-        app.scroll_to_match = true;
-    }
+
+    // ── resolve deferred actions ──────────────────────────────────────────────
+    if prev_hunk && current_hunk_idx > 0             { app.current_hunk -= 1; app.load_hunk(); return; }
+    if next_hunk && current_hunk_idx < total_hunks-1 { app.current_hunk += 1; app.load_hunk(); return; }
+    if clear_marks_flag { app.clear_marks(); }
+    if prev_candidate && app.candidate_index > 0           { app.candidate_index -= 1; app.scroll_to_match = true; app.recompute_match(); return; }
+    if next_candidate && app.candidate_index + 1 < candidate_count { app.candidate_index += 1; app.scroll_to_match = true; app.recompute_match(); return; }
+    if clear_search  { app.file_search_query.clear(); app.search_matches.clear(); app.scroll_to_match = true; }
+
     if find_text {
         let q = app.file_search_query.trim().to_lowercase();
         if q.is_empty() {
@@ -683,123 +672,134 @@ fn render_file_panel(
                 app.scroll_to_match = true;
             } else {
                 app.search_matches.clear();
-                app.set_message(super::types::StatusMessage::warning(format!(
-                    "No matches for '{}'",
-                    q
-                )));
+                app.set_message(StatusMessage::warning(format!("No matches for '{}'", q)));
             }
         }
     }
+
     if next_search_match && !app.search_matches.is_empty() {
         app.search_match_idx = (app.search_match_idx + 1) % app.search_matches.len();
         app.cursor_line = Some(app.search_matches[app.search_match_idx]);
         app.scroll_to_match = true;
     }
     if prev_search_match && !app.search_matches.is_empty() {
-        if app.search_match_idx > 0 {
-            app.search_match_idx -= 1;
-        } else {
-            app.search_match_idx = app.search_matches.len() - 1;
-        }
+        if app.search_match_idx > 0 { app.search_match_idx -= 1; }
+        else { app.search_match_idx = app.search_matches.len() - 1; }
         app.cursor_line = Some(app.search_matches[app.search_match_idx]);
         app.scroll_to_match = true;
     }
+
     if go_next_hunk {
-        if app.current_hunk < app.hunks.len() - 1 {
-            app.current_hunk += 1;
-            app.load_hunk();
-            return;
-        } else {
-            app.cursor_line = Some(mr.file_start);
-            app.scroll_to_match = true;
-        }
+        if app.current_hunk < app.hunks.len() - 1 { app.current_hunk += 1; app.load_hunk(); return; }
+        else { app.cursor_line = Some(mr.file_start); app.scroll_to_match = true; }
     }
     if go_prev_hunk {
-        if app.current_hunk > 0 {
-            app.current_hunk -= 1;
-            app.load_hunk();
-            return;
-        } else {
-            app.cursor_line = Some(mr.file_start);
-            app.scroll_to_match = true;
-        }
+        if app.current_hunk > 0 { app.current_hunk -= 1; app.load_hunk(); return; }
+        else { app.cursor_line = Some(mr.file_start); app.scroll_to_match = true; }
     }
-    let file_lines = app.file_lines.clone();
-    let manual_anchor_check = app.manual_anchor;
-    let merged_range = app.merged_range;
-    let auto_start = mr.file_start;
-    let auto_end = mr.file_end;
-    let auto_score = mr.score;
-    let search_query = app.file_search_query.clone();
+
+    // ── render file rows ──────────────────────────────────────────────────────
+    let file_lines    = app.file_lines.clone();
+    let fa            = app.file_anchor;
+    let merged_range  = app.merged_range;
+    let auto_start    = mr.file_start;
+    let auto_end      = mr.file_end;
+    let auto_score    = mr.score;
+    let search_query  = app.file_search_query.clone();
     let current_search_line = app.search_matches.get(app.search_match_idx).copied();
     let scroll_to_match = app.scroll_to_match;
-    let cursor_line = app.cursor_line;
-    let mut did_scroll = false;
+    let cursor_line   = app.cursor_line;
+
+    let mut did_scroll  = false;
     let mut set_cursor: Option<usize> = None;
+
     let delete_file_indices: HashSet<usize> = app
-        .search_rows
-        .iter()
+        .search_rows.iter()
         .filter(|r| matches!(r.kind, RowKind::Delete))
         .filter_map(|r| r.file_idx)
         .collect();
     let equal_file_indices: HashSet<usize> = app
-        .search_rows
-        .iter()
+        .search_rows.iter()
         .filter(|r| matches!(r.kind, RowKind::Equal))
         .filter_map(|r| r.file_idx)
         .collect();
+
     ScrollArea::both()
         .id_source("file_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             for (i, line) in file_lines.iter().enumerate() {
                 let in_auto_match = i >= auto_start && i < auto_end;
-                let is_anchor = manual_anchor_check == Some(i);
-                let is_cursor = cursor_line == Some(i);
-                let in_merged = merged_range.map_or(false, |(rs, re)| i >= rs && i < re);
-                let is_delete = in_auto_match && delete_file_indices.contains(&i);
-                let is_equal = in_auto_match && equal_file_indices.contains(&i);
+                // mark-a line
+                let is_mark_a = fa.map_or(false, |f| f.a == i);
+                // mark-b line (last inclusive line = b-1 since b is exclusive)
+                let is_mark_b = fa.and_then(|f| f.b).map_or(false, |b| b > 0 && b - 1 == i);
+                // inside [a, b) range
+                let in_mark_range = fa.map_or(false, |f| {
+                    i >= f.file_start() && i < f.file_end().max(f.file_start() + 1)
+                });
+
+                let is_cursor   = cursor_line == Some(i);
+                let in_merged   = merged_range.map_or(false, |(rs, re)| i >= rs && i < re);
+                let is_delete   = in_auto_match && delete_file_indices.contains(&i);
+                let is_equal    = in_auto_match && equal_file_indices.contains(&i);
                 let is_search_hit = !search_query.is_empty()
                     && line.to_lowercase().contains(&search_query.to_lowercase());
                 let is_current_search = is_search_hit && current_search_line == Some(i);
-                let row_is_tall = is_anchor
-                    || (in_auto_match && i == auto_start && manual_anchor_check.is_none());
+
+                // tall rows: mark-a header, auto-match header
+                let row_is_tall = is_mark_a
+                    || (in_auto_match && i == auto_start && fa.is_none());
                 let desired = Vec2::new(
                     ui.available_width(),
                     if row_is_tall { row_h + 6.0 } else { row_h },
                 );
                 let (rect, row_resp) = ui.allocate_exact_size(desired, Sense::click());
+
                 let should_scroll = scroll_to_match
                     && (is_cursor
-                        || (cursor_line.is_none() && is_anchor)
-                        || (cursor_line.is_none()
-                            && manual_anchor_check.is_none()
-                            && i == auto_start));
+                        || (cursor_line.is_none() && is_mark_a)
+                        || (cursor_line.is_none() && fa.is_none() && i == auto_start));
                 if should_scroll {
                     ui.scroll_to_rect(rect, Some(Align::Center));
                     did_scroll = true;
                 }
-                if is_anchor {
-                    ui.painter().rect_filled(rect, 2.0, pal::BG_ANCHOR);
-                    let dash_y = rect.center().y;
+
+                // ── mark-a header row ─────────────────────────────────────────
+                if is_mark_a {
+                    let has_range = fa.and_then(|f| f.b).is_some();
+                    let anchor_bg = if has_range {
+                        Color32::from_rgb(48, 36, 10)   // range mode: warmer
+                    } else {
+                        pal::BG_ANCHOR
+                    };
+                    ui.painter().rect_filled(rect, 2.0, anchor_bg);
+
+                    // dashed top line
+                    let dash_y = rect.top() + 2.0;
                     let mut x = rect.left() + 4.0;
-                    while x < rect.right() - 120.0 {
+                    while x < rect.right() - 130.0 {
                         ui.painter().line_segment(
-                            [
-                                Pos2::new(x, dash_y),
-                                Pos2::new((x + 8.0).min(rect.right() - 120.0), dash_y),
-                            ],
+                            [Pos2::new(x, dash_y), Pos2::new((x + 8.0).min(rect.right() - 130.0), dash_y)],
                             Stroke::new(1.5, pal::BAR_ANCHOR),
                         );
                         x += 14.0;
                     }
+
+                    let label = if has_range {
+                        format!("⚓ ma:{} (set mb with 'mb' at end line)", i + 1)
+                    } else {
+                        format!("⚓ ma:{} — insert / replace before here", i + 1)
+                    };
                     ui.painter().text(
                         Pos2::new(rect.left() + 10.0, rect.center().y),
                         Align2::LEFT_CENTER,
-                        format!("⚓ insert before line {}", i + 1),
+                        label,
                         FontId::monospace(10.5),
                         pal::TEXT_ANCHOR,
                     );
+
+                    // "⚡ Apply here" button
                     let btn_size = Vec2::new(100.0, row_h);
                     let btn_rect = Rect::from_min_size(
                         Pos2::new(rect.right() - 106.0, rect.center().y - row_h / 2.0),
@@ -821,7 +821,9 @@ fn render_file_panel(
                     {
                         apply_clicked = true;
                     }
-                } else if in_auto_match && i == auto_start && manual_anchor_check.is_none() {
+
+                // ── auto-match header row ─────────────────────────────────────
+                } else if in_auto_match && i == auto_start && fa.is_none() {
                     ui.painter()
                         .rect_filled(rect, 2.0, Color32::from_rgb(28, 60, 40));
                     ui.painter().text(
@@ -829,9 +831,7 @@ fn render_file_panel(
                         Align2::LEFT_CENTER,
                         format!(
                             "▼ auto match  {}–{}  ({:.0}%)",
-                            auto_start + 1,
-                            auto_end,
-                            auto_score
+                            auto_start + 1, auto_end, auto_score
                         ),
                         FontId::monospace(10.5),
                         Color32::from_rgb(120, 230, 160),
@@ -857,20 +857,26 @@ fn render_file_panel(
                     {
                         apply_clicked = true;
                     }
+
+                // ── normal file row ───────────────────────────────────────────
                 } else {
                     let base_bg = if in_merged {
                         pal::BG_MERGED
                     } else if is_delete {
                         pal::BG_DELETE
+                    } else if in_mark_range {
+                        // inside [ma, mb) — tinted amber
+                        Color32::from_rgb(36, 28, 8)
                     } else if is_cursor {
                         pal::BG_CURSOR
-                    } else if in_auto_match && manual_anchor_check.is_none() {
+                    } else if in_auto_match && fa.is_none() {
                         pal::BG_MATCH
                     } else if i % 2 == 0 {
                         pal::BG_ROW_EVEN
                     } else {
                         pal::BG_ROW_ODD
                     };
+
                     let row_bg = if is_current_search {
                         Color32::from_rgb(70, 60, 15)
                     } else if is_search_hit {
@@ -878,17 +884,23 @@ fn render_file_panel(
                     } else {
                         base_bg
                     };
+
                     ui.painter().rect_filled(rect, 0.0, row_bg);
+
+                    // side bar color
                     let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
                     let bar_color = if in_merged {
                         pal::BAR_MERGED
+                    } else if is_mark_b {
+                        // bottom edge of range — use a contrasting amber stripe
+                        Color32::from_rgb(180, 110, 0)
+                    } else if in_mark_range {
+                        pal::BAR_ANCHOR
                     } else if is_delete {
                         pal::TEXT_DELETE
                     } else if is_cursor {
                         pal::BAR_CURSOR
-                    } else if is_anchor {
-                        pal::BAR_ANCHOR
-                    } else if in_auto_match && manual_anchor_check.is_none() {
+                    } else if in_auto_match && fa.is_none() {
                         pal::BAR_MATCH
                     } else if is_current_search {
                         pal::ACCENT_WARN
@@ -898,25 +910,36 @@ fn render_file_panel(
                         Color32::TRANSPARENT
                     };
                     ui.painter().rect_filled(bar, 0.0, bar_color);
-                    let diff_prefix = if in_auto_match && manual_anchor_check.is_none() {
-                        if is_delete {
-                            Some(("-", pal::TEXT_DELETE))
-                        } else if is_equal {
-                            Some(("=", Color32::from_gray(60)))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-                    if row_resp.clicked() {
-                        set_cursor = Some(i);
+
+                    // mb bottom border line
+                    if is_mark_b {
+                        ui.painter().line_segment(
+                            [
+                                Pos2::new(rect.left(), rect.bottom() - 1.0),
+                                Pos2::new(rect.right(), rect.bottom() - 1.0),
+                            ],
+                            Stroke::new(1.5, Color32::from_rgb(200, 130, 20)),
+                        );
+                        // "mb" label at right edge
+                        ui.painter().text(
+                            Pos2::new(rect.right() - 4.0, rect.center().y),
+                            Align2::RIGHT_CENTER,
+                            format!("mb:{}", i + 1),
+                            FontId::monospace(9.0),
+                            Color32::from_rgb(220, 160, 50),
+                        );
                     }
+
+                    if row_resp.clicked() { set_cursor = Some(i); }
+
+                    // line number
                     let num_color = if in_merged {
                         pal::TEXT_LNUM_ACTIVE
                     } else if is_delete {
                         pal::TEXT_DELETE
-                    } else if in_auto_match && manual_anchor_check.is_none() {
+                    } else if in_mark_range {
+                        pal::TEXT_ANCHOR
+                    } else if in_auto_match && fa.is_none() {
                         pal::TEXT_LNUM_ACTIVE
                     } else if is_search_hit {
                         Color32::from_rgb(180, 160, 60)
@@ -930,6 +953,13 @@ fn render_file_panel(
                         FontId::monospace(11.0),
                         num_color,
                     );
+
+                    // diff glyph
+                    let diff_prefix = if in_auto_match && fa.is_none() {
+                        if is_delete      { Some(("-", pal::TEXT_DELETE)) }
+                        else if is_equal  { Some(("=", Color32::from_gray(60))) }
+                        else              { None }
+                    } else { None };
                     if let Some((glyph, glyph_color)) = diff_prefix {
                         ui.painter().text(
                             Pos2::new(rect.left() + 48.0, rect.center().y),
@@ -939,11 +969,15 @@ fn render_file_panel(
                             glyph_color,
                         );
                     }
+
+                    // line text
                     let text_color = if in_merged {
                         pal::TEXT_MERGED
                     } else if is_delete {
                         pal::TEXT_DELETE
-                    } else if in_auto_match && manual_anchor_check.is_none() {
+                    } else if in_mark_range {
+                        pal::TEXT_ANCHOR
+                    } else if in_auto_match && fa.is_none() {
                         pal::TEXT_MATCH
                     } else if is_search_hit {
                         pal::TEXT_SEARCH
@@ -959,28 +993,31 @@ fn render_file_panel(
                         text_color,
                     );
                 }
-                if in_auto_match && i == auto_end.saturating_sub(1) && manual_anchor_check.is_none()
+
+                // auto-match bottom border
+                if in_auto_match
+                    && i == auto_end.saturating_sub(1)
+                    && fa.is_none()
                 {
-                    let (sep_rect, _) = ui
-                        .allocate_exact_size(Vec2::new(ui.available_width(), 2.0), Sense::hover());
+                    let (sep_rect, _) = ui.allocate_exact_size(
+                        Vec2::new(ui.available_width(), 2.0),
+                        Sense::hover(),
+                    );
                     ui.painter().rect_filled(sep_rect, 0.0, pal::BAR_MATCH);
                 }
             }
             ui.add_space(row_h * 3.0);
         });
-    if scroll_to_match && !did_scroll {
-        did_scroll = true;
-    }
-    if did_scroll {
-        app.scroll_to_match = false;
-    }
+
+    if scroll_to_match && !did_scroll { did_scroll = true; }
+    if did_scroll { app.scroll_to_match = false; }
+
     if let Some(cur_line) = set_cursor {
         app.cursor_line = Some(cur_line);
         if let Some(idx) = app.search_matches.iter().position(|&x| x == cur_line) {
             app.search_match_idx = idx;
         }
     }
-    if apply_clicked {
-        app.apply_merge();
-    }
+
+    if apply_clicked { app.apply_merge(); }
 }

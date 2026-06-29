@@ -11,32 +11,25 @@ impl MergeApp {
             )));
             return;
         }
-
         let hunk = match self.hunks.get(self.current_hunk) {
             Some(h) => h.clone(),
             None => return,
         };
 
-        let (file_start, file_end) = if let Some(anchor) = self.manual_anchor {
-            (anchor, anchor)
-        } else {
-            match &self.match_result {
-                Some(m) => (m.file_start, m.file_end),
-                None => return,
-            }
+        let (file_start, file_end) = match self.resolve_apply_range() {
+            Some(r) => r,
+            None => return,
         };
 
         if let Some((ms, me)) = self.merged_range {
-            let overlaps = file_start < me && file_end > ms;
-            if overlaps {
+            if file_start < me && file_end > ms {
                 self.set_message(StatusMessage::warning(
                     "⚠ This hunk overlaps an already-merged region — applied anyway, check result",
                 ));
             }
         }
 
-        self.history
-            .push((self.file_lines.clone(), self.current_hunk));
+        self.history.push((self.file_lines.clone(), self.current_hunk));
 
         let mut output: Vec<String> = Vec::new();
         output.extend_from_slice(&self.file_lines[..file_start]);
@@ -48,7 +41,8 @@ impl MergeApp {
         self.file_lines = output;
         self.merged_range = Some((replace_start, replace_end));
         self.applied_hunks.insert(self.current_hunk);
-        self.manual_anchor = None;
+        self.file_anchor = None;           // clear marks after apply
+        self.mark_pending = None;
         self.cursor_line = Some(replace_start);
         self.scroll_to_match = true;
 
@@ -59,7 +53,6 @@ impl MergeApp {
             file_end - file_start,
             hunk.replace.len(),
         )));
-
         self.recompute_match();
     }
 
@@ -96,8 +89,7 @@ impl MergeApp {
     pub fn delete_lines(&mut self, count: usize) {
         if let Some(start) = self.cursor_line {
             if start < self.file_lines.len() {
-                self.history
-                    .push((self.file_lines.clone(), self.current_hunk));
+                self.history.push((self.file_lines.clone(), self.current_hunk));
                 let end = (start + count).min(self.file_lines.len());
                 self.file_lines.drain(start..end);
                 self.merged_range = None;

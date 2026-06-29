@@ -44,6 +44,29 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                     );
                 }
 
+                // show active file anchor
+                if let Some(fa) = app.file_anchor {
+                    ui.add(Separator::default().vertical());
+                    ui.label(
+                        RichText::new(format!("⚓ {}", fa.label()))
+                            .color(pal::TEXT_ANCHOR)
+                            .monospace()
+                            .small(),
+                    );
+                }
+
+                // pending mark mode indicator
+                if app.mark_pending.is_some() {
+                    ui.add(Separator::default().vertical());
+                    ui.label(
+                        RichText::new("m›_")
+                            .color(pal::ACCENT_WARN)
+                            .monospace()
+                            .strong(),
+                    );
+                }
+
+                // vim buffer
                 if !app.vim_buffer.is_empty() {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
