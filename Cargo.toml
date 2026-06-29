@@ -7,3 +7,5 @@ edition = "2021"
 eframe = "0.29"
 rfd = "0.15"
 git2 = "0.19"
+syn = { version = "2.0", features = ["full", "visit"] }
+quote = "1.0"

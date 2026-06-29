@@ -691,6 +691,8 @@ fn render_file_panel(
                     }
                 }
             });
+
+        // In src/app/split_view.rs (inside render_file_panel)
         } else if !ui.ctx().wants_keyboard_input() {
             let mut cursor_changed = false;
             let mut new_text = String::new();
@@ -726,7 +728,16 @@ fn render_file_panel(
                     app.cursor_line = Some(len - 1);
                     cursor_changed = true;
                 }
-                if i.key_pressed(Key::L) {
+                if i.key_pressed(Key::Escape) {
+                    if app.d_pending {
+                        app.d_pending = false;
+                        app.vim_buffer.clear();
+                    }
+                }
+                if i.key_pressed(Key::D) {
+                    app.d_pending = true;
+                }
+                if i.key_pressed(Key::L) && !app.d_pending && app.vim_buffer.is_empty() {
                     if i.modifiers.shift {
                         if candidate_count > 1 && candidate_idx > 0 {
                             prev_candidate = true;
@@ -741,18 +752,18 @@ fn render_file_panel(
                         }
                     }
                 }
-                if i.key_pressed(Key::Slash) {
+                if i.key_pressed(Key::Slash) && !app.d_pending && app.vim_buffer.is_empty() {
                     app.is_searching = true;
                     app.file_search_query.clear();
                     app.search_matches.clear();
                     clear_search = true;
                 }
-                if i.key_pressed(Key::Space) {
+                if i.key_pressed(Key::Space) && !app.d_pending && app.vim_buffer.is_empty() {
                     if let Some(cur) = app.cursor_line {
                         app.set_mark_a(cur);
                     }
                 }
-                if i.key_pressed(Key::A) {
+                if i.key_pressed(Key::A) && !app.d_pending && app.vim_buffer.is_empty() {
                     let in_hunk = if file_anchors.is_empty() {
                         cur >= mr.file_start && cur < mr.file_end
                     } else {
@@ -848,6 +859,7 @@ fn render_file_panel(
                     if let Some(action) = app.last_action.clone() {
                         match action {
                             Action::DeleteLines(count) => app.delete_lines(count),
+                            Action::DeleteFunction => app.delete_function_around_cursor(),
                         }
                     }
                     clear_buffer = true;
@@ -858,6 +870,10 @@ fn render_file_panel(
                 } else if buf == "G" {
                     app.cursor_line = Some(app.file_lines.len().saturating_sub(1));
                     app.scroll_to_match = true;
+                    clear_buffer = true;
+                } else if lower_buf == "daf" {
+                    app.delete_function_around_cursor();
+                    app.last_action = Some(Action::DeleteFunction);
                     clear_buffer = true;
                 } else if lower_buf.ends_with("dd") {
                     let num_part = &lower_buf[..lower_buf.len() - 2];
@@ -883,7 +899,8 @@ fn render_file_panel(
                             || c == '['
                             || c == ']'
                             || c == 'h'
-                    });
+                    }) || lower_buf == "da"
+                        || lower_buf == "daf";
                     let d_count = buf.matches('d').count() + buf.matches('D').count();
                     if !allowed || d_count > 2 {
                         clear_buffer = true;
@@ -891,8 +908,10 @@ fn render_file_panel(
                 }
                 if clear_buffer {
                     app.vim_buffer.clear();
+                    app.d_pending = false; // Reset pending state
                 }
             }
+
             if cursor_changed {
                 app.scroll_to_match = true;
             }

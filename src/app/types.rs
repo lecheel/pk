@@ -6,6 +6,7 @@ use std::collections::HashSet;
 #[derive(Clone, Debug)]
 pub enum Action {
     DeleteLines(usize),
+    DeleteFunction,
 }
 
 #[derive(Clone)]

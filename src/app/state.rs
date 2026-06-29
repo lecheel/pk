@@ -30,6 +30,7 @@ pub struct MergeApp {
     pub merged_range: Option<(usize, usize)>,
     pub history: Vec<(Vec<String>, usize)>,
     pub vim_buffer: String,
+    pub d_pending: bool,
     pub last_action: Option<Action>,
     pub file_states: HashMap<String, FileState>,
     pub show_help: bool,
@@ -79,6 +80,7 @@ impl MergeApp {
             merged_range: None,
             history: Vec::new(),
             vim_buffer: String::new(),
+            d_pending: false,
             last_action: None,
             file_states: HashMap::new(),
             show_help: false,
@@ -212,6 +214,7 @@ impl MergeApp {
         self.merged_range = None;
         self.history.clear();
         self.vim_buffer.clear();
+        self.d_pending = false;
         self.last_action = None;
         self.file_path.clear();
         self.file_states.clear();
@@ -295,6 +298,7 @@ impl MergeApp {
         self.cursor_line = None;
         self.scroll_to_match = true;
         self.vim_buffer.clear();
+        self.d_pending = false;
         self.last_action = None;
         self.left_selection = None;
         self.update_git_statuses();
@@ -322,6 +326,7 @@ impl MergeApp {
         self.merged_range = None;
         self.history.clear();
         self.vim_buffer.clear();
+        self.d_pending = false;
         self.file_anchors.clear();
         self.mark_pending = None;
         self.file_search_query.clear();

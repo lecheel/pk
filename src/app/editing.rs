@@ -1,3 +1,4 @@
+// file:///src/app/editing.rs
 use super::matching::MergeMatching;
 use super::state::MergeApp;
 use super::types::{Action, StatusMessage};
@@ -170,5 +171,130 @@ impl MergeApp {
                 saved, failed
             )));
         }
+    }
+
+    // In src/app/editing.rs
+    pub fn delete_function_around_cursor(&mut self) {
+        let cursor = match self.cursor_line {
+            Some(line) => line,
+            None => return,
+        };
+
+        // 1. Scan backwards to find the nearest function signature line
+        let mut fn_start_line = None;
+        for i in (0..=cursor).rev() {
+            if self.is_fn_line(&self.file_lines[i]) {
+                // Find any immediately preceding attributes or doc comments to delete as well
+                let mut real_start = i;
+                while real_start > 0 {
+                    let prev = self.file_lines[real_start - 1].trim();
+                    if prev.starts_with("#[") || prev.starts_with("///") || prev.starts_with("//!")
+                    {
+                        real_start -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                fn_start_line = Some((i, real_start));
+                break;
+            }
+        }
+
+        // 2. Scan forwards from the signature to balance the curly braces {}
+        let mut fn_end_line = None;
+        if let Some((sig_line, _)) = fn_start_line {
+            let mut balance = 0;
+            let mut found_open = false;
+            for j in sig_line..self.file_lines.len() {
+                let line = &self.file_lines[j];
+                let mut in_string = false;
+                let mut in_char = false;
+                let mut chars = line.chars().peekable();
+                while let Some(c) = chars.next() {
+                    if c == '/' && chars.peek() == Some(&'/') {
+                        // Ignore remaining characters in comment line
+                        break;
+                    }
+                    if c == '"' && !in_char {
+                        in_string = !in_string;
+                    } else if c == '\'' && !in_string {
+                        in_char = !in_char;
+                    } else if !in_string && !in_char {
+                        if c == '{' {
+                            if !found_open {
+                                found_open = true;
+                            }
+                            balance += 1;
+                        } else if c == '}' {
+                            if found_open {
+                                balance -= 1;
+                                if balance == 0 {
+                                    fn_end_line = Some(j);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if fn_end_line.is_some() {
+                    break;
+                }
+            }
+        }
+
+        // 3. Perform the deletion if a valid function enclosing the cursor was parsed
+        let mut target_range = None;
+        if let Some((_, start)) = fn_start_line {
+            if let Some(end) = fn_end_line {
+                if cursor >= start && cursor <= end {
+                    target_range = Some((start, end));
+                }
+            }
+        }
+
+        if let Some((start, end)) = target_range {
+            self.history
+                .push((self.file_lines.clone(), self.current_hunk));
+            self.file_lines.drain(start..=end);
+            self.recompute_match();
+            self.update_git_statuses();
+            self.cursor_line = Some(start.min(self.file_lines.len().saturating_sub(1)));
+            self.last_action = Some(Action::DeleteFunction); // Added here to register as repeatable action
+            self.set_message(StatusMessage::success("Function block deleted"));
+        } else {
+            self.set_message(StatusMessage::warning("No function found around cursor"));
+        }
+    }
+
+    /// Checks if a line contains a function signature declaration
+    fn is_fn_line(&self, line: &str) -> bool {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("*") {
+            return false;
+        }
+
+        let bytes = trimmed.as_bytes();
+        for i in 0..bytes.len().saturating_sub(1) {
+            if &bytes[i..i + 2] == b"fn" {
+                let ok_before = if i == 0 {
+                    true
+                } else {
+                    let c = bytes[i - 1];
+                    c.is_ascii_whitespace() || c == b')' || c == b']'
+                };
+
+                let ok_after = if i + 2 >= bytes.len() {
+                    true
+                } else {
+                    let c = bytes[i + 2];
+                    c.is_ascii_whitespace() || c == b'<' || c == b'(' || c == b'{'
+                };
+
+                if ok_before && ok_after {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
