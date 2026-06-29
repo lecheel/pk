@@ -33,7 +33,6 @@ pub struct MergeApp {
     pub last_action: Option<Action>,
     pub file_states: HashMap<String, FileState>,
     pub show_help: bool,
-    pub show_minimap: bool,
     pub left_selection: Option<(usize, usize)>,
     pub file_anchors: BTreeMap<char, FileAnchor>,
     pub mark_pending: Option<MarkPending>,
@@ -75,7 +74,6 @@ impl MergeApp {
             last_action: None,
             file_states: HashMap::new(),
             show_help: false,
-            show_minimap: true,
             left_selection: None,
             file_anchors: BTreeMap::new(),
             mark_pending: None,
@@ -304,13 +302,6 @@ impl eframe::App for MergeApp {
                 {
                     self.show_help = !self.show_help;
                 }
-                if !self.is_searching
-                    && i.events
-                        .iter()
-                        .any(|e| matches!(e, Event::Text(t) if t == "o" || t == "O"))
-                {
-                    self.show_minimap = !self.show_minimap;
-                }
             });
         }
         if self.is_searching {
@@ -407,15 +398,7 @@ impl eframe::App for MergeApp {
                 });
                 return;
             }
-            if self.show_minimap {
-                super::minimap::render_with_minimap(self, ui);
-            } else {
-                SidePanel::left("minimap_collapsed")
-                    .resizable(false)
-                    .exact_width(0.0)
-                    .show_inside(ui, |_| {});
-                super::split_view::render_split_view(self, ui);
-            }
+            super::split_view::render_split_view(self, ui);
         });
     }
 }

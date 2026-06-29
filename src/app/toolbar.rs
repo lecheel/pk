@@ -128,20 +128,6 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
 
                 ui.add(Separator::default().vertical().spacing(12.0));
 
-                // Minimap toggle + help
-                let minimap_label = if app.show_minimap {
-                    "▪ Map"
-                } else {
-                    "□ Map"
-                };
-                if ui
-                    .button(minimap_label)
-                    .on_hover_text("Toggle hunk minimap (M)")
-                    .clicked()
-                {
-                    app.show_minimap = !app.show_minimap;
-                }
-
                 if ui
                     .button("📋 Copy Prompt")
                     .on_hover_text("Copy patch prompt template to clipboard")

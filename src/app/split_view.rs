@@ -399,8 +399,10 @@ fn render_file_panel(
     let mut next_search_match = false;
     let mut prev_search_match = false;
     let mut clear_search = false;
-    let mut go_next_hunk = false; // Moved up here
-    let mut go_prev_hunk = false; // Moved up here
+    let mut go_next_hunk = false;
+    let mut go_prev_hunk = false;
+    let mut go_next_file = false;
+    let mut go_prev_file = false;
 
     let current_hunk_idx = app.current_hunk;
     let total_hunks = app.hunks.len();
@@ -416,12 +418,53 @@ fn render_file_panel(
         file_anchors.values().next().unwrap().line + 1
     };
 
+    // Fix: Use a Vec to maintain insertion order deterministically
+    let mut unique_files = Vec::new();
+    for h in &app.hunks {
+        if !unique_files.contains(&h.filename) {
+            unique_files.push(h.filename.clone());
+        }
+    }
+    let current_file_name = app
+        .current_hunk()
+        .map(|h| h.filename.clone())
+        .unwrap_or_default();
+    let current_file_idx = unique_files
+        .iter()
+        .position(|f| *f == current_file_name)
+        .unwrap_or(0);
+
     Frame::none()
         .fill(Color32::from_rgb(25, 32, 42))
         .inner_margin(Margin::symmetric(6.0, 4.0))
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
+
+                if unique_files.len() > 1 {
+                    ui.label(RichText::new("File:").color(pal::TEXT_DIM).small());
+                    if ui
+                        .add_enabled(current_file_idx > 0, Button::new("◀").small())
+                        .clicked()
+                    {
+                        go_prev_file = true;
+                    }
+                    ui.label(
+                        RichText::new(format!("{}/{}", current_file_idx + 1, unique_files.len()))
+                            .monospace(),
+                    );
+                    if ui
+                        .add_enabled(
+                            current_file_idx + 1 < unique_files.len(),
+                            Button::new("▶").small(),
+                        )
+                        .clicked()
+                    {
+                        go_next_file = true;
+                    }
+                    ui.separator();
+                }
+
                 ui.label(RichText::new("Hunk:").color(pal::TEXT_DIM).small());
                 if ui
                     .add_enabled(current_hunk_idx > 0, Button::new("◀").small())
@@ -459,7 +502,6 @@ fn render_file_panel(
                         clear_marks_flag = true;
                     }
                 } else {
-                    // ▲ and ▼ buttons mapping EXACTLY to L and Shift+L
                     if ui
                         .add(Button::new("^").small())
                         .on_hover_text("Previous (Shift+L)")
@@ -703,6 +745,34 @@ fn render_file_panel(
             if cursor_changed {
                 app.scroll_to_match = true;
             }
+        }
+    }
+
+    if go_prev_file {
+        let mut prev_file_hunk = None;
+        for (i, h) in app.hunks.iter().enumerate() {
+            if i < app.current_hunk && h.filename != current_file_name {
+                prev_file_hunk = Some(i);
+            }
+        }
+        if let Some(idx) = prev_file_hunk {
+            app.current_hunk = idx;
+            app.load_hunk();
+            return;
+        }
+    }
+    if go_next_file {
+        let mut next_file_hunk = None;
+        for (i, h) in app.hunks.iter().enumerate() {
+            if i > app.current_hunk && h.filename != current_file_name {
+                next_file_hunk = Some(i);
+                break;
+            }
+        }
+        if let Some(idx) = next_file_hunk {
+            app.current_hunk = idx;
+            app.load_hunk();
+            return;
         }
     }
 
