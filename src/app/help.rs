@@ -1,40 +1,42 @@
+//--+ file:///src/app/help.rs
 use super::palette::pal;
 use super::state::MergeApp;
 use eframe::egui::*;
-
 pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
     let screen = ctx.screen_rect();
-    let overlay_w = 440.0_f32;
-    let overlay_h = 420.0_f32;
+    let overlay_w = 460.0_f32;
+    let overlay_h = 440.0_f32;
     let pos = Pos2::new(
         (screen.center().x - overlay_w / 2.0).max(8.0),
         (screen.center().y - overlay_h / 2.0).max(8.0),
     );
     let overlay_rect = Rect::from_min_size(pos, Vec2::new(overlay_w, overlay_h));
-    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("help_overlay")));
-    painter.rect_filled(screen, 0.0, Color32::from_black_alpha(160));
-    painter.rect_filled(overlay_rect, 6.0, Color32::from_rgb(22, 28, 38));
-    painter.rect_stroke(overlay_rect, 6.0, Stroke::new(1.0, pal::SEPARATOR));
 
-    Area::new(Id::new("help_area"))
-        .fixed_pos(pos)
+    // Dim the entire background behind the help window
+    // let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("help_overlay_dim")));
+    // painter.rect_filled(screen, 0.0, Color32::from_black_alpha(140));
+
+    let mut open = app.show_help;
+    Window::new("⌨ Keyboard shortcuts")
+        .open(&mut open)
+        .fixed_rect(overlay_rect)
+        .collapsible(false)
+        .resizable(false)
+        .frame(
+            Frame::none()
+                .fill(Color32::from_rgb(22, 28, 38))
+                .inner_margin(Margin::symmetric(16.0, 12.0))
+                .rounding(6.0)
+                .stroke(Stroke::new(1.0, pal::SEPARATOR)),
+        )
         .show(ctx, |ui| {
-            ui.set_min_size(Vec2::new(overlay_w, overlay_h));
-            ui.add_space(12.0);
             ui.horizontal(|ui| {
-                ui.add_space(16.0);
                 ui.label(
                     RichText::new("Keyboard shortcuts")
                         .color(pal::ACCENT_INFO)
                         .strong()
                         .heading(),
                 );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.add_space(12.0);
-                    if ui.button("✕").clicked() {
-                        app.show_help = false;
-                    }
-                });
             });
             ui.add_space(8.0);
             ui.add(Separator::default());
@@ -46,6 +48,8 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
                 ("PgUp / PgDn", "Move cursor 10 lines"),
                 ("Home / End", "Jump to first / last line"),
                 ("gg / G", "Jump to top / bottom (vim)"),
+                ("]h / [h", "Jump to next / previous git hunk"),
+                ("Alt+= / Alt+-", "Jump to next / previous file"),
                 ("", ""),
                 ("Hunk control", ""),
                 ("L", "Next hunk"),
@@ -59,6 +63,10 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
                 ("", "  → selects lines [ma, mb] in right buffer"),
                 ("", "  → links to left-panel selection via > button"),
                 ("Esc", "Clear both marks / cancel pending 'm'"),
+                ("", ""),
+                ("Git Diff Display", ""),
+                ("F4", "Toggle full git diff window"),
+                ("Mouse Hover", "Hover modified line to show diff"),
                 ("", ""),
                 ("Editing", ""),
                 ("A", "Apply current hunk (cursor in match or on ma)"),
@@ -76,7 +84,7 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
             ];
 
             ScrollArea::vertical()
-                .max_height(overlay_h - 110.0)
+                .max_height(overlay_h - 100.0)
                 .show(ui, |ui| {
                     for (key, desc) in shortcuts {
                         if desc.is_empty() {
@@ -88,9 +96,9 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
                             }
                         } else {
                             ui.horizontal(|ui| {
-                                ui.add_space(12.0);
+                                ui.add_space(4.0);
                                 let key_rect =
-                                    ui.allocate_exact_size(Vec2::new(140.0, 18.0), Sense::hover());
+                                    ui.allocate_exact_size(Vec2::new(130.0, 18.0), Sense::hover());
                                 ui.painter_at(key_rect.0).text(
                                     key_rect.0.left_center(),
                                     Align2::LEFT_CENTER,
@@ -103,14 +111,6 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
                         }
                     }
                 });
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.add_space(16.0);
-                ui.label(
-                    RichText::new("Esc or click ✕ to close")
-                        .color(pal::TEXT_DIM)
-                        .small(),
-                );
-            });
         });
+    app.show_help = open;
 }

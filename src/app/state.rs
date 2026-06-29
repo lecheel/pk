@@ -1,4 +1,3 @@
-//--+ file:///src/app/state.rs
 use super::constants::{DEFAULT_FILE, DEFAULT_PATCH};
 use super::git_ops::GitStatus;
 use super::matching::MergeMatching;
@@ -44,6 +43,7 @@ pub struct MergeApp {
     pub git_diff_rows: Vec<crate::diff::DiffRow>,
     pub git_hunks: Vec<super::git_ops::GitDiffHunk>,
     pub show_git_diff_window: bool,
+    pub filter_low_matches: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
@@ -92,6 +92,7 @@ impl MergeApp {
             git_diff_rows: Vec::new(),
             git_hunks: Vec::new(),
             show_git_diff_window: false,
+            filter_low_matches: false,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -124,6 +125,45 @@ impl MergeApp {
         }
         app.reparse();
         app
+    }
+    pub fn is_hunk_match_ok(&self, hunk_idx: usize) -> bool {
+        if let Some(hunk) = self.hunks.get(hunk_idx) {
+            let best = crate::diff::find_best_match(&hunk.search, &self.file_lines);
+            best.score >= 60.0
+        } else {
+            false
+        }
+    }
+    pub fn ensure_valid_filtered_hunk(&mut self) {
+        if !self.filter_low_matches {
+            return;
+        }
+        if self.hunks.is_empty() {
+            return;
+        }
+        if !self.is_hunk_match_ok(self.current_hunk) {
+            let mut found = None;
+            for i in self.current_hunk..self.hunks.len() {
+                if self.is_hunk_match_ok(i) {
+                    found = Some(i);
+                    break;
+                }
+            }
+            if found.is_none() {
+                for i in 0..self.current_hunk {
+                    if self.is_hunk_match_ok(i) {
+                        found = Some(i);
+                        break;
+                    }
+                }
+            }
+            if let Some(idx) = found {
+                self.current_hunk = idx;
+                self.load_hunk();
+            } else {
+                self.set_message(StatusMessage::warning("No hunks have match score >= 60%"));
+            }
+        }
     }
     pub fn set_message(&mut self, msg: StatusMessage) {
         self.message = Some(msg);
@@ -297,6 +337,7 @@ impl MergeApp {
         self.git_hunks.clear();
     }
 }
+
 impl eframe::App for MergeApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         if self.message.is_some() {
@@ -416,9 +457,29 @@ impl eframe::App for MergeApp {
         }
         super::toolbar::render_toolbar(self, ctx);
         super::status_bar::render_status_bar(self, ctx);
+
+        CentralPanel::default().show(ctx, |ui| {
+            if self.hunks.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(80.0);
+                    ui.heading("No patches found");
+                    ui.label("Open a .md file containing <patch> blocks.");
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("Press ? for keyboard shortcuts")
+                            .color(super::palette::pal::TEXT_DIM)
+                            .small(),
+                    );
+                });
+                return;
+            }
+            super::split_view::render_split_view(self, ui);
+        });
+
         if self.show_help {
             super::help::render_help_overlay(self, ctx);
         }
+
         if self.show_debug {
             let mut show_debug = self.show_debug;
             Window::new("🐞 App diagnostics")
@@ -569,22 +630,5 @@ impl eframe::App for MergeApp {
                 });
             self.show_debug = show_debug;
         }
-        CentralPanel::default().show(ctx, |ui| {
-            if self.hunks.is_empty() {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(80.0);
-                    ui.heading("No patches found");
-                    ui.label("Open a .md file containing <patch> blocks.");
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new("Press ? for keyboard shortcuts")
-                            .color(super::palette::pal::TEXT_DIM)
-                            .small(),
-                    );
-                });
-                return;
-            }
-            super::split_view::render_split_view(self, ui);
-        });
     }
 }

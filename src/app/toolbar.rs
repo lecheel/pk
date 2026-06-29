@@ -1,10 +1,9 @@
-use eframe::egui::*;
-
+//--+ file:///src/app/toolbar.rs
 use super::matching::MergeMatching;
 use super::palette::pal;
 use super::state::MergeApp;
 use super::types::StatusMessage;
-
+use eframe::egui::*;
 pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
     TopBottomPanel::top("toolbar")
         .frame(
@@ -16,7 +15,6 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().button_padding = Vec2::new(8.0, 4.0);
                 ui.spacing_mut().item_spacing.x = 6.0;
-
                 ui.label(
                     RichText::new("patch·merge")
                         .color(pal::ACCENT_INFO)
@@ -24,8 +22,6 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                         .monospace(),
                 );
                 ui.add(Separator::default().vertical().spacing(12.0));
-
-                // File open controls
                 if ui.button("Open Patch…").clicked() {
                     if let Some(path) = rfd::FileDialog::new()
                         .add_filter("Patch", &["md", "txt"])
@@ -40,7 +36,6 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                         }
                     }
                 }
-
                 if ui.button("Open File…").clicked() {
                     if let Some(path) = rfd::FileDialog::new().pick_file() {
                         if let Ok(content) = std::fs::read_to_string(&path) {
@@ -55,10 +50,7 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                         }
                     }
                 }
-
                 ui.add(Separator::default().vertical().spacing(12.0));
-
-                // Match score badge
                 if let Some(ref mr) = app.match_result {
                     let (bg, fg, icon) = MergeApp::score_appearance(mr.score);
                     let frame = Frame::none()
@@ -76,8 +68,6 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                     });
                     ui.add(Separator::default().vertical().spacing(12.0));
                 }
-
-                // Hunk progress
                 let (applied, pending, total) = app.hunk_summary();
                 if total > 0 {
                     let frac = applied as f32 / total as f32;
@@ -101,8 +91,18 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                     );
                     ui.add(Separator::default().vertical().spacing(12.0));
                 }
-
-                // Save controls
+                let mut filter_low = app.filter_low_matches;
+                if ui
+                    .checkbox(&mut filter_low, "Filter <60%")
+                    .on_hover_text("Skip and hide hunks with less than 60% match score")
+                    .changed()
+                {
+                    app.filter_low_matches = filter_low;
+                    if filter_low {
+                        app.ensure_valid_filtered_hunk();
+                    }
+                }
+                ui.add(Separator::default().vertical().spacing(12.0));
                 let has_unsaved = !app.applied_hunks.is_empty();
                 ui.add_enabled_ui(has_unsaved, |ui| {
                     if ui
@@ -117,7 +117,6 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                         app.save_file();
                     }
                 });
-
                 if ui
                     .button("💾 Save All")
                     .on_hover_text("Save every modified file")
@@ -125,9 +124,7 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                 {
                     app.save_all_files();
                 }
-
                 ui.add(Separator::default().vertical().spacing(12.0));
-
                 if ui
                     .button("📋 Copy Prompt")
                     .on_hover_text("Copy patch prompt template to clipboard")
@@ -136,7 +133,6 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                     ctx.copy_text(super::constants::PROMPT_TEMPLATE.to_string());
                     app.set_message(StatusMessage::success("Prompt copied to clipboard!"));
                 }
-
                 if ui.button("?").on_hover_text("Keyboard shortcuts").clicked() {
                     app.show_help = !app.show_help;
                 }

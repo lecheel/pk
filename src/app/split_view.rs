@@ -1,4 +1,3 @@
-//--+ file:///src/app/split_view.rs
 use super::git_ops::GitStatus;
 use super::matching::MergeMatching;
 use super::palette::pal;
@@ -522,8 +521,17 @@ fn render_file_panel(
                         go_prev_file = true;
                     }
                     ui.label(
-                        RichText::new(format!("{}/{}", current_file_idx + 1, unique_files.len()))
-                            .monospace(),
+                        RichText::new(format!(
+                            "{}/{}{}",
+                            current_file_idx + 1,
+                            unique_files.len(),
+                            if app.filter_low_matches {
+                                " (filtered)"
+                            } else {
+                                ""
+                            }
+                        ))
+                        .monospace(),
                     );
                     if ui
                         .add_enabled(
@@ -545,7 +553,17 @@ fn render_file_panel(
                     prev_hunk = true;
                 }
                 ui.label(
-                    RichText::new(format!("{}/{}", current_hunk_idx + 1, total_hunks)).monospace(),
+                    RichText::new(format!(
+                        "{}/{}{}",
+                        current_hunk_idx + 1,
+                        total_hunks,
+                        if app.filter_low_matches {
+                            " (filtered)"
+                        } else {
+                            ""
+                        }
+                    ))
+                    .monospace(),
                 );
                 if ui
                     .add_enabled(current_hunk_idx < total_hunks - 1, Button::new("▶").small())
@@ -678,6 +696,12 @@ fn render_file_panel(
             let mut new_text = String::new();
             ui.input(|i| {
                 let cur = app.cursor_line.unwrap_or(0);
+                if i.key_pressed(Key::Equals) && i.modifiers.alt {
+                    go_next_file = true;
+                }
+                if i.key_pressed(Key::Minus) && i.modifiers.alt {
+                    go_prev_file = true;
+                }
                 if i.key_pressed(Key::ArrowDown) {
                     app.cursor_line = Some((cur + 1).min(len - 1));
                     cursor_changed = true;
@@ -878,7 +902,9 @@ fn render_file_panel(
         let mut prev_file_hunk = None;
         for (i, h) in app.hunks.iter().enumerate() {
             if i < app.current_hunk && h.filename != current_file_name {
-                prev_file_hunk = Some(i);
+                if !app.filter_low_matches || app.is_hunk_match_ok(i) {
+                    prev_file_hunk = Some(i);
+                }
             }
         }
         if let Some(idx) = prev_file_hunk {
@@ -891,8 +917,10 @@ fn render_file_panel(
         let mut next_file_hunk = None;
         for (i, h) in app.hunks.iter().enumerate() {
             if i > app.current_hunk && h.filename != current_file_name {
-                next_file_hunk = Some(i);
-                break;
+                if !app.filter_low_matches || app.is_hunk_match_ok(i) {
+                    next_file_hunk = Some(i);
+                    break;
+                }
             }
         }
         if let Some(idx) = next_file_hunk {
@@ -902,14 +930,48 @@ fn render_file_panel(
         }
     }
     if prev_hunk && current_hunk_idx > 0 {
-        app.current_hunk -= 1;
-        app.load_hunk();
-        return;
+        if app.filter_low_matches {
+            let mut target = None;
+            for i in (0..current_hunk_idx).rev() {
+                if app.is_hunk_match_ok(i) {
+                    target = Some(i);
+                    break;
+                }
+            }
+            if let Some(idx) = target {
+                app.current_hunk = idx;
+                app.load_hunk();
+                return;
+            } else {
+                app.set_message(StatusMessage::info("No previous hunk matching >= 60%"));
+            }
+        } else {
+            app.current_hunk -= 1;
+            app.load_hunk();
+            return;
+        }
     }
     if next_hunk && current_hunk_idx < total_hunks - 1 {
-        app.current_hunk += 1;
-        app.load_hunk();
-        return;
+        if app.filter_low_matches {
+            let mut target = None;
+            for i in current_hunk_idx + 1..total_hunks {
+                if app.is_hunk_match_ok(i) {
+                    target = Some(i);
+                    break;
+                }
+            }
+            if let Some(idx) = target {
+                app.current_hunk = idx;
+                app.load_hunk();
+                return;
+            } else {
+                app.set_message(StatusMessage::info("No next hunk matching >= 60%"));
+            }
+        } else {
+            app.current_hunk += 1;
+            app.load_hunk();
+            return;
+        }
     }
     if clear_marks_flag {
         app.clear_marks();
@@ -969,9 +1031,24 @@ fn render_file_panel(
     }
     if go_next_hunk {
         if app.current_hunk < app.hunks.len() - 1 {
-            app.current_hunk += 1;
-            app.load_hunk();
-            return;
+            if app.filter_low_matches {
+                let mut target = None;
+                for i in app.current_hunk + 1..app.hunks.len() {
+                    if app.is_hunk_match_ok(i) {
+                        target = Some(i);
+                        break;
+                    }
+                }
+                if let Some(idx) = target {
+                    app.current_hunk = idx;
+                    app.load_hunk();
+                    return;
+                }
+            } else {
+                app.current_hunk += 1;
+                app.load_hunk();
+                return;
+            }
         } else {
             app.cursor_line = Some(mr.file_start);
             app.scroll_to_match = true;
@@ -979,9 +1056,24 @@ fn render_file_panel(
     }
     if go_prev_hunk {
         if app.current_hunk > 0 {
-            app.current_hunk -= 1;
-            app.load_hunk();
-            return;
+            if app.filter_low_matches {
+                let mut target = None;
+                for i in (0..app.current_hunk).rev() {
+                    if app.is_hunk_match_ok(i) {
+                        target = Some(i);
+                        break;
+                    }
+                }
+                if let Some(idx) = target {
+                    app.current_hunk = idx;
+                    app.load_hunk();
+                    return;
+                }
+            } else {
+                app.current_hunk -= 1;
+                app.load_hunk();
+                return;
+            }
         } else {
             app.cursor_line = Some(mr.file_start);
             app.scroll_to_match = true;
