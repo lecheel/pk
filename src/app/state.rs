@@ -7,6 +7,31 @@ use crate::diff::MatchResult;
 use crate::patch::PatchHunk;
 use eframe::egui::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
+
+#[derive(Clone, Debug)]
+pub struct SyncAnchor {
+    pub id: usize,
+    pub left_line: usize,
+    pub right_line: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PendingSync {
+    WaitingRight { left_line: usize },
+    WaitingLeft { right_line: usize },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineAction {
+    pub line_idx: usize,
+    pub kind: LineActionKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum LineActionKind {
+    Remove,
+}
+
 pub struct MergeApp {
     pub patch_text: String,
     pub hunks: Vec<PatchHunk>,
@@ -48,6 +73,12 @@ pub struct MergeApp {
     pub git_hunks: Vec<super::git_ops::GitDiffHunk>,
     pub show_git_diff_window: bool,
     pub filter_low_matches: bool,
+    pub sync_anchors: Vec<SyncAnchor>,
+    pub pending_sync: Option<PendingSync>,
+    pub next_sync_id: usize,
+    pub pending_line_actions: Vec<LineAction>,
+    pub del_start: Option<usize>,
+    pub del_end: Option<usize>,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
@@ -101,6 +132,12 @@ impl MergeApp {
             git_hunks: Vec::new(),
             show_git_diff_window: false,
             filter_low_matches: false,
+            sync_anchors: Vec::new(),
+            pending_sync: None,
+            next_sync_id: 1,
+            pending_line_actions: Vec::new(),
+            del_start: None,
+            del_end: None,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -152,6 +189,12 @@ impl MergeApp {
             false
         }
     }
+
+    pub fn save_history(&mut self) {
+        self.history
+            .push((self.file_lines.clone(), self.cursor_line.unwrap_or(0)));
+    }
+
     pub fn ensure_valid_filtered_hunk(&mut self) {
         if !self.filter_low_matches {
             return;
@@ -212,6 +255,51 @@ impl MergeApp {
             .as_ref()
             .map(|mr| (mr.file_start, mr.file_end))
     }
+    pub fn toggle_line_removal(&mut self, line_idx: usize) {
+        if let Some(pos) = self
+            .pending_line_actions
+            .iter()
+            .position(|a| a.line_idx == line_idx)
+        {
+            self.pending_line_actions.remove(pos);
+        } else {
+            self.pending_line_actions.push(LineAction {
+                line_idx,
+                kind: LineActionKind::Remove,
+            });
+        }
+    }
+
+    pub fn is_pending_remove(&self, line_idx: usize) -> bool {
+        self.pending_line_actions
+            .iter()
+            .any(|a| a.line_idx == line_idx)
+    }
+
+    pub fn apply_line_removals(&mut self) {
+        if self.pending_line_actions.is_empty() {
+            return;
+        }
+        self.save_history();
+        let indices: HashSet<usize> = self
+            .pending_line_actions
+            .iter()
+            .map(|a| a.line_idx)
+            .collect();
+        self.file_lines = self
+            .file_lines
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !indices.contains(i))
+            .map(|(_, l)| l.clone())
+            .collect();
+        let count = self.pending_line_actions.len();
+        self.pending_line_actions.clear();
+        self.recompute_match();
+        self.scroll_to_match = true;
+        self.set_message(StatusMessage::success(format!("Removed {} lines", count)));
+    }
+
     pub fn update_git_statuses(&mut self) {
         let repo_root = std::path::Path::new(&self.base_dir);
         let file_path = std::path::Path::new(&self.file_path);
@@ -236,6 +324,11 @@ impl MergeApp {
         self.last_action = None;
         self.file_path.clear();
         self.file_states.clear();
+        self.sync_anchors.clear();
+        self.pending_sync = None;
+        self.pending_line_actions.clear();
+        self.del_start = None;
+        self.del_end = None;
         self.load_hunk();
     }
     pub fn save_file_state(&mut self) {
@@ -321,6 +414,11 @@ impl MergeApp {
         self.manual_paste_text.clear();
         self.last_action = None;
         self.left_selection = None;
+        self.sync_anchors.clear();
+        self.pending_sync = None;
+        self.pending_line_actions.clear();
+        self.del_start = None;
+        self.del_end = None;
         self.update_git_statuses();
         self.recompute_match();
     }
@@ -362,6 +460,11 @@ impl MergeApp {
         self.git_statuses.clear();
         self.git_diff_rows.clear();
         self.git_hunks.clear();
+        self.sync_anchors.clear();
+        self.pending_sync = None;
+        self.pending_line_actions.clear();
+        self.del_start = None;
+        self.del_end = None;
     }
 }
 
@@ -381,11 +484,16 @@ impl eframe::App for MergeApp {
         if ctx.input(|i| i.key_pressed(Key::F4)) {
             self.show_git_diff_window = !self.show_git_diff_window;
         }
+        if ctx.input(|i| i.key_pressed(Key::F3)) {
+            self.show_debug = !self.show_debug;
+        }
         if !ctx.wants_keyboard_input() || self.is_searching {
             ctx.input(|i| {
                 if i.key_pressed(Key::Escape) {
                     if self.show_help {
                         self.show_help = false;
+                    } else if self.show_debug {
+                        self.show_debug = false;
                     } else if self.show_git_diff_window {
                         self.show_git_diff_window = false;
                     } else if self.is_searching {
@@ -393,10 +501,15 @@ impl eframe::App for MergeApp {
                         self.file_search_query.clear();
                         self.search_matches.clear();
                         self.scroll_to_match = true;
+                    } else if self.pending_sync.is_some() {
+                        self.pending_sync = None;
                     } else if !self.file_anchors.is_empty() || self.mark_pending.is_some() {
                         self.clear_marks();
                     } else if self.left_selection.is_some() {
                         self.left_selection = None;
+                    } else if self.del_start.is_some() || self.del_end.is_some() {
+                        self.del_start = None;
+                        self.del_end = None;
                     }
                 }
                 if !self.is_searching
@@ -479,6 +592,90 @@ impl eframe::App for MergeApp {
                                 );
                             });
                         }
+                    });
+                });
+        }
+        if self.pending_sync.is_some() {
+            TopBottomPanel::bottom("sync_hud")
+                .frame(
+                    Frame::none()
+                        .fill(Color32::from_rgb(35, 30, 15))
+                        .inner_margin(Margin::symmetric(10.0, 4.0)),
+                )
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        let text = match &self.pending_sync {
+                            Some(PendingSync::WaitingRight { left_line }) => {
+                                format!(
+                                    "Sync L@{} \u{2192} click file line or press S \u{00b7} ESC cancel",
+                                    left_line + 1
+                                )
+                            }
+                            Some(PendingSync::WaitingLeft { right_line }) => {
+                                format!(
+                                    "Sync R@{} \u{2192} click search line \u{00b7} ESC cancel",
+                                    right_line + 1
+                                )
+                            }
+                            None => String::new(),
+                        };
+                        ui.label(
+                            RichText::new(text)
+                                .color(Color32::from_rgb(255, 200, 80))
+                                .monospace()
+                                .small(),
+                        );
+                    });
+                });
+        }
+        if self.del_start.is_some() || self.del_end.is_some() {
+            TopBottomPanel::bottom("block_delete_hud")
+                .frame(
+                    Frame::none()
+                        .fill(Color32::from_rgb(45, 20, 20))
+                        .inner_margin(Margin::symmetric(10.0, 4.0)),
+                )
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        let mut msg = "Block Delete:".to_string();
+                        if let Some(start) = self.del_start {
+                            msg.push_str(&format!(" Start @ Line {}", start + 1));
+                        }
+                        if let Some(end) = self.del_end {
+                            msg.push_str(&format!(" End @ Line {}", end + 1));
+                        }
+                        ui.label(
+                            RichText::new(&msg)
+                                .color(pal::TEXT_DELETE)
+                                .strong()
+                                .monospace()
+                                .small(),
+                        );
+                        if self.del_start.is_some() && self.del_end.is_some() {
+                            let start = self.del_start.unwrap();
+                            let end = self.del_end.unwrap();
+                            let min = start.min(end);
+                            let max = start.max(end);
+                            let count = max - min + 1;
+                            ui.add(Separator::default().vertical());
+                            let btn = Button::new(
+                                RichText::new(format!("Delete block ({} lines)", count))
+                                    .color(Color32::WHITE)
+                                    .strong()
+                                    .small()
+                                    .monospace(),
+                            )
+                            .fill(Color32::from_rgb(120, 40, 40));
+                            if ui.add(btn).clicked() {
+                                self.delete_block_range(min, max);
+                            }
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.button("Clear block selection").clicked() {
+                                self.del_start = None;
+                                self.del_end = None;
+                            }
+                        });
                     });
                 });
         }

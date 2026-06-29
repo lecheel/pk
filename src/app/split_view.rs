@@ -744,6 +744,7 @@ fn render_search_panel(
     }
 }
 
+
 fn render_file_panel(
     app: &mut MergeApp,
     ui: &mut Ui,
@@ -1404,6 +1405,10 @@ fn render_file_panel(
     let git_statuses = app.git_statuses.clone();
     let mut did_scroll = false;
     let mut set_cursor: Option<usize> = None;
+    let mut set_del_start: Option<usize> = None;
+    let mut set_del_end: Option<usize> = None;
+    let mut clear_del = false;
+    let mut perform_block_delete: Option<(usize, usize)> = None;
     let delete_file_indices: HashSet<usize> = app
         .search_rows
         .iter()
@@ -1428,6 +1433,12 @@ fn render_file_panel(
                 let in_merged = merged_range.map_or(false, |(rs, re)| i >= rs && i < re);
                 let is_delete = in_auto_match && delete_file_indices.contains(&i);
                 let is_equal = in_auto_match && equal_file_indices.contains(&i);
+                let in_block_delete = match (app.del_start, app.del_end) {
+                    (Some(s), Some(e)) => i >= s.min(e) && i <= s.max(e),
+                    (Some(s), None) => i == s,
+                    (None, Some(e)) => i == e,
+                    (None, None) => false,
+                };
                 let is_search_hit = !search_query.is_empty()
                     && line.to_lowercase().contains(&search_query.to_lowercase());
                 let is_current_search = is_search_hit && current_search_line == Some(i);
@@ -1494,7 +1505,9 @@ fn render_file_panel(
                         apply_clicked_id = Some(anchor.id);
                     }
                 } else {
-                    let base_bg = if in_merged {
+                    let base_bg = if in_block_delete {
+                        pal::BG_DELETE
+                    } else if in_merged {
                         pal::BG_MERGED
                     } else if is_delete {
                         pal::BG_DELETE
@@ -1581,7 +1594,9 @@ fn render_file_panel(
                         Pos2::new(rect.left() + 2.0, rect.top()),
                         Vec2::new(3.0, rect.height()),
                     );
-                    let bar_color = if in_merged {
+                    let bar_color = if in_block_delete {
+                        pal::TEXT_DELETE
+                    } else if in_merged {
                         pal::BAR_MERGED
                     } else if is_delete {
                         pal::TEXT_DELETE
@@ -1600,7 +1615,9 @@ fn render_file_panel(
                     if row_resp.clicked() {
                         set_cursor = Some(i);
                     }
-                    let num_color = if in_merged {
+                    let num_color = if in_block_delete {
+                        pal::TEXT_DELETE
+                    } else if in_merged {
                         pal::TEXT_LNUM_ACTIVE
                     } else if is_delete {
                         pal::TEXT_DELETE
@@ -1638,7 +1655,9 @@ fn render_file_panel(
                             glyph_color,
                         );
                     }
-                    let text_color = if in_merged {
+                    let text_color = if in_block_delete {
+                        pal::TEXT_DELETE
+                    } else if in_merged {
                         pal::TEXT_MERGED
                     } else if is_delete {
                         pal::TEXT_DELETE
@@ -1712,6 +1731,37 @@ fn render_file_panel(
                         .allocate_exact_size(Vec2::new(ui.available_width(), 2.0), Sense::hover());
                     ui.painter().rect_filled(sep_rect, 0.0, pal::BAR_MATCH);
                 }
+
+                row_resp.context_menu(|ui| {
+                    ui.label(RichText::new(format!("Line {}", i + 1)).strong());
+                    ui.separator();
+                    if ui.button("Set Block Delete Start").clicked() {
+                        set_del_start = Some(i);
+                        ui.close_menu();
+                    }
+                    if ui.button("Set Block Delete End").clicked() {
+                        set_del_end = Some(i);
+                        ui.close_menu();
+                    }
+                    if app.del_start.is_some() || app.del_end.is_some() {
+                        if ui.button("Clear Block Selection").clicked() {
+                            clear_del = true;
+                            ui.close_menu();
+                        }
+                    }
+                    if let Some(start) = app.del_start {
+                        if let Some(end) = app.del_end {
+                            ui.separator();
+                            let min = start.min(end);
+                            let max = start.max(end);
+                            let count = max - min + 1;
+                            if ui.button(format!("Delete Block ({} lines)", count)).clicked() {
+                                perform_block_delete = Some((min, max));
+                                ui.close_menu();
+                            }
+                        }
+                    }
+                });
             }
             ui.add_space(row_h * 3.0);
         });
@@ -1732,5 +1782,18 @@ fn render_file_panel(
     }
     if let Some(id) = apply_clicked_id {
         app.apply_merge(None, Some(id));
+    }
+    if let Some(val) = set_del_start {
+        app.del_start = Some(val);
+    }
+    if let Some(val) = set_del_end {
+        app.del_end = Some(val);
+    }
+    if clear_del {
+        app.del_start = None;
+        app.del_end = None;
+    }
+    if let Some((min, max)) = perform_block_delete {
+        app.delete_block_range(min, max);
     }
 }

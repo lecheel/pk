@@ -266,6 +266,35 @@ impl MergeApp {
         }
     }
 
+    pub fn delete_block_range(&mut self, min: usize, max: usize) {
+        if min < self.file_lines.len() && max < self.file_lines.len() {
+            self.history
+                .push((self.file_lines.clone(), self.current_hunk));
+            let count = max - min + 1;
+            self.file_lines.drain(min..=max);
+            self.merged_range = None;
+            self.del_start = None;
+            self.del_end = None;
+            self.recompute_match();
+            self.update_git_statuses();
+            let new_len = self.file_lines.len();
+            if new_len == 0 {
+                self.cursor_line = None;
+            } else if min >= new_len {
+                self.cursor_line = Some(new_len - 1);
+            } else {
+                self.cursor_line = Some(min);
+            }
+            self.scroll_to_match = true;
+            self.set_message(StatusMessage::success(format!(
+                "Deleted block of {} line(s) (lines {} to {})",
+                count,
+                min + 1,
+                max + 1
+            )));
+        }
+    }
+
     /// Checks if a line contains a function signature declaration
     fn is_fn_line(&self, line: &str) -> bool {
         let trimmed = line.trim();
