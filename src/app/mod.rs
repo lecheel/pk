@@ -1,5 +1,6 @@
 mod constants;
 mod editing;
+mod git_ops;
 mod help;
 mod matching;
 mod minimap;

@@ -1,3 +1,4 @@
+use super::git_ops::GitStatus;
 use super::matching::MergeMatching;
 use super::palette::pal;
 use super::state::{MarkPending, MergeApp};
@@ -502,7 +503,7 @@ fn render_file_panel(
                     }
                 } else {
                     if ui
-                        .add(Button::new("▲").small())
+                        .add(Button::new("^").small())
                         .on_hover_text("Previous (Shift+L)")
                         .clicked()
                     {
@@ -513,7 +514,7 @@ fn render_file_panel(
                         }
                     }
                     if ui
-                        .add(Button::new("▼").small())
+                        .add(Button::new("v").small())
                         .on_hover_text("Next (L)")
                         .clicked()
                     {
@@ -871,6 +872,7 @@ fn render_file_panel(
     let current_search_line = app.search_matches.get(app.search_match_idx).copied();
     let scroll_to_match = app.scroll_to_match;
     let cursor_line = app.cursor_line;
+    let git_statuses = app.git_statuses.clone();
     let mut did_scroll = false;
     let mut set_cursor: Option<usize> = None;
 
@@ -905,6 +907,8 @@ fn render_file_panel(
                 let is_current_search = is_search_hit && current_search_line == Some(i);
                 let is_auto_start_line =
                     in_auto_match && i == auto_start && file_anchors.is_empty();
+
+                let git_status = git_statuses.get(i).copied().unwrap_or(GitStatus::Unchanged);
 
                 let row_is_tall = is_anchor;
                 let desired = Vec2::new(
@@ -996,7 +1000,24 @@ fn render_file_panel(
                         final_bg
                     };
                     ui.painter().rect_filled(rect, 0.0, row_bg);
-                    let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
+
+                    // Git Gutter (Far Left)
+                    let git_color = match git_status {
+                        GitStatus::Added => Color32::from_rgb(40, 130, 60),
+                        GitStatus::Modified => Color32::from_rgb(200, 160, 40),
+                        GitStatus::Deleted => Color32::from_rgb(180, 40, 40),
+                        _ => Color32::TRANSPARENT,
+                    };
+                    if git_color != Color32::TRANSPARENT {
+                        let git_bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
+                        ui.painter().rect_filled(git_bar, 0.0, git_color);
+                    }
+
+                    // Main Status Bar (Shifted right by 2px to make room for Git Gutter)
+                    let bar = Rect::from_min_size(
+                        Pos2::new(rect.left() + 2.0, rect.top()),
+                        Vec2::new(3.0, rect.height()),
+                    );
                     let bar_color = if in_merged {
                         pal::BAR_MERGED
                     } else if is_delete {

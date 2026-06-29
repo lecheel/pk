@@ -69,6 +69,7 @@ impl MergeApp {
             hunk.replace.len(),
         )));
         self.recompute_match();
+        self.update_git_statuses(); // Update Git gutter
     }
 
     pub fn advance_to_next_unapplied(&mut self) {
@@ -96,6 +97,7 @@ impl MergeApp {
                 hunk_idx + 1
             )));
             self.recompute_match();
+            self.update_git_statuses(); // Update Git gutter
         } else {
             self.set_message(StatusMessage::warning("Nothing to undo"));
         }
@@ -110,6 +112,7 @@ impl MergeApp {
                 self.file_lines.drain(start..end);
                 self.merged_range = None;
                 self.recompute_match();
+                self.update_git_statuses(); // Update Git gutter
                 let new_len = self.file_lines.len();
                 if new_len == 0 {
                     self.cursor_line = None;

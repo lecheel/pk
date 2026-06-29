@@ -1,4 +1,3 @@
-// file: src/app/help.rs
 use super::palette::pal;
 use super::state::MergeApp;
 use eframe::egui::*;
@@ -43,38 +42,37 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
 
             let shortcuts: &[(&str, &str)] = &[
                 ("Navigation", ""),
-                ("↑ / ↓",       "Move cursor one line"),
+                ("↑ / ↓", "Move cursor one line"),
                 ("PgUp / PgDn", "Move cursor 10 lines"),
-                ("Home / End",  "Jump to first / last line"),
-                ("gg / G",      "Jump to top / bottom (vim)"),
+                ("Home / End", "Jump to first / last line"),
+                ("gg / G", "Jump to top / bottom (vim)"),
                 ("", ""),
                 ("Hunk control", ""),
-                ("L",           "Next hunk"),
-                ("Shift+L",     "Previous hunk"),
+                ("L", "Next hunk"),
+                ("Shift+L", "Previous hunk"),
                 ("◀ ▶ (toolbar)", "Navigate candidates"),
                 ("", ""),
                 ("File-panel marks  (right buffer)", ""),
-                ("Space",       "Quick set ma at cursor (point insert)"),
-                ("ma",          "Set mark-a (start of replace range)"),
-                ("mb",          "Set mark-b (end of replace range, inclusive)"),
-                ("",            "  → selects lines [ma, mb] in right buffer"),
-                ("",            "  → links to left-panel selection via > button"),
-                ("Esc",         "Clear both marks / cancel pending 'm'"),
+                ("Space", "Quick set ma at cursor (point insert)"),
+                ("ma", "Set mark-a (start of replace range)"),
+                ("mb", "Set mark-b (end of replace range, inclusive)"),
+                ("", "  → selects lines [ma, mb] in right buffer"),
+                ("", "  → links to left-panel selection via > button"),
+                ("Esc", "Clear both marks / cancel pending 'm'"),
                 ("", ""),
                 ("Editing", ""),
-                ("A",           "Apply current hunk (cursor in match or on ma)"),
+                ("A", "Apply current hunk (cursor in match or on ma)"),
                 ("> (toolbar)", "Apply replace at ma/mb (or left selection)"),
-                ("dd / Ndd",    "Delete 1 or N lines at cursor"),
-                ("u",           "Undo last edit"),
-                (".",           "Repeat last action"),
+                ("dd / Ndd", "Delete 1 or N lines at cursor"),
+                ("u", "Undo last edit"),
+                (".", "Repeat last action"),
                 ("", ""),
                 ("Search", ""),
-                ("/",           "Enter file search"),
-                ("n / N",       "Next / previous search match"),
+                ("/", "Enter file search"),
+                ("n / N", "Next / previous search match"),
                 ("", ""),
                 ("UI", ""),
-                ("?",           "Toggle this help"),
-                ("o",           "Toggle hunk minimap"),
+                ("?", "Toggle this help"),
             ];
 
             ScrollArea::vertical()
@@ -84,17 +82,15 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
                         if desc.is_empty() {
                             if !key.is_empty() {
                                 ui.add_space(6.0);
-                                ui.label(
-                                    RichText::new(*key).color(pal::TEXT_DIM).small().strong(),
-                                );
+                                ui.label(RichText::new(*key).color(pal::TEXT_DIM).small().strong());
                             } else {
                                 ui.add_space(2.0);
                             }
                         } else {
                             ui.horizontal(|ui| {
                                 ui.add_space(12.0);
-                                let key_rect = ui
-                                    .allocate_exact_size(Vec2::new(140.0, 18.0), Sense::hover());
+                                let key_rect =
+                                    ui.allocate_exact_size(Vec2::new(140.0, 18.0), Sense::hover());
                                 ui.painter_at(key_rect.0).text(
                                     key_rect.0.left_center(),
                                     Align2::LEFT_CENTER,
@@ -107,7 +103,6 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
                         }
                     }
                 });
-
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.add_space(16.0);

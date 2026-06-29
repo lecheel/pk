@@ -1,4 +1,5 @@
 use super::constants::{DEFAULT_FILE, DEFAULT_PATCH};
+use super::git_ops::GitStatus;
 use super::matching::MergeMatching;
 use super::types::{Action, FileAnchor, FileState, StatusMessage};
 use crate::app::pal;
@@ -36,6 +37,7 @@ pub struct MergeApp {
     pub left_selection: Option<(usize, usize)>,
     pub file_anchors: BTreeMap<char, FileAnchor>,
     pub mark_pending: Option<MarkPending>,
+    pub git_statuses: Vec<GitStatus>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -77,6 +79,7 @@ impl MergeApp {
             left_selection: None,
             file_anchors: BTreeMap::new(),
             mark_pending: None,
+            git_statuses: Vec::new(),
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -135,6 +138,12 @@ impl MergeApp {
         self.match_result
             .as_ref()
             .map(|mr| (mr.file_start, mr.file_end))
+    }
+    pub fn update_git_statuses(&mut self) {
+        let repo_root = std::path::Path::new(&self.base_dir);
+        let file_path = std::path::Path::new(&self.file_path);
+        self.git_statuses =
+            super::git_ops::get_line_statuses(repo_root, file_path, &self.file_lines);
     }
     pub fn reparse(&mut self) {
         self.save_file_state();
@@ -229,6 +238,7 @@ impl MergeApp {
         self.vim_buffer.clear();
         self.last_action = None;
         self.left_selection = None;
+        self.update_git_statuses();
         self.recompute_match();
     }
     pub fn current_hunk(&self) -> Option<&PatchHunk> {
