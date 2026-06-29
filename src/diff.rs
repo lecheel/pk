@@ -131,10 +131,26 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
     let mut best_start = 0;
     let mut best_end = 0;
     let mut best_raw: Vec<(RowKind, Option<String>, Option<String>)> = Vec::new();
+
     let mut all_candidates: Vec<(usize, usize, f32)> = Vec::new();
+    let required_lines: Vec<&String> = search
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .take(2)
+        .collect();
     for window_size in min_window..=max_window {
         for start in 0..=file.len().saturating_sub(window_size) {
             let window = &file[start..start + window_size];
+            let mut all_present = true;
+            for req in &required_lines {
+                if !window.iter().any(|l| l == *req) {
+                    all_present = false;
+                    break;
+                }
+            }
+            if !all_present {
+                continue;
+            }
             let raw = lcs_diff(search, window);
 
             let score = if valuable_search_count > 0 {

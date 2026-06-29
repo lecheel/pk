@@ -136,6 +136,16 @@ impl MergeApp {
     }
     pub fn is_hunk_match_ok(&self, hunk_idx: usize) -> bool {
         if let Some(hunk) = self.hunks.get(hunk_idx) {
+            if hunk.search.is_empty() {
+                return true;
+            }
+            let current_file_name = self.current_hunk().map(|h| h.filename.clone()).unwrap_or_default();
+            if hunk.filename != current_file_name {
+                return true;
+            }
+            if self.file_lines.is_empty() {
+                return true;
+            }
             let best = crate::diff::find_best_match(&hunk.search, &self.file_lines);
             best.score >= 60.0
         } else {

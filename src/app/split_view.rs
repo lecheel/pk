@@ -11,22 +11,13 @@ use std::collections::HashSet;
 pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mr = match app.match_result.clone() {
         Some(m) => m,
-        None => {
-            ui.vertical_centered(|ui| {
-                ui.add_space(40.0);
-                ui.label(
-                    RichText::new("No file loaded or no match found.")
-                        .color(Color32::from_gray(140)),
-                );
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new("Open a file or patch above")
-                        .color(pal::TEXT_DIM)
-                        .small(),
-                );
-            });
-            return;
-        }
+        None => crate::diff::MatchResult {
+            score: 0.0,
+            file_start: 0,
+            file_end: 0,
+            rows: vec![],
+            candidates: vec![],
+        },
     };
     let available = ui.available_size();
     let divider = 0.38_f32;
