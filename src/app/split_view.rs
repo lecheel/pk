@@ -783,7 +783,8 @@ fn render_file_panel(
     let candidate_count = mr.candidates.len();
     let candidate_idx = app.candidate_index;
     let is_applied = app.applied_hunks.contains(&app.current_hunk);
-    let can_apply = !is_applied && (app.match_result.is_some() || !app.file_anchors.is_empty());
+    let score_ok = mr.score > 60.0 || !file_anchors.is_empty();
+    let can_apply = !is_applied && score_ok;
     let apply_line = if file_anchors.is_empty() {
         mr.file_start + 1
     } else {
@@ -928,27 +929,32 @@ fn render_file_panel(
                     }
                 }
                 ui.add(Separator::default().vertical());
-                ui.add_enabled_ui(can_apply, |ui| {
-                    let btn_text = if is_applied {
-                        "✓ Applied".to_string()
-                    } else {
-                        format!("⚡ Apply @ {}", apply_line)
-                    };
-                    let btn = Button::new(RichText::new(&btn_text).strong().monospace()).fill(
-                        if can_apply {
-                            Color32::from_rgb(40, 90, 55)
+                if can_apply {
+                    ui.add_enabled_ui(can_apply, |ui| {
+                        let btn_text = if is_applied {
+                            "✓ Applied".to_string()
                         } else {
-                            Color32::from_gray(35)
-                        },
-                    );
-                    if ui
-                        .add(btn)
-                        .on_hover_text("Apply this hunk to the file (A when cursor is in match)")
-                        .clicked()
-                    {
-                        apply_clicked = true;
-                    }
-                });
+                            format!("⚡ Apply @ {}", apply_line)
+                        };
+                        let btn = Button::new(RichText::new(&btn_text).strong().monospace()).fill(
+                            if can_apply {
+                                Color32::from_rgb(40, 90, 55)
+                            } else {
+                                Color32::from_gray(35)
+                            },
+                        );
+                        if ui
+                            .add(btn)
+                            .on_hover_text(
+                                "Apply this hunk to the file (A when cursor is in match)",
+                            )
+                            .clicked()
+                        {
+                            apply_clicked = true;
+                        }
+                    });
+                }
+
                 ui.add(Separator::default().vertical());
                 if ui
                     .selectable_label(app.show_git_diff_window, "📝 Git Diff (F4)")
@@ -1067,7 +1073,7 @@ fn render_file_panel(
                         file_anchors.values().any(|f| f.line == cur)
                     };
                     if is_applied {
-                    } else if in_hunk {
+                    } else if score_ok && in_hunk {
                         apply_clicked = true;
                     } else {
                         app.cursor_line = Some(mr.file_start);
@@ -1665,7 +1671,8 @@ fn render_file_panel(
                         FontId::monospace(11.0),
                         text_color,
                     );
-                    if is_auto_start_line {
+
+                    if is_auto_start_line && mr.score > 60.0 {
                         let right_box_width = 215.0;
                         let right_box_rect = Rect::from_min_size(
                             Pos2::new(rect.right() - right_box_width, rect.top()),
