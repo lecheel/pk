@@ -418,7 +418,6 @@ fn render_file_panel(
         file_anchors.values().next().unwrap().line + 1
     };
 
-    // Fix: Use a Vec to maintain insertion order deterministically
     let mut unique_files = Vec::new();
     for h in &app.hunks {
         if !unique_files.contains(&h.filename) {
@@ -503,7 +502,7 @@ fn render_file_panel(
                     }
                 } else {
                     if ui
-                        .add(Button::new("^").small())
+                        .add(Button::new("▲").small())
                         .on_hover_text("Previous (Shift+L)")
                         .clicked()
                     {
@@ -514,7 +513,7 @@ fn render_file_panel(
                         }
                     }
                     if ui
-                        .add(Button::new("v").small())
+                        .add(Button::new("▼").small())
                         .on_hover_text("Next (L)")
                         .clicked()
                     {
@@ -904,8 +903,10 @@ fn render_file_panel(
                 let is_search_hit = !search_query.is_empty()
                     && line.to_lowercase().contains(&search_query.to_lowercase());
                 let is_current_search = is_search_hit && current_search_line == Some(i);
-                let row_is_tall =
-                    is_anchor || (in_auto_match && i == auto_start && file_anchors.is_empty());
+                let is_auto_start_line =
+                    in_auto_match && i == auto_start && file_anchors.is_empty();
+
+                let row_is_tall = is_anchor;
                 let desired = Vec2::new(
                     ui.available_width(),
                     if row_is_tall { row_h + 6.0 } else { row_h },
@@ -915,7 +916,7 @@ fn render_file_panel(
                 let should_scroll = scroll_to_match
                     && (is_cursor
                         || (cursor_line.is_none() && is_anchor)
-                        || (cursor_line.is_none() && file_anchors.is_empty() && i == auto_start));
+                        || (cursor_line.is_none() && is_auto_start_line));
                 if should_scroll {
                     ui.scroll_to_rect(rect, Some(Align::Center));
                     did_scroll = true;
@@ -966,42 +967,6 @@ fn render_file_panel(
                     {
                         apply_clicked_id = Some(anchor.id);
                     }
-                } else if in_auto_match && i == auto_start && file_anchors.is_empty() {
-                    ui.painter()
-                        .rect_filled(rect, 2.0, Color32::from_rgb(28, 60, 40));
-                    ui.painter().text(
-                        Pos2::new(rect.left() + 10.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        format!(
-                            "▼ auto match  {}–{}  ({:.0}%)",
-                            auto_start + 1,
-                            auto_end,
-                            auto_score
-                        ),
-                        FontId::monospace(10.5),
-                        Color32::from_rgb(120, 230, 160),
-                    );
-                    let btn_size = Vec2::new(100.0, row_h);
-                    let btn_rect = Rect::from_min_size(
-                        Pos2::new(rect.right() - 106.0, rect.center().y - row_h / 2.0),
-                        btn_size,
-                    );
-                    if ui
-                        .put(
-                            btn_rect,
-                            Button::new(
-                                RichText::new("⚡ Apply here")
-                                    .color(Color32::WHITE)
-                                    .strong()
-                                    .monospace(),
-                            )
-                            .fill(Color32::from_rgb(35, 85, 50))
-                            .stroke(Stroke::new(1.0, pal::BAR_MATCH)),
-                        )
-                        .clicked()
-                    {
-                        apply_clicked = true;
-                    }
                 } else {
                     let base_bg = if in_merged {
                         pal::BG_MERGED
@@ -1009,19 +974,26 @@ fn render_file_panel(
                         pal::BG_DELETE
                     } else if is_cursor {
                         pal::BG_CURSOR
-                    } else if in_auto_match && file_anchors.is_empty() {
+                    } else if in_auto_match && file_anchors.is_empty() && !is_auto_start_line {
                         pal::BG_MATCH
                     } else if i % 2 == 0 {
                         pal::BG_ROW_EVEN
                     } else {
                         pal::BG_ROW_ODD
                     };
+
+                    let final_bg = if is_auto_start_line {
+                        Color32::TRANSPARENT
+                    } else {
+                        base_bg
+                    };
+
                     let row_bg = if is_current_search {
                         Color32::from_rgb(70, 60, 15)
                     } else if is_search_hit {
                         pal::BG_SEARCH_HIT
                     } else {
-                        base_bg
+                        final_bg
                     };
                     ui.painter().rect_filled(rect, 0.0, row_bg);
                     let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
@@ -1094,7 +1066,13 @@ fn render_file_panel(
                     } else {
                         pal::TEXT_NORMAL
                     };
-                    let display = MergeApp::truncate_owned(line, max_chars);
+
+                    let display_max_chars = if is_auto_start_line {
+                        ((panel_w - 68.0 - 215.0) / char_w).floor() as usize
+                    } else {
+                        max_chars
+                    };
+                    let display = MergeApp::truncate_owned(line, display_max_chars);
                     ui.painter().text(
                         Pos2::new(rect.left() + 58.0, rect.center().y),
                         Align2::LEFT_CENTER,
@@ -1102,6 +1080,52 @@ fn render_file_panel(
                         FontId::monospace(11.0),
                         text_color,
                     );
+
+                    if is_auto_start_line {
+                        let right_box_width = 215.0;
+                        let right_box_rect = Rect::from_min_size(
+                            Pos2::new(rect.right() - right_box_width, rect.top()),
+                            Vec2::new(right_box_width, rect.height()),
+                        );
+                        ui.painter().rect_filled(
+                            right_box_rect,
+                            2.0,
+                            Color32::from_rgba_premultiplied(28, 60, 40, 230),
+                        );
+
+                        ui.painter().text(
+                            Pos2::new(right_box_rect.left() + 8.0, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            format!("▼ {}–{} ({:.0}%)", auto_start + 1, auto_end, auto_score),
+                            FontId::monospace(10.5),
+                            Color32::from_rgb(120, 230, 160),
+                        );
+
+                        let btn_size = Vec2::new(90.0, row_h - 4.0);
+                        let btn_rect = Rect::from_min_size(
+                            Pos2::new(
+                                right_box_rect.right() - btn_size.x - 4.0,
+                                rect.center().y - btn_size.y / 2.0,
+                            ),
+                            btn_size,
+                        );
+                        if ui
+                            .put(
+                                btn_rect,
+                                Button::new(
+                                    RichText::new("⚡ Apply")
+                                        .color(Color32::WHITE)
+                                        .strong()
+                                        .monospace(),
+                                )
+                                .fill(Color32::from_rgb(35, 85, 50))
+                                .stroke(Stroke::new(1.0, pal::BAR_MATCH)),
+                            )
+                            .clicked()
+                        {
+                            apply_clicked = true;
+                        }
+                    }
                 }
                 if in_auto_match && i == auto_end.saturating_sub(1) && file_anchors.is_empty() {
                     let (sep_rect, _) = ui
