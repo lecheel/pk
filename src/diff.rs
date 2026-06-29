@@ -1,12 +1,10 @@
-/// Kind of diff row produced by the LCS line diff.
+//--+ file:///src/diff.rs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowKind {
     Equal,
     Delete,
     Insert,
 }
-
-/// A single aligned row in the side-by-side diff.
 #[derive(Debug, Clone)]
 pub struct DiffRow {
     pub kind: RowKind,
@@ -15,30 +13,23 @@ pub struct DiffRow {
     pub left_num: Option<usize>,
     pub right_num: Option<usize>,
 }
-
-/// Result of matching a SEARCH block against the file.
 #[derive(Debug, Clone)]
 pub struct MatchResult {
     pub score: f32,
     pub file_start: usize,
     pub file_end: usize,
     pub rows: Vec<DiffRow>,
-    /// All candidate match locations: (file_start, file_end, score), sorted best-first
     pub candidates: Vec<(usize, usize, f32)>,
 }
-
 pub fn diff_patch(
     search: &[String],
     replace: &[String],
 ) -> Vec<(RowKind, Option<String>, Option<String>)> {
     lcs_diff(search, replace)
 }
-
-/// Classic LCS-based line diff.
 fn lcs_diff(left: &[String], right: &[String]) -> Vec<(RowKind, Option<String>, Option<String>)> {
     let m = left.len();
     let n = right.len();
-
     let mut dp = vec![vec![0usize; n + 1]; m + 1];
     for i in 1..=m {
         for j in 1..=n {
@@ -49,11 +40,9 @@ fn lcs_diff(left: &[String], right: &[String]) -> Vec<(RowKind, Option<String>, 
             }
         }
     }
-
     let mut result = Vec::new();
     let mut i = m;
     let mut j = n;
-
     while i > 0 || j > 0 {
         if i > 0 && j > 0 && left[i - 1] == right[j - 1] {
             result.push((
@@ -71,12 +60,9 @@ fn lcs_diff(left: &[String], right: &[String]) -> Vec<(RowKind, Option<String>, 
             i -= 1;
         }
     }
-
     result.reverse();
     result
 }
-
-/// Slide a window over `file` to find the region that best matches `search`.
 pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
     if search.is_empty() || file.is_empty() {
         return MatchResult {
@@ -87,9 +73,7 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
             candidates: vec![],
         };
     }
-
     let search_len = search.len();
-
     if search_len > file.len() {
         let raw = lcs_diff(search, file);
         let matched = raw.iter().filter(|(k, _, _)| *k == RowKind::Equal).count();
@@ -103,16 +87,13 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
             candidates: vec![(0, file.len(), score)],
         };
     }
-
     let min_window = search_len.saturating_sub(2).max(1);
     let max_window = (search_len + 3).min(file.len());
-
     let mut best_score = -1.0_f32;
     let mut best_start = 0;
     let mut best_end = 0;
     let mut best_raw: Vec<(RowKind, Option<String>, Option<String>)> = Vec::new();
     let mut all_candidates: Vec<(usize, usize, f32)> = Vec::new();
-
     for window_size in min_window..=max_window {
         for start in 0..=file.len().saturating_sub(window_size) {
             let window = &file[start..start + window_size];
@@ -122,24 +103,20 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
             let extra = window_size.saturating_sub(search_len);
             let penalty = extra as f32 * 0.03;
             let adjusted = score - penalty;
-
             if adjusted > best_score {
                 best_score = adjusted;
                 best_start = start;
                 best_end = start + window_size;
                 best_raw = raw;
             }
-
             let pct = (adjusted * 100.0).clamp(0.0, 100.0);
             if pct >= 30.0 {
                 all_candidates.push((start, start + window_size, pct));
             }
         }
     }
-
     let rows = build_rows(&best_raw, 1, best_start + 1);
     let score = (best_score * 100.0).clamp(0.0, 100.0);
-
     all_candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     let mut candidates: Vec<(usize, usize, f32)> = Vec::new();
     for (s, e, sc) in all_candidates {
@@ -149,7 +126,6 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
         }
     }
     candidates.truncate(20);
-
     MatchResult {
         score,
         file_start: best_start,
@@ -158,8 +134,6 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
         candidates,
     }
 }
-
-/// Compute a MatchResult for a specific file window (used when navigating candidates).
 pub fn compute_match_for_window(
     search: &[String],
     file: &[String],
@@ -181,7 +155,6 @@ pub fn compute_match_for_window(
     let matched = raw.iter().filter(|(k, _, _)| *k == RowKind::Equal).count();
     let score = (matched as f32 / search.len().max(1) as f32) * 100.0;
     let rows = build_rows(&raw, 1, file_start + 1);
-
     MatchResult {
         score,
         file_start,
@@ -190,8 +163,7 @@ pub fn compute_match_for_window(
         candidates: vec![],
     }
 }
-
-fn build_rows(
+pub fn build_rows(
     raw: &[(RowKind, Option<String>, Option<String>)],
     left_start: usize,
     right_start: usize,
@@ -199,7 +171,6 @@ fn build_rows(
     let mut rows = Vec::new();
     let mut ln = left_start;
     let mut rn = right_start;
-
     for (kind, left, right) in raw {
         let left_num = if left.is_some() {
             let n = Some(ln);
@@ -215,7 +186,6 @@ fn build_rows(
         } else {
             None
         };
-
         rows.push(DiffRow {
             kind: *kind,
             left: left.clone(),
@@ -224,6 +194,5 @@ fn build_rows(
             right_num,
         });
     }
-
     rows
 }

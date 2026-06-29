@@ -4,10 +4,10 @@ use super::matching::MergeMatching;
 use super::types::{Action, FileAnchor, FileState, StatusMessage};
 use crate::app::pal;
 use crate::diff::MatchResult;
+use crate::diff::RowKind;
 use crate::patch::PatchHunk;
 use eframe::egui::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
-
 pub struct MergeApp {
     pub patch_text: String,
     pub hunks: Vec<PatchHunk>,
@@ -41,13 +41,14 @@ pub struct MergeApp {
     pub file_anchors: BTreeMap<char, FileAnchor>,
     pub mark_pending: Option<MarkPending>,
     pub git_statuses: Vec<GitStatus>,
+    pub git_diff_rows: Vec<crate::diff::DiffRow>,
+    pub git_hunks: Vec<super::git_ops::GitDiffHunk>,
+    pub show_git_diff_window: bool,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
     WaitingKey,
 }
-
 impl MergeApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_patch: Option<String>) -> Self {
         cc.egui_ctx.set_visuals(Visuals::dark());
@@ -55,7 +56,6 @@ impl MergeApp {
             .map(|p| p.display().to_string())
             .unwrap_or_default();
         let start_pwd_is_repo = git2::Repository::discover(&start_pwd).is_ok();
-
         let mut app = Self {
             patch_text: String::new(),
             hunks: Vec::new(),
@@ -89,6 +89,9 @@ impl MergeApp {
             file_anchors: BTreeMap::new(),
             mark_pending: None,
             git_statuses: Vec::new(),
+            git_diff_rows: Vec::new(),
+            git_hunks: Vec::new(),
+            show_git_diff_window: false,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -154,8 +157,12 @@ impl MergeApp {
     pub fn update_git_statuses(&mut self) {
         let repo_root = std::path::Path::new(&self.base_dir);
         let file_path = std::path::Path::new(&self.file_path);
-        self.git_statuses =
+        let (statuses, diff_rows) =
             super::git_ops::get_line_statuses(repo_root, file_path, &self.file_lines);
+        self.git_statuses = statuses;
+        self.git_diff_rows = diff_rows;
+        self.git_hunks =
+            super::git_ops::group_git_hunks(&self.git_diff_rows, self.file_lines.len());
     }
     pub fn reparse(&mut self) {
         self.save_file_state();
@@ -285,9 +292,11 @@ impl MergeApp {
         self.cursor_line = None;
         self.scroll_to_match = true;
         self.left_selection = None;
+        self.git_statuses.clear();
+        self.git_diff_rows.clear();
+        self.git_hunks.clear();
     }
 }
-
 impl eframe::App for MergeApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         if self.message.is_some() {
@@ -300,6 +309,9 @@ impl eframe::App for MergeApp {
                     self.message_until = None;
                 }
             }
+        }
+        if ctx.input(|i| i.key_pressed(Key::F4)) {
+            self.show_git_diff_window = !self.show_git_diff_window;
         }
         if !ctx.wants_keyboard_input() || self.is_searching {
             ctx.input(|i| {
@@ -405,7 +417,74 @@ impl eframe::App for MergeApp {
         if self.show_help {
             super::help::render_help_overlay(self, ctx);
         }
+        if self.show_git_diff_window {
+            let mut open = self.show_git_diff_window;
+            Window::new("📝 Git Diff (file vs HEAD)")
+                .open(&mut open)
+                .default_size(Vec2::new(600.0, 450.0))
+                .show(ctx, |ui| {
+                    if self.git_diff_rows.is_empty() {
+                        ui.centered_and_justified(|ui| {
+                            ui.label("No git differences or not in a Git repository.");
+                        });
+                    } else {
+                        ScrollArea::vertical().show(ui, |ui| {
+                            for row in &self.git_diff_rows {
+                                ui.horizontal(|ui| {
+                                    let left_num =
+                                        row.left_num.map_or(String::new(), |n| n.to_string());
+                                    let right_num =
+                                        row.right_num.map_or(String::new(), |n| n.to_string());
+                                    ui.add_sized(
+                                        [35.0, 18.0],
+                                        Label::new(
+                                            RichText::new(left_num)
+                                                .color(pal::TEXT_DIM)
+                                                .monospace(),
+                                        ),
+                                    );
+                                    ui.add_sized(
+                                        [35.0, 18.0],
+                                        Label::new(
+                                            RichText::new(right_num)
+                                                .color(pal::TEXT_DIM)
+                                                .monospace(),
+                                        ),
+                                    );
 
+                                    match row.kind {
+                                        RowKind::Delete => {
+                                            if let Some(ref text) = row.left {
+                                                ui.colored_label(
+                                                    pal::TEXT_DELETE,
+                                                    format!("- {}", text),
+                                                );
+                                            }
+                                        }
+                                        RowKind::Insert => {
+                                            if let Some(ref text) = row.right {
+                                                ui.colored_label(
+                                                    pal::TEXT_INSERT,
+                                                    format!("+ {}", text),
+                                                );
+                                            }
+                                        }
+                                        RowKind::Equal => {
+                                            if let Some(ref text) = row.right {
+                                                ui.colored_label(
+                                                    pal::TEXT_NORMAL,
+                                                    format!("  {}", text),
+                                                );
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            self.show_git_diff_window = open;
+        }
         if self.show_debug {
             let mut show_debug = self.show_debug;
             Window::new("🐞 App diagnostics")
@@ -414,7 +493,6 @@ impl eframe::App for MergeApp {
                 .show(ctx, |ui| {
                     ScrollArea::vertical().show(ui, |ui| {
                         let mut report = String::new();
-
                         ui.heading("Paths & directory mappings");
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Start PWD:").strong());
@@ -426,23 +504,19 @@ impl eframe::App for MergeApp {
                             }
                         });
                         report.push_str(&format!("Start PWD: {} (Git Repo: {})\n", self.start_pwd, self.start_pwd_is_repo));
-
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Base directory:").strong());
                             ui.label(RichText::new(&self.base_dir).monospace());
                         });
                         report.push_str(&format!("Base Directory: {}\n", self.base_dir));
-
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Current file path:").strong());
                             ui.label(RichText::new(&self.file_path).monospace());
                         });
                         report.push_str(&format!("Current File Path: {}\n", self.file_path));
-
                         ui.add_space(8.0);
                         ui.separator();
                         ui.add_space(8.0);
-
                         ui.heading("Git mapping diagnostics");
                         let repo_root = std::path::Path::new(&self.base_dir);
                         match git2::Repository::discover(repo_root) {
@@ -455,7 +529,6 @@ impl eframe::App for MergeApp {
                                         ui.label(RichText::new(workdir.to_string_lossy()).monospace());
                                     });
                                     report.push_str(&format!("Repo workdir: {}\n", workdir.to_string_lossy()));
-
                                     let file_path = std::path::Path::new(&self.file_path);
                                     let abs_file_path = if file_path.is_absolute() {
                                         file_path.to_path_buf()
@@ -464,7 +537,6 @@ impl eframe::App for MergeApp {
                                     } else {
                                         file_path.to_path_buf()
                                     };
-
                                     let abs_workdir = if workdir.is_absolute() {
                                         workdir.to_path_buf()
                                     } else if let Ok(cwd) = std::env::current_dir() {
@@ -472,7 +544,6 @@ impl eframe::App for MergeApp {
                                     } else {
                                         workdir.to_path_buf()
                                     };
-
                                     let clean_path = |p: &std::path::Path| -> String {
                                         let s = p.to_string_lossy().replace('\\', "/");
                                         if let Some(stripped) = s.strip_prefix("//?/") {
@@ -481,22 +552,18 @@ impl eframe::App for MergeApp {
                                             s
                                         }
                                     };
-
                                     let clean_file = clean_path(&abs_file_path);
                                     let clean_work = clean_path(&abs_workdir);
-
                                     ui.horizontal(|ui| {
                                         ui.label("Normalized file path:");
                                         ui.label(RichText::new(&clean_file).monospace());
                                     });
                                     report.push_str(&format!("Normalized file path: {}\n", clean_file));
-
                                     ui.horizontal(|ui| {
                                         ui.label("Normalized workdir:");
                                         ui.label(RichText::new(&clean_work).monospace());
                                     });
                                     report.push_str(&format!("Normalized workdir: {}\n", clean_work));
-
                                     if clean_file.starts_with(&clean_work) {
                                         let rel = &clean_file[clean_work.len()..].trim_start_matches('/');
                                         ui.colored_label(
@@ -524,24 +591,20 @@ impl eframe::App for MergeApp {
                                 report.push_str(&format!("Git lookup error: {}\n", e));
                             }
                         }
-
                         ui.add_space(8.0);
                         ui.separator();
                         ui.add_space(8.0);
-
                         ui.heading("Buffers & state summary");
                         ui.label(format!("Total patches in file: {}", self.hunks.len()));
                         ui.label(format!("Current hunk index: {}", self.current_hunk));
                         ui.label(format!("Applied hunks indices: {:?}", self.applied_hunks));
                         ui.label(format!("File lines: {}", self.file_lines.len()));
                         ui.label(format!("Git status indexes: {}", self.git_statuses.len()));
-
                         report.push_str(&format!("Total patches: {}\n", self.hunks.len()));
                         report.push_str(&format!("Current hunk index: {}\n", self.current_hunk));
                         report.push_str(&format!("Applied hunk indices: {:?}\n", self.applied_hunks));
                         report.push_str(&format!("File lines: {}\n", self.file_lines.len()));
                         report.push_str(&format!("Git status indexes: {}\n", self.git_statuses.len()));
-
                         let (mut unchanged, mut added, mut modified, mut deleted) = (0, 0, 0, 0);
                         for status in &self.git_statuses {
                             match status {
@@ -559,7 +622,6 @@ impl eframe::App for MergeApp {
                             ui.colored_label(Color32::from_rgb(235, 120, 120), format!("Deleted: {}", deleted));
                         });
                         report.push_str(&format!("Gutter: Unchanged: {}, Added: {}, Modified: {}, Deleted: {}\n", unchanged, added, modified, deleted));
-
                         ui.add_space(12.0);
                         ui.horizontal(|ui| {
                             if ui.button("📋 Copy Diagnostics").clicked() {
@@ -573,7 +635,6 @@ impl eframe::App for MergeApp {
                 });
             self.show_debug = show_debug;
         }
-
         CentralPanel::default().show(ctx, |ui| {
             if self.hunks.is_empty() {
                 ui.vertical_centered(|ui| {

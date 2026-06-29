@@ -1,5 +1,4 @@
 //--+ file:///src/app/split_view.rs
-// Hash: f5de59d99cb1
 use super::git_ops::GitStatus;
 use super::matching::MergeMatching;
 use super::palette::pal;
@@ -8,7 +7,6 @@ use super::types::{Action, FileAnchor, SearchRow, StatusMessage};
 use crate::diff::RowKind;
 use eframe::egui::*;
 use std::collections::HashSet;
-
 pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mr = match app.match_result.clone() {
         Some(m) => m,
@@ -90,7 +88,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
     render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
 }
-
 fn render_search_panel(
     app: &mut MergeApp,
     ui: &mut Ui,
@@ -357,7 +354,6 @@ fn render_search_panel(
         app.apply_merge(Some(ln), None);
     }
 }
-
 fn render_file_panel(
     app: &mut MergeApp,
     ui: &mut Ui,
@@ -536,6 +532,12 @@ fn render_file_panel(
                     }
                 });
                 ui.add(Separator::default().vertical());
+                if ui
+                    .selectable_label(app.show_git_diff_window, "📝 Git Diff (F4)")
+                    .clicked()
+                {
+                    app.show_git_diff_window = !app.show_git_diff_window;
+                }
                 if ui.selectable_label(app.show_debug, "🐞 Debug").clicked() {
                     app.show_debug = !app.show_debug;
                 }
@@ -670,6 +672,48 @@ fn render_file_panel(
                 } else if buf == "N" {
                     prev_search_match = true;
                     clear_buffer = true;
+                } else if buf == "]h" {
+                    let cur = app.cursor_line.unwrap_or(0);
+                    let mut hunk_starts: Vec<usize> = app
+                        .git_hunks
+                        .iter()
+                        .map(|h| h.current_line_range.start)
+                        .collect();
+                    hunk_starts.sort();
+                    if !hunk_starts.is_empty() {
+                        let mut next_line = None;
+                        for &start in &hunk_starts {
+                            if start > cur {
+                                next_line = Some(start);
+                                break;
+                            }
+                        }
+                        let target = next_line.unwrap_or(hunk_starts[0]);
+                        app.cursor_line = Some(target);
+                        app.scroll_to_match = true;
+                    }
+                    clear_buffer = true;
+                } else if buf == "[h" {
+                    let cur = app.cursor_line.unwrap_or(0);
+                    let mut hunk_starts: Vec<usize> = app
+                        .git_hunks
+                        .iter()
+                        .map(|h| h.current_line_range.start)
+                        .collect();
+                    hunk_starts.sort();
+                    if !hunk_starts.is_empty() {
+                        let mut prev_line = None;
+                        for &start in hunk_starts.iter().rev() {
+                            if start < cur {
+                                prev_line = Some(start);
+                                break;
+                            }
+                        }
+                        let target = prev_line.unwrap_or(*hunk_starts.last().unwrap());
+                        app.cursor_line = Some(target);
+                        app.scroll_to_match = true;
+                    }
+                    clear_buffer = true;
                 } else if lower_buf == "u" {
                     app.undo();
                     clear_buffer = true;
@@ -704,7 +748,14 @@ fn render_file_panel(
                     clear_buffer = true;
                 } else {
                     let allowed = buf.chars().all(|c| {
-                        c.is_ascii_digit() || c == 'd' || c == 'D' || c == 'g' || c == 'G'
+                        c.is_ascii_digit()
+                            || c == 'd'
+                            || c == 'D'
+                            || c == 'g'
+                            || c == 'G'
+                            || c == '['
+                            || c == ']'
+                            || c == 'h'
                     });
                     let d_count = buf.matches('d').count() + buf.matches('D').count();
                     if !allowed || d_count > 2 {
@@ -970,6 +1021,53 @@ fn render_file_panel(
                     if git_color != Color32::TRANSPARENT {
                         let git_bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
                         ui.painter().rect_filled(git_bar, 0.0, git_color);
+                    }
+                    if git_status != GitStatus::Unchanged {
+                        if let Some(hunk) = app
+                            .git_hunks
+                            .iter()
+                            .find(|h| h.current_line_range.contains(&i))
+                        {
+                            row_resp.clone().on_hover_ui(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 2.0;
+                                    ui.label(
+                                        RichText::new("Git Diff")
+                                            .color(Color32::from_rgb(100, 160, 230))
+                                            .strong(),
+                                    );
+                                });
+                                ui.separator();
+                                for row in &hunk.rows {
+                                    match row.kind {
+                                        RowKind::Delete => {
+                                            if let Some(ref text) = row.left {
+                                                ui.colored_label(
+                                                    pal::TEXT_DELETE,
+                                                    format!("- {}", text),
+                                                );
+                                            }
+                                        }
+                                        RowKind::Insert => {
+                                            if let Some(ref text) = row.right {
+                                                ui.colored_label(
+                                                    pal::TEXT_INSERT,
+                                                    format!("+ {}", text),
+                                                );
+                                            }
+                                        }
+                                        RowKind::Equal => {
+                                            if let Some(ref text) = row.right {
+                                                ui.colored_label(
+                                                    pal::TEXT_DIM,
+                                                    format!("  {}", text),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
                     }
                     let bar = Rect::from_min_size(
                         Pos2::new(rect.left() + 2.0, rect.top()),
