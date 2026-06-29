@@ -1,6 +1,8 @@
+mod clipboard_utils;
 mod constants;
 mod editing;
 mod git_ops;
+mod git_panels;
 mod help;
 mod matching;
 mod minimap;

@@ -1,10 +1,11 @@
+use super::clipboard_utils::{get_clipboard_text, parse_clipboard_patch};
 use super::git_ops::GitStatus;
+use super::git_panels::{render_git_diff_panel, render_git_status_panel};
 use super::matching::MergeMatching;
 use super::palette::pal;
 use super::state::{MarkPending, MergeApp};
 use super::types::{Action, FileAnchor, SearchRow, StatusMessage};
 use crate::diff::RowKind;
-use crate::patch::PatchHunk;
 use eframe::egui::*;
 use std::collections::HashSet;
 
@@ -112,345 +113,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
 
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
     render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
-}
-
-fn render_git_status_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_w: f32, panel_w: f32) {
-    let max_chars = ((panel_w - 90.0) / char_w).floor() as usize;
-    ScrollArea::vertical()
-        .id_source("git_status_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            let desired = Vec2::new(ui.available_width(), row_h + 2.0);
-            let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-            ui.painter()
-                .rect_filled(rect, 2.0, Color32::from_rgb(20, 35, 25));
-            ui.painter().text(
-                Pos2::new(rect.left() + 8.0, rect.center().y),
-                Align2::LEFT_CENTER,
-                "📝 GIT REPOSITORY STATUS  ·  press ESC to close",
-                FontId::monospace(11.0),
-                Color32::from_rgb(120, 230, 160),
-            );
-            ui.add_space(4.0);
-
-            let repo = git2::Repository::discover(&app.base_dir).ok();
-            let mut file_statuses = Vec::new();
-            if let Some(ref r) = repo {
-                let mut opts = git2::StatusOptions::new();
-                opts.include_untracked(true);
-                if let Ok(statuses) = r.statuses(Some(&mut opts)) {
-                    for entry in statuses.iter() {
-                        if let Some(path) = entry.path() {
-                            let status = entry.status();
-                            let status_char = if status.is_index_new() || status.is_wt_new() {
-                                'A'
-                            } else if status.is_index_deleted() || status.is_wt_deleted() {
-                                'D'
-                            } else {
-                                'M'
-                            };
-
-                            let mut additions = 0;
-                            let mut deletions = 0;
-                            let mut diff_opts = git2::DiffOptions::new();
-                            diff_opts.pathspec(path);
-                            if let Ok(diff) = r.diff_index_to_workdir(None, Some(&mut diff_opts)) {
-                                let _ = diff.foreach(
-                                    &mut |_, _| true,
-                                    None,
-                                    None,
-                                    Some(&mut |_, _, line| {
-                                        let origin = line.origin();
-                                        if origin == '+' {
-                                            additions += 1;
-                                        } else if origin == '-' {
-                                            deletions += 1;
-                                        }
-                                        true
-                                    }),
-                                );
-                            }
-
-                            file_statuses.push((
-                                path.to_string(),
-                                status_char,
-                                additions,
-                                deletions,
-                            ));
-                        }
-                    }
-                }
-            }
-
-            if file_statuses.is_empty() {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(20.0);
-                    ui.label(
-                        RichText::new("No modified or untracked files in the repository.")
-                            .color(pal::TEXT_DIM),
-                    );
-                });
-                return;
-            }
-
-            for (path, status_char, additions, deletions) in file_statuses {
-                let (base_bg, badge_color, prefix) = match status_char {
-                    'A' => (pal::BG_INSERT, Color32::from_rgb(40, 150, 60), "A"),
-                    'D' => (pal::BG_DELETE, Color32::from_rgb(200, 40, 40), "D"),
-                    _ => (
-                        Color32::from_rgba_premultiplied(45, 38, 15, 100),
-                        Color32::from_rgb(200, 160, 40),
-                        "M",
-                    ),
-                };
-
-                let desired = Vec2::new(ui.available_width(), row_h);
-                let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
-
-                let is_hovered = resp.hovered();
-                let bg = if is_hovered {
-                    Color32::from_rgba_premultiplied(50, 50, 60, 150)
-                } else {
-                    base_bg
-                };
-
-                ui.painter().rect_filled(rect, 0.0, bg);
-
-                let status_bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
-                ui.painter().rect_filled(status_bar, 0.0, badge_color);
-
-                ui.painter().text(
-                    Pos2::new(rect.left() + 8.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    format!("[{}]", prefix),
-                    FontId::monospace(10.5),
-                    badge_color,
-                );
-
-                let mut stats_str = String::new();
-                if additions > 0 {
-                    stats_str.push_str(&format!("+{} ", additions));
-                }
-                if deletions > 0 {
-                    stats_str.push_str(&format!("-{} ", deletions));
-                }
-
-                ui.painter().text(
-                    Pos2::new(rect.left() + 40.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    &stats_str,
-                    FontId::monospace(10.0),
-                    if additions > 0 && deletions > 0 {
-                        pal::TEXT_DIM
-                    } else if additions > 0 {
-                        pal::TEXT_INSERT
-                    } else {
-                        pal::TEXT_DELETE
-                    },
-                );
-
-                let path_x = rect.left() + 100.0;
-                let display = MergeApp::truncate_owned(&path, max_chars);
-
-                ui.painter().text(
-                    Pos2::new(path_x, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    &display,
-                    FontId::monospace(11.0),
-                    pal::TEXT_NORMAL,
-                );
-
-                if resp.clicked() {
-                    if let Some(pos) = app
-                        .hunks
-                        .iter()
-                        .position(|h| h.filename == path || path.contains(&h.filename))
-                    {
-                        app.current_hunk = pos;
-                        app.load_hunk();
-                    } else {
-                        let target_path = std::path::Path::new(&app.base_dir)
-                            .join(&path)
-                            .display()
-                            .to_string();
-                        if target_path != app.file_path {
-                            app.save_file_state();
-                            app.file_path = target_path;
-                            if let Ok(content) = std::fs::read_to_string(&app.file_path) {
-                                app.file_text = content;
-                                app.file_lines = app.file_text.lines().map(String::from).collect();
-                                app.applied_hunks.clear();
-                                app.merged_range = None;
-                                app.history.clear();
-                                app.recompute_match();
-                                app.update_git_statuses();
-                            }
-                        }
-                    }
-                }
-            }
-        });
-}
-
-fn render_git_diff_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_w: f32, panel_w: f32) {
-    let max_chars = ((panel_w - 68.0) / char_w).floor() as usize;
-    ScrollArea::vertical()
-        .id_source("git_diff_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            let desired = Vec2::new(ui.available_width(), row_h + 2.0);
-            let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-            ui.painter()
-                .rect_filled(rect, 2.0, Color32::from_rgb(45, 20, 20));
-            ui.painter().text(
-                Pos2::new(rect.left() + 8.0, rect.center().y),
-                Align2::LEFT_CENTER,
-                "📝 GIT DIFF vs HEAD  ·  press ESC to close",
-                FontId::monospace(11.0),
-                Color32::from_rgb(230, 120, 120),
-            );
-            ui.add_space(4.0);
-
-            if app.git_diff_rows.is_empty() {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(20.0);
-                    ui.label(
-                        RichText::new("No git differences or not in a Git repository.")
-                            .color(pal::TEXT_DIM),
-                    );
-                });
-                return;
-            }
-
-            for row in &app.git_diff_rows {
-                let (base_bg, text_color, prefix) = match row.kind {
-                    RowKind::Delete => (pal::BG_DELETE, pal::TEXT_DELETE, "- "),
-                    RowKind::Insert => (pal::BG_INSERT, pal::TEXT_INSERT, "+ "),
-                    RowKind::Equal => (Color32::TRANSPARENT, pal::TEXT_NORMAL, "  "),
-                };
-
-                let desired = Vec2::new(ui.available_width(), row_h);
-                let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-                if base_bg != Color32::TRANSPARENT {
-                    ui.painter().rect_filled(rect, 0.0, base_bg);
-                }
-
-                let left_num = row.left_num.map_or(String::new(), |n| n.to_string());
-                let right_num = row.right_num.map_or(String::new(), |n| n.to_string());
-
-                ui.painter().text(
-                    Pos2::new(rect.left() + 4.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    format!("{:>3}", left_num),
-                    FontId::monospace(9.5),
-                    pal::TEXT_DIM,
-                );
-                ui.painter().text(
-                    Pos2::new(rect.left() + 26.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    format!("{:>3}", right_num),
-                    FontId::monospace(9.5),
-                    pal::TEXT_DIM,
-                );
-
-                ui.painter().text(
-                    Pos2::new(rect.left() + 52.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    prefix,
-                    FontId::monospace(11.0),
-                    text_color,
-                );
-
-                let text = match row.kind {
-                    RowKind::Delete => row.left.as_deref().unwrap_or(""),
-                    _ => row.right.as_deref().unwrap_or(""),
-                };
-                let display = MergeApp::truncate_owned(text, max_chars.saturating_sub(2));
-                ui.painter().text(
-                    Pos2::new(rect.left() + 64.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    &display,
-                    FontId::monospace(11.0),
-                    text_color,
-                );
-            }
-        });
-}
-
-// In src/app/split_view.rs
-
-#[cfg(not(target_arch = "wasm32"))]
-fn get_clipboard_text() -> Option<String> {
-    arboard::Clipboard::new()
-        .ok()
-        .and_then(|mut cb| cb.get_text().ok())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn get_clipboard_text() -> Option<String> {
-    None
-}
-
-/// Smart parser to convert raw clipboard text into search-only or standard hunks
-fn parse_clipboard_patch(pasted: &str) -> Vec<PatchHunk> {
-    let trimmed = pasted.trim();
-
-    // If it is a standard patch block, parse it using the app's default parser
-    if trimmed.contains("<patch>") {
-        return crate::patch::parse_patches(pasted);
-    }
-
-    // If it has unified diff headers, try default patch parsing
-    if trimmed.contains("diff --git") || trimmed.contains("--- ") || trimmed.contains("+++ ") {
-        let hunks = crate::patch::parse_patches(pasted);
-        if !hunks.is_empty() {
-            return hunks;
-        }
-    }
-
-    // Otherwise, treat the entire clipboard content as a raw search pattern
-    let lines: Vec<String> = pasted.lines().map(|s| s.to_string()).collect();
-    if lines.is_empty() {
-        return Vec::new();
-    }
-
-    let mut filename = String::new();
-    let mut search_start = 0;
-
-    let first_line = lines[0].trim();
-    if first_line.starts_with("filename ") {
-        filename = first_line
-            .strip_prefix("filename ")
-            .unwrap()
-            .trim()
-            .to_string();
-        search_start = 1;
-    } else if first_line.starts_with("+++ b/") {
-        filename = first_line
-            .strip_prefix("+++ b/")
-            .unwrap()
-            .trim()
-            .to_string();
-        search_start = 1;
-    } else if first_line.starts_with("+++ ") {
-        filename = first_line.strip_prefix("+++ ").unwrap().trim().to_string();
-        search_start = 1;
-    }
-
-    // Gather all lines and strip diff markers if present
-    let search_lines: Vec<String> = lines[search_start..]
-        .iter()
-        .filter(|l| {
-            !l.starts_with("<<<<<<<") && !l.starts_with("=======") && !l.starts_with(">>>>>>>")
-        })
-        .cloned()
-        .collect();
-
-    vec![PatchHunk {
-        filename,
-        search: search_lines,
-        replace: Vec::new(), // No replace block for raw search pattern pastes
-    }]
 }
 
 fn render_search_panel(
@@ -1841,6 +1503,55 @@ fn render_file_panel(
                         pal::TEXT_ANCHOR,
                     );
                 }
+
+                if !is_anchor_row && git_status != GitStatus::Unchanged {
+                    if let Some(hunk) = app
+                        .git_hunks
+                        .iter()
+                        .find(|h| h.current_line_range.contains(&i))
+                    {
+                        row_resp.clone().on_hover_ui(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 2.0;
+                                ui.label(
+                                    RichText::new("Git Diff")
+                                        .color(Color32::from_rgb(100, 160, 230))
+                                        .strong(),
+                                );
+                            });
+                            ui.separator();
+                            for row in &hunk.rows {
+                                match row.kind {
+                                    RowKind::Delete => {
+                                        if let Some(ref text) = row.left {
+                                            ui.colored_label(
+                                                pal::TEXT_DELETE,
+                                                format!("- {}", text),
+                                            );
+                                        }
+                                    }
+                                    RowKind::Insert => {
+                                        if let Some(ref text) = row.right {
+                                            ui.colored_label(
+                                                pal::TEXT_INSERT,
+                                                format!("+ {}", text),
+                                            );
+                                        }
+                                    }
+                                    RowKind::Equal => {
+                                        if let Some(ref text) = row.right {
+                                            ui.colored_label(
+                                                pal::TEXT_DIM,
+                                                format!("  {}", text),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+
                 let text_color = if is_anchor_row {
                     pal::TEXT_ANCHOR
                 } else if in_block_delete {
@@ -2353,321 +2064,7 @@ fn render_file_panel(
                     {
                         adjust_end_by = 1;
                     }
-                } else {
-                    let base_bg = if in_block_delete {
-                        pal::BG_DELETE
-                    } else if in_merged {
-                        pal::BG_MERGED
-                    } else if is_delete {
-                        pal::BG_DELETE
-                    } else if is_cursor {
-                        pal::BG_CURSOR
-                    } else if in_auto_match && file_anchors.is_empty() && !is_auto_start_line {
-                        pal::BG_MATCH
-                    } else if i % 2 == 0 {
-                        pal::BG_ROW_EVEN
-                    } else {
-                        pal::BG_ROW_ODD
-                    };
-                    let final_bg = if is_auto_start_line {
-                        Color32::TRANSPARENT
-                    } else {
-                        base_bg
-                    };
-                    let row_bg = if is_current_search {
-                        Color32::from_rgb(70, 60, 15)
-                    } else if is_search_hit {
-                        pal::BG_SEARCH_HIT
-                    } else {
-                        final_bg
-                    };
-                    ui.painter().rect_filled(rect, 0.0, row_bg);
-                    let git_color = match git_status {
-                        GitStatus::Added => Color32::from_rgb(40, 130, 60),
-                        GitStatus::Modified => Color32::from_rgb(200, 160, 40),
-                        GitStatus::Deleted => Color32::from_rgb(180, 40, 40),
-                        _ => Color32::TRANSPARENT,
-                    };
-                    if git_color != Color32::TRANSPARENT {
-                        let git_bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
-                        ui.painter().rect_filled(git_bar, 0.0, git_color);
-                    }
-                    if git_status != GitStatus::Unchanged {
-                        if let Some(hunk) = app
-                            .git_hunks
-                            .iter()
-                            .find(|h| h.current_line_range.contains(&i))
-                        {
-                            row_resp.clone().on_hover_ui(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 2.0;
-                                    ui.label(
-                                        RichText::new("Git Diff")
-                                            .color(Color32::from_rgb(100, 160, 230))
-                                            .strong(),
-                                    );
-                                });
-                                ui.separator();
-                                for row in &hunk.rows {
-                                    match row.kind {
-                                        RowKind::Delete => {
-                                            if let Some(ref text) = row.left {
-                                                ui.colored_label(
-                                                    pal::TEXT_DELETE,
-                                                    format!("- {}", text),
-                                                );
-                                            }
-                                        }
-                                        RowKind::Insert => {
-                                            if let Some(ref text) = row.right {
-                                                ui.colored_label(
-                                                    pal::TEXT_INSERT,
-                                                    format!("+ {}", text),
-                                                );
-                                            }
-                                        }
-                                        RowKind::Equal => {
-                                            if let Some(ref text) = row.right {
-                                                ui.colored_label(
-                                                    pal::TEXT_DIM,
-                                                    format!("  {}", text),
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                    }
-                    let bar = Rect::from_min_size(
-                        Pos2::new(rect.left() + 2.0, rect.top()),
-                        Vec2::new(3.0, rect.height()),
-                    );
-                    let bar_color = if in_block_delete {
-                        pal::TEXT_DELETE
-                    } else if in_merged {
-                        pal::BAR_MERGED
-                    } else if is_delete {
-                        pal::TEXT_DELETE
-                    } else if is_cursor {
-                        pal::BAR_CURSOR
-                    } else if in_auto_match && file_anchors.is_empty() {
-                        pal::BAR_MATCH
-                    } else if is_current_search {
-                        pal::ACCENT_WARN
-                    } else if is_search_hit {
-                        pal::BAR_SEARCH
-                    } else {
-                        Color32::TRANSPARENT
-                    };
-                    ui.painter().rect_filled(bar, 0.0, bar_color);
-                    if row_resp.clicked() {
-                        set_cursor = Some(i);
-                    }
-                    let num_color = if in_block_delete {
-                        pal::TEXT_DELETE
-                    } else if in_merged {
-                        pal::TEXT_LNUM_ACTIVE
-                    } else if is_delete {
-                        pal::TEXT_DELETE
-                    } else if in_auto_match && file_anchors.is_empty() {
-                        pal::TEXT_LNUM_ACTIVE
-                    } else if is_search_hit {
-                        Color32::from_rgb(180, 160, 60)
-                    } else {
-                        pal::TEXT_LNUM
-                    };
-                    ui.painter().text(
-                        Pos2::new(rect.left() + 6.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        format!("{:>4} │", i + 1),
-                        FontId::monospace(11.0),
-                        num_color,
-                    );
-                    let diff_prefix = if in_auto_match && file_anchors.is_empty() {
-                        if is_delete {
-                            Some(("-", pal::TEXT_DELETE))
-                        } else if is_equal {
-                            Some(("=", Color32::from_gray(60)))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-                    if let Some((glyph, glyph_color)) = diff_prefix {
-                        ui.painter().text(
-                            Pos2::new(rect.left() + 48.0, rect.center().y),
-                            Align2::LEFT_CENTER,
-                            glyph,
-                            FontId::monospace(11.0),
-                            glyph_color,
-                        );
-                    }
-                    let text_color = if in_block_delete {
-                        pal::TEXT_DELETE
-                    } else if in_merged {
-                        pal::TEXT_MERGED
-                    } else if is_delete {
-                        pal::TEXT_DELETE
-                    } else if in_auto_match && file_anchors.is_empty() {
-                        pal::TEXT_MATCH
-                    } else if is_search_hit {
-                        pal::TEXT_SEARCH
-                    } else {
-                        pal::TEXT_NORMAL
-                    };
-                    let display_max_chars = if is_auto_start_line {
-                        ((panel_w - 68.0 - 215.0) / char_w).floor() as usize
-                    } else {
-                        max_chars
-                    };
-                    let display = MergeApp::truncate_owned(line, display_max_chars);
-                    ui.painter().text(
-                        Pos2::new(rect.left() + 58.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        &display,
-                        FontId::monospace(11.0),
-                        text_color,
-                    );
-
-                    if is_auto_start_line && mr.score > 0.0 {
-                        let right_box_width = 250.0;
-                        let right_box_rect = Rect::from_min_size(
-                            Pos2::new(rect.right() - right_box_width, rect.top()),
-                            Vec2::new(right_box_width, rect.height()),
-                        );
-                        ui.painter().rect_filled(
-                            right_box_rect,
-                            2.0,
-                            Color32::from_rgba_premultiplied(28, 60, 40, 230),
-                        );
-                        ui.painter().text(
-                            Pos2::new(right_box_rect.left() + 6.0, rect.center().y),
-                            Align2::LEFT_CENTER,
-                            format!("▼ {}–{} ({:.0}%)", auto_start + 1, auto_end, auto_score),
-                            FontId::monospace(10.0),
-                            Color32::from_rgb(120, 230, 160),
-                        );
-                        let mut next_x = right_box_rect.left() + 115.0;
-                        let btn_w = 18.0;
-                        let btn_h = row_h - 6.0;
-                        ui.painter().text(
-                            Pos2::new(next_x, rect.center().y),
-                            Align2::LEFT_CENTER,
-                            "S:",
-                            FontId::monospace(10.0),
-                            Color32::from_rgb(180, 220, 190),
-                        );
-                        next_x += 14.0;
-                        let dec_s_rect = Rect::from_min_size(
-                            Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                            Vec2::new(btn_w, btn_h),
-                        );
-                        if ui
-                            .put(
-                                dec_s_rect,
-                                Button::new(RichText::new("▲").small().monospace())
-                                    .fill(Color32::from_rgb(40, 55, 45)),
-                            )
-                            .clicked()
-                        {
-                            adjust_start_by = -1;
-                        }
-                        next_x += btn_w + 2.0;
-                        let inc_s_rect = Rect::from_min_size(
-                            Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                            Vec2::new(btn_w, btn_h),
-                        );
-                        if ui
-                            .put(
-                                inc_s_rect,
-                                Button::new(RichText::new("▼").small().monospace())
-                                    .fill(Color32::from_rgb(40, 55, 45)),
-                            )
-                            .clicked()
-                        {
-                            adjust_start_by = 1;
-                        }
-                        let btn_size = Vec2::new(65.0, row_h - 4.0);
-                        let btn_rect = Rect::from_min_size(
-                            Pos2::new(
-                                right_box_rect.right() - btn_size.x - 4.0,
-                                rect.center().y - btn_size.y / 2.0,
-                            ),
-                            btn_size,
-                        );
-                        if ui
-                            .put(
-                                btn_rect,
-                                Button::new(
-                                    RichText::new("⚡ Apply")
-                                        .color(Color32::WHITE)
-                                        .strong()
-                                        .small()
-                                        .monospace(),
-                                )
-                                .fill(Color32::from_rgb(35, 85, 50))
-                                .stroke(Stroke::new(1.0, pal::BAR_MATCH)),
-                            )
-                            .clicked()
-                        {
-                            apply_clicked = true;
-                        }
-                    } else if is_auto_end_line && mr.score > 0.0 {
-                        let right_box_width = 120.0;
-                        let right_box_rect = Rect::from_min_size(
-                            Pos2::new(rect.right() - right_box_width, rect.top()),
-                            Vec2::new(right_box_width, rect.height()),
-                        );
-                        ui.painter().rect_filled(
-                            right_box_rect,
-                            2.0,
-                            Color32::from_rgba_premultiplied(28, 60, 40, 230),
-                        );
-                        let mut next_x = right_box_rect.left() + 6.0;
-                        let btn_w = 18.0;
-                        let btn_h = row_h - 6.0;
-                        ui.painter().text(
-                            Pos2::new(next_x, rect.center().y),
-                            Align2::LEFT_CENTER,
-                            "End block:",
-                            FontId::monospace(10.0),
-                            Color32::from_rgb(120, 230, 160),
-                        );
-                        next_x += 62.0;
-                        let dec_e_rect = Rect::from_min_size(
-                            Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                            Vec2::new(btn_w, btn_h),
-                        );
-                        if ui
-                            .put(
-                                dec_e_rect,
-                                Button::new(RichText::new("▲").small().monospace())
-                                    .fill(Color32::from_rgb(40, 55, 45)),
-                            )
-                            .clicked()
-                        {
-                            adjust_end_by = -1;
-                        }
-                        next_x += btn_w + 2.0;
-                        let inc_e_rect = Rect::from_min_size(
-                            Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                            Vec2::new(btn_w, btn_h),
-                        );
-                        if ui
-                            .put(
-                                inc_e_rect,
-                                Button::new(RichText::new("▼").small().monospace())
-                                    .fill(Color32::from_rgb(40, 55, 45)),
-                            )
-                            .clicked()
-                        {
-                            adjust_end_by = 1;
-                        }
-                    }
                 }
-
                 if in_auto_match && i == auto_end.saturating_sub(1) && file_anchors.is_empty() {
                     let (sep_rect, _) = ui
                         .allocate_exact_size(Vec2::new(ui.available_width(), 2.0), Sense::hover());
