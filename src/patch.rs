@@ -6,16 +6,23 @@ pub struct PatchHunk {
 }
 
 pub fn parse_patches(content: &str) -> Vec<PatchHunk> {
-    eprintln!("\n--- [DEBUG parse_patches] Starting to parse patch content ---");
+    // Prioritize Aider format if it contains SEARCH/REPLACE markers or <patch> tags
+    if content.contains("<<<<<<< SEARCH") || content.contains("<patch>") {
+        return parse_aider_patches(content);
+    }
+
     if content.contains("*** Begin Patch")
         || content.contains("diff --git")
         || content.contains("--- a/")
         || content.contains("+++ b/")
     {
-        eprintln!("[DEBUG parse_patches] Detected Git/Unified diff format. Delegating to parse_git_or_unified_patches.");
         return parse_git_or_unified_patches(content);
     }
-    eprintln!("[DEBUG parse_patches] Detected Aider SEARCH/REPLACE format.");
+
+    parse_aider_patches(content)
+}
+
+fn parse_aider_patches(content: &str) -> Vec<PatchHunk> {
     let mut hunks = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0;
@@ -24,10 +31,8 @@ pub fn parse_patches(content: &str) -> Vec<PatchHunk> {
         let trimmed = lines[i].trim();
         if trimmed.starts_with("filename ") {
             current_filename = trimmed["filename ".len()..].trim().to_string();
-            eprintln!("[DEBUG parse_patches] Found filename: {}", current_filename);
             i += 1;
         } else if trimmed.contains("<<<<<<< SEARCH") {
-            eprintln!("[DEBUG parse_patches] Found <<<<<<< SEARCH at line {}", i);
             i += 1;
             let mut search = Vec::new();
             while i < lines.len() {
@@ -42,24 +47,12 @@ pub fn parse_patches(content: &str) -> Vec<PatchHunk> {
                 search.push(lines[i].to_string());
                 i += 1;
             }
-            eprintln!(
-                "[DEBUG parse_patches] Parsed SEARCH block ({} lines). Next line: {:?}",
-                search.len(),
-                lines.get(i).unwrap_or(&"EOF")
-            );
 
             if i >= lines.len() {
-                eprintln!("[DEBUG parse_patches] Reached EOF prematurely while parsing SEARCH.");
                 break;
             }
             if lines[i].trim() == "=======" {
-                eprintln!(
-                    "[DEBUG parse_patches] Found ======= delimiter at line {}",
-                    i
-                );
                 i += 1;
-            } else {
-                eprintln!("[DEBUG parse_patches] WARNING: Expected ======= but found something else! Breaking.");
             }
 
             let mut replace = Vec::new();
@@ -75,46 +68,22 @@ pub fn parse_patches(content: &str) -> Vec<PatchHunk> {
                 replace.push(lines[i].to_string());
                 i += 1;
             }
-            eprintln!(
-                "[DEBUG parse_patches] Parsed REPLACE block ({} lines). Next line: {:?}",
-                replace.len(),
-                lines.get(i).unwrap_or(&"EOF")
-            );
 
             if i < lines.len() && lines[i].trim() == ">>>>>>> REPLACE" {
-                eprintln!(
-                    "[DEBUG parse_patches] Found >>>>>>> REPLACE delimiter at line {}",
-                    i
-                );
                 i += 1;
-            } else {
-                eprintln!("[DEBUG parse_patches] WARNING: Expected >>>>>>> REPLACE but found something else! Breaking.");
             }
 
             if !search.is_empty() || !replace.is_empty() {
-                eprintln!(
-                    "[DEBUG parse_patches] Successfully created PatchHunk for {}",
-                    current_filename
-                );
                 hunks.push(PatchHunk {
                     filename: current_filename.clone(),
                     search,
                     replace,
                 });
-            } else {
-                eprintln!(
-                    "[DEBUG parse_patches] SKIPPED empty PatchHunk for {}",
-                    current_filename
-                );
             }
         } else {
             i += 1;
         }
     }
-    eprintln!(
-        "[DEBUG parse_patches] Finished parsing. Total hunks: {}\n",
-        hunks.len()
-    );
     hunks
 }
 
