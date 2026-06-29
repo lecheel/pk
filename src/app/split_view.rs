@@ -35,16 +35,31 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let row_h = mono_h + 4.0;
     let char_w = mono_h * 0.60;
     ui.horizontal(|ui| {
+        let hunk = app.current_hunk().unwrap();
+        let header_bg = if app.show_git_diff_window {
+            Color32::from_rgb(58, 28, 28)
+        } else {
+            Color32::from_rgb(28, 38, 58)
+        };
         Frame::none()
-            .fill(Color32::from_rgb(28, 38, 58))
+            .fill(header_bg)
             .inner_margin(Margin::symmetric(8.0, 3.0))
             .show(ui, |ui| {
                 ui.set_min_width(left_w);
                 ui.set_max_width(left_w);
-                let hunk = app.current_hunk().unwrap();
+                let header_text = if app.show_git_diff_window {
+                    format!("GIT DIFF  ·  {}", hunk.filename)
+                } else {
+                    format!("SEARCH  ·  {}", hunk.filename)
+                };
+                let header_color = if app.show_git_diff_window {
+                    Color32::from_rgb(235, 120, 120)
+                } else {
+                    Color32::from_rgb(120, 180, 255)
+                };
                 ui.label(
-                    RichText::new(format!("SEARCH  ·  {}", hunk.filename))
-                        .color(Color32::from_rgb(120, 180, 255))
+                    RichText::new(header_text)
+                        .color(header_color)
                         .strong()
                         .monospace(),
                 );
@@ -84,9 +99,97 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     right_rect.min.x = body_rect.min.x + left_w + 2.0;
     right_rect.set_width(right_w);
     let mut left_ui = ui.child_ui(left_rect, Layout::top_down(Align::LEFT), None);
-    render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
+    if app.show_git_diff_window {
+        render_git_diff_panel(app, &mut left_ui, row_h, char_w, left_w);
+    } else {
+        render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
+    }
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
     render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
+}
+fn render_git_diff_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_w: f32, panel_w: f32) {
+    let max_chars = ((panel_w - 68.0) / char_w).floor() as usize;
+    ScrollArea::vertical()
+        .id_source("git_diff_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let desired = Vec2::new(ui.available_width(), row_h + 2.0);
+            let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+            ui.painter()
+                .rect_filled(rect, 2.0, Color32::from_rgb(45, 20, 20));
+            ui.painter().text(
+                Pos2::new(rect.left() + 8.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                "📝 GIT DIFF vs HEAD  ·  press ESC to close",
+                FontId::monospace(11.0),
+                Color32::from_rgb(230, 120, 120),
+            );
+            ui.add_space(4.0);
+
+            if app.git_diff_rows.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(20.0);
+                    ui.label(
+                        RichText::new("No git differences or not in a Git repository.")
+                            .color(pal::TEXT_DIM),
+                    );
+                });
+                return;
+            }
+
+            for row in &app.git_diff_rows {
+                let (base_bg, text_color, prefix) = match row.kind {
+                    RowKind::Delete => (pal::BG_DELETE, pal::TEXT_DELETE, "- "),
+                    RowKind::Insert => (pal::BG_INSERT, pal::TEXT_INSERT, "+ "),
+                    RowKind::Equal => (Color32::TRANSPARENT, pal::TEXT_NORMAL, "  "),
+                };
+
+                let desired = Vec2::new(ui.available_width(), row_h);
+                let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                if base_bg != Color32::TRANSPARENT {
+                    ui.painter().rect_filled(rect, 0.0, base_bg);
+                }
+
+                let left_num = row.left_num.map_or(String::new(), |n| n.to_string());
+                let right_num = row.right_num.map_or(String::new(), |n| n.to_string());
+
+                ui.painter().text(
+                    Pos2::new(rect.left() + 4.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    format!("{:>3}", left_num),
+                    FontId::monospace(9.5),
+                    pal::TEXT_DIM,
+                );
+                ui.painter().text(
+                    Pos2::new(rect.left() + 26.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    format!("{:>3}", right_num),
+                    FontId::monospace(9.5),
+                    pal::TEXT_DIM,
+                );
+
+                ui.painter().text(
+                    Pos2::new(rect.left() + 52.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    prefix,
+                    FontId::monospace(11.0),
+                    text_color,
+                );
+
+                let text = match row.kind {
+                    RowKind::Delete => row.left.as_deref().unwrap_or(""),
+                    _ => row.right.as_deref().unwrap_or(""),
+                };
+                let display = MergeApp::truncate_owned(text, max_chars.saturating_sub(2));
+                ui.painter().text(
+                    Pos2::new(rect.left() + 64.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    &display,
+                    FontId::monospace(11.0),
+                    text_color,
+                );
+            }
+        });
 }
 fn render_search_panel(
     app: &mut MergeApp,

@@ -1,10 +1,10 @@
+//--+ file:///src/app/state.rs
 use super::constants::{DEFAULT_FILE, DEFAULT_PATCH};
 use super::git_ops::GitStatus;
 use super::matching::MergeMatching;
 use super::types::{Action, FileAnchor, FileState, StatusMessage};
 use crate::app::pal;
 use crate::diff::MatchResult;
-use crate::diff::RowKind;
 use crate::patch::PatchHunk;
 use eframe::egui::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -318,6 +318,8 @@ impl eframe::App for MergeApp {
                 if i.key_pressed(Key::Escape) {
                     if self.show_help {
                         self.show_help = false;
+                    } else if self.show_git_diff_window {
+                        self.show_git_diff_window = false;
                     } else if self.is_searching {
                         self.is_searching = false;
                         self.file_search_query.clear();
@@ -416,74 +418,6 @@ impl eframe::App for MergeApp {
         super::status_bar::render_status_bar(self, ctx);
         if self.show_help {
             super::help::render_help_overlay(self, ctx);
-        }
-        if self.show_git_diff_window {
-            let mut open = self.show_git_diff_window;
-            Window::new("📝 Git Diff (file vs HEAD)")
-                .open(&mut open)
-                .default_size(Vec2::new(600.0, 450.0))
-                .show(ctx, |ui| {
-                    if self.git_diff_rows.is_empty() {
-                        ui.centered_and_justified(|ui| {
-                            ui.label("No git differences or not in a Git repository.");
-                        });
-                    } else {
-                        ScrollArea::vertical().show(ui, |ui| {
-                            for row in &self.git_diff_rows {
-                                ui.horizontal(|ui| {
-                                    let left_num =
-                                        row.left_num.map_or(String::new(), |n| n.to_string());
-                                    let right_num =
-                                        row.right_num.map_or(String::new(), |n| n.to_string());
-                                    ui.add_sized(
-                                        [35.0, 18.0],
-                                        Label::new(
-                                            RichText::new(left_num)
-                                                .color(pal::TEXT_DIM)
-                                                .monospace(),
-                                        ),
-                                    );
-                                    ui.add_sized(
-                                        [35.0, 18.0],
-                                        Label::new(
-                                            RichText::new(right_num)
-                                                .color(pal::TEXT_DIM)
-                                                .monospace(),
-                                        ),
-                                    );
-
-                                    match row.kind {
-                                        RowKind::Delete => {
-                                            if let Some(ref text) = row.left {
-                                                ui.colored_label(
-                                                    pal::TEXT_DELETE,
-                                                    format!("- {}", text),
-                                                );
-                                            }
-                                        }
-                                        RowKind::Insert => {
-                                            if let Some(ref text) = row.right {
-                                                ui.colored_label(
-                                                    pal::TEXT_INSERT,
-                                                    format!("+ {}", text),
-                                                );
-                                            }
-                                        }
-                                        RowKind::Equal => {
-                                            if let Some(ref text) = row.right {
-                                                ui.colored_label(
-                                                    pal::TEXT_NORMAL,
-                                                    format!("  {}", text),
-                                                );
-                                            }
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                    }
-                });
-            self.show_git_diff_window = open;
         }
         if self.show_debug {
             let mut show_debug = self.show_debug;
