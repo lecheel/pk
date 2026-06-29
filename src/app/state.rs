@@ -34,6 +34,9 @@ pub struct MergeApp {
     pub last_action: Option<Action>,
     pub file_states: HashMap<String, FileState>,
     pub show_help: bool,
+    pub show_debug: bool,
+    pub start_pwd: String,
+    pub start_pwd_is_repo: bool,
     pub left_selection: Option<(usize, usize)>,
     pub file_anchors: BTreeMap<char, FileAnchor>,
     pub mark_pending: Option<MarkPending>,
@@ -48,6 +51,11 @@ pub enum MarkPending {
 impl MergeApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_patch: Option<String>) -> Self {
         cc.egui_ctx.set_visuals(Visuals::dark());
+        let start_pwd = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        let start_pwd_is_repo = git2::Repository::discover(&start_pwd).is_ok();
+
         let mut app = Self {
             patch_text: String::new(),
             hunks: Vec::new(),
@@ -55,9 +63,7 @@ impl MergeApp {
             file_text: String::new(),
             file_lines: Vec::new(),
             file_path: String::new(),
-            base_dir: std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default(),
+            base_dir: start_pwd.clone(),
             match_result: None,
             search_rows: Vec::new(),
             file_search_query: String::new(),
@@ -76,6 +82,9 @@ impl MergeApp {
             last_action: None,
             file_states: HashMap::new(),
             show_help: false,
+            show_debug: false,
+            start_pwd,
+            start_pwd_is_repo,
             left_selection: None,
             file_anchors: BTreeMap::new(),
             mark_pending: None,
@@ -87,7 +96,10 @@ impl MergeApp {
             if let Ok(content) = std::fs::read_to_string(path) {
                 app.patch_text = content;
                 if let Some(parent) = path.parent() {
-                    app.base_dir = parent.display().to_string();
+                    let parent_str = parent.display().to_string();
+                    if !parent_str.is_empty() {
+                        app.base_dir = parent_str;
+                    }
                 }
                 loaded_patch = true;
                 app.set_message(StatusMessage::success(format!(
@@ -393,6 +405,175 @@ impl eframe::App for MergeApp {
         if self.show_help {
             super::help::render_help_overlay(self, ctx);
         }
+
+        if self.show_debug {
+            let mut show_debug = self.show_debug;
+            Window::new("🐞 App diagnostics")
+                .open(&mut show_debug)
+                .default_size(Vec2::new(550.0, 420.0))
+                .show(ctx, |ui| {
+                    ScrollArea::vertical().show(ui, |ui| {
+                        let mut report = String::new();
+
+                        ui.heading("Paths & directory mappings");
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Start PWD:").strong());
+                            ui.label(RichText::new(&self.start_pwd).monospace());
+                            if self.start_pwd_is_repo {
+                                ui.colored_label(Color32::from_rgb(120, 220, 160), "(Git Repo)");
+                            } else {
+                                ui.colored_label(Color32::from_rgb(230, 100, 100), "(Not Git Repo)");
+                            }
+                        });
+                        report.push_str(&format!("Start PWD: {} (Git Repo: {})\n", self.start_pwd, self.start_pwd_is_repo));
+
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Base directory:").strong());
+                            ui.label(RichText::new(&self.base_dir).monospace());
+                        });
+                        report.push_str(&format!("Base Directory: {}\n", self.base_dir));
+
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Current file path:").strong());
+                            ui.label(RichText::new(&self.file_path).monospace());
+                        });
+                        report.push_str(&format!("Current File Path: {}\n", self.file_path));
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        ui.heading("Git mapping diagnostics");
+                        let repo_root = std::path::Path::new(&self.base_dir);
+                        match git2::Repository::discover(repo_root) {
+                            Ok(repo) => {
+                                ui.colored_label(Color32::from_rgb(120, 220, 160), "✔ Git repository found");
+                                report.push_str("Git Repo: Found\n");
+                                if let Some(workdir) = repo.workdir() {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Repo workdir:");
+                                        ui.label(RichText::new(workdir.to_string_lossy()).monospace());
+                                    });
+                                    report.push_str(&format!("Repo workdir: {}\n", workdir.to_string_lossy()));
+
+                                    let file_path = std::path::Path::new(&self.file_path);
+                                    let abs_file_path = if file_path.is_absolute() {
+                                        file_path.to_path_buf()
+                                    } else if let Ok(cwd) = std::env::current_dir() {
+                                        cwd.join(file_path)
+                                    } else {
+                                        file_path.to_path_buf()
+                                    };
+
+                                    let abs_workdir = if workdir.is_absolute() {
+                                        workdir.to_path_buf()
+                                    } else if let Ok(cwd) = std::env::current_dir() {
+                                        cwd.join(workdir)
+                                    } else {
+                                        workdir.to_path_buf()
+                                    };
+
+                                    let clean_path = |p: &std::path::Path| -> String {
+                                        let s = p.to_string_lossy().replace('\\', "/");
+                                        if let Some(stripped) = s.strip_prefix("//?/") {
+                                            stripped.to_string()
+                                        } else {
+                                            s
+                                        }
+                                    };
+
+                                    let clean_file = clean_path(&abs_file_path);
+                                    let clean_work = clean_path(&abs_workdir);
+
+                                    ui.horizontal(|ui| {
+                                        ui.label("Normalized file path:");
+                                        ui.label(RichText::new(&clean_file).monospace());
+                                    });
+                                    report.push_str(&format!("Normalized file path: {}\n", clean_file));
+
+                                    ui.horizontal(|ui| {
+                                        ui.label("Normalized workdir:");
+                                        ui.label(RichText::new(&clean_work).monospace());
+                                    });
+                                    report.push_str(&format!("Normalized workdir: {}\n", clean_work));
+
+                                    if clean_file.starts_with(&clean_work) {
+                                        let rel = &clean_file[clean_work.len()..].trim_start_matches('/');
+                                        ui.colored_label(
+                                            Color32::from_rgb(120, 220, 160),
+                                            format!("✔ Relative path match: {}", rel)
+                                        );
+                                        report.push_str(&format!("Relative path match: {}\n", rel));
+                                    } else {
+                                        ui.colored_label(
+                                            Color32::from_rgb(230, 100, 100),
+                                            "❌ Path mismatch: File is not inside the repo workdir."
+                                        );
+                                        report.push_str("Relative path match: Mismatch (File not inside repo workdir)\n");
+                                    }
+                                } else {
+                                    ui.colored_label(Color32::from_rgb(230, 100, 100), "❌ Git repo missing working directory");
+                                    report.push_str("Git Repo Workdir: Missing\n");
+                                }
+                            }
+                            Err(e) => {
+                                ui.colored_label(
+                                    Color32::from_rgb(230, 100, 100),
+                                    format!("❌ Git lookup error: {}", e)
+                                );
+                                report.push_str(&format!("Git lookup error: {}\n", e));
+                            }
+                        }
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        ui.heading("Buffers & state summary");
+                        ui.label(format!("Total patches in file: {}", self.hunks.len()));
+                        ui.label(format!("Current hunk index: {}", self.current_hunk));
+                        ui.label(format!("Applied hunks indices: {:?}", self.applied_hunks));
+                        ui.label(format!("File lines: {}", self.file_lines.len()));
+                        ui.label(format!("Git status indexes: {}", self.git_statuses.len()));
+
+                        report.push_str(&format!("Total patches: {}\n", self.hunks.len()));
+                        report.push_str(&format!("Current hunk index: {}\n", self.current_hunk));
+                        report.push_str(&format!("Applied hunk indices: {:?}\n", self.applied_hunks));
+                        report.push_str(&format!("File lines: {}\n", self.file_lines.len()));
+                        report.push_str(&format!("Git status indexes: {}\n", self.git_statuses.len()));
+
+                        let (mut unchanged, mut added, mut modified, mut deleted) = (0, 0, 0, 0);
+                        for status in &self.git_statuses {
+                            match status {
+                                GitStatus::Unchanged => unchanged += 1,
+                                GitStatus::Added => added += 1,
+                                GitStatus::Modified => modified += 1,
+                                GitStatus::Deleted => deleted += 1,
+                            }
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label("Gutter distribution:");
+                            ui.colored_label(Color32::from_gray(160), format!("Unchanged: {} ", unchanged));
+                            ui.colored_label(Color32::from_rgb(120, 220, 160), format!("Added: {} ", added));
+                            ui.colored_label(Color32::from_rgb(220, 200, 100), format!("Modified: {} ", modified));
+                            ui.colored_label(Color32::from_rgb(235, 120, 120), format!("Deleted: {}", deleted));
+                        });
+                        report.push_str(&format!("Gutter: Unchanged: {}, Added: {}, Modified: {}, Deleted: {}\n", unchanged, added, modified, deleted));
+
+                        ui.add_space(12.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("📋 Copy Diagnostics").clicked() {
+                                ui.ctx().copy_text(report);
+                            }
+                            if ui.button("Force update git status").clicked() {
+                                self.update_git_statuses();
+                            }
+                        });
+                    });
+                });
+            self.show_debug = show_debug;
+        }
+
         CentralPanel::default().show(ctx, |ui| {
             if self.hunks.is_empty() {
                 ui.vertical_centered(|ui| {

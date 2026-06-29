@@ -1,3 +1,5 @@
+//--+ file:///src/app/split_view.rs
+// Hash: f5de59d99cb1
 use super::git_ops::GitStatus;
 use super::matching::MergeMatching;
 use super::palette::pal;
@@ -34,7 +36,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mono_h = ui.text_style_height(&TextStyle::Monospace);
     let row_h = mono_h + 4.0;
     let char_w = mono_h * 0.60;
-
     ui.horizontal(|ui| {
         Frame::none()
             .fill(Color32::from_rgb(28, 38, 58))
@@ -77,7 +78,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                 );
             });
     });
-
     ui.add(Separator::default());
     let body_rect = ui.available_rect_before_wrap();
     let mut left_rect = body_rect;
@@ -85,7 +85,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mut right_rect = body_rect;
     right_rect.min.x = body_rect.min.x + left_w + 2.0;
     right_rect.set_width(right_w);
-
     let mut left_ui = ui.child_ui(left_rect, Layout::top_down(Align::LEFT), None);
     render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
@@ -105,7 +104,6 @@ fn render_search_panel(
     let mut apply_clicked_id: Option<char> = None;
     let mut apply_clicked = false;
     let mut apply_clicked_line: Option<usize> = None;
-
     ScrollArea::vertical()
         .id_source("search_scroll")
         .auto_shrink([false, false])
@@ -132,7 +130,6 @@ fn render_search_panel(
                     ),
                 )
             };
-
             let desired = Vec2::new(ui.available_width(), row_h + 2.0);
             let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
             ui.painter().rect_filled(rect, 2.0, banner_bg);
@@ -144,18 +141,15 @@ fn render_search_panel(
                 if is_applied { pal::TEXT_DIM } else { banner_fg },
             );
             ui.add_space(2.0);
-
             let search_file_map: Vec<Option<usize>> = app
                 .search_rows
                 .iter()
                 .filter(|r| matches!(r.kind, RowKind::Equal | RowKind::Delete))
                 .map(|r| r.file_idx)
                 .collect();
-
             let pointer_down = ui.input(|i| i.pointer.primary_down());
             let pointer_pressed = ui.input(|i| i.pointer.primary_pressed());
             let pointer_dragging = ui.input(|i| i.pointer.is_decidedly_dragging());
-
             for (line_idx, line) in hunk.search.iter().enumerate() {
                 let file_idx = search_file_map.get(line_idx).copied().flatten();
                 let is_matched = file_idx.is_some();
@@ -172,7 +166,6 @@ fn render_search_panel(
                 } else {
                     base_bg
                 };
-
                 let desired = Vec2::new(ui.available_width(), row_h);
                 let (rect, resp) = ui.allocate_exact_size(desired, Sense::click_and_drag());
                 if resp.hovered() {
@@ -232,7 +225,6 @@ fn render_search_panel(
                     },
                 );
             }
-
             if !hunk.replace.is_empty() {
                 ui.add_space(4.0);
                 let (sep_rect, _) =
@@ -250,12 +242,9 @@ fn render_search_panel(
                     FontId::monospace(10.0),
                     pal::TEXT_INSERT,
                 );
-
                 let btn_size = Vec2::new(30.0, row_h - 4.0);
                 let btn_line_size = Vec2::new(55.0, row_h - 4.0);
                 let mut x_offset = 4.0;
-
-                // 1. Draw >a (or >) button
                 let btn_rect = Rect::from_min_size(
                     Pos2::new(
                         hdr_rect.right() - btn_size.x - x_offset,
@@ -263,13 +252,11 @@ fn render_search_panel(
                     ),
                     btn_size,
                 );
-
                 let btn_text = if let Some((&id, _)) = app.file_anchors.iter().next() {
                     format!(">{}", id)
                 } else {
                     ">".to_string()
                 };
-
                 let btn = Button::new(
                     RichText::new(&btn_text)
                         .color(Color32::WHITE)
@@ -278,7 +265,6 @@ fn render_search_panel(
                 )
                 .fill(Color32::from_rgb(40, 90, 55))
                 .min_size(btn_size);
-
                 let resp = ui.put(btn_rect, btn);
                 if resp.clicked() {
                     if let Some((&id, _)) = app.file_anchors.iter().next() {
@@ -287,7 +273,6 @@ fn render_search_panel(
                         apply_clicked = true;
                     }
                 }
-
                 resp.context_menu(|ui| {
                     if app.file_anchors.is_empty() {
                         ui.label("No markers set.");
@@ -303,10 +288,7 @@ fn render_search_panel(
                         }
                     }
                 });
-
                 x_offset += btn_size.x + 4.0;
-
-                // 2. Draw >(line) button if cursor exists
                 if let Some(cur_ln) = app.cursor_line {
                     let btn_line_rect = Rect::from_min_size(
                         Pos2::new(
@@ -315,7 +297,6 @@ fn render_search_panel(
                         ),
                         btn_line_size,
                     );
-
                     let btn_line = Button::new(
                         RichText::new(format!(">({})", cur_ln + 1))
                             .color(Color32::WHITE)
@@ -324,12 +305,10 @@ fn render_search_panel(
                     )
                     .fill(Color32::from_rgb(40, 90, 55))
                     .min_size(btn_line_size);
-
                     if ui.put(btn_line_rect, btn_line).clicked() {
                         apply_clicked_line = Some(cur_ln);
                     }
                 }
-
                 for (line_idx, line) in hunk.replace.iter().enumerate() {
                     let desired = Vec2::new(ui.available_width(), row_h);
                     let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
@@ -365,7 +344,6 @@ fn render_search_panel(
                 }
             }
         });
-
     if let Some(sel) = set_selection {
         app.left_selection = Some(sel);
     }
@@ -404,7 +382,6 @@ fn render_file_panel(
     let mut go_prev_hunk = false;
     let mut go_next_file = false;
     let mut go_prev_file = false;
-
     let current_hunk_idx = app.current_hunk;
     let total_hunks = app.hunks.len();
     let file_anchors = app.file_anchors.clone();
@@ -412,13 +389,11 @@ fn render_file_panel(
     let candidate_idx = app.candidate_index;
     let is_applied = app.applied_hunks.contains(&app.current_hunk);
     let can_apply = !is_applied && (app.match_result.is_some() || !app.file_anchors.is_empty());
-
     let apply_line = if file_anchors.is_empty() {
         mr.file_start + 1
     } else {
         file_anchors.values().next().unwrap().line + 1
     };
-
     let mut unique_files = Vec::new();
     for h in &app.hunks {
         if !unique_files.contains(&h.filename) {
@@ -433,14 +408,12 @@ fn render_file_panel(
         .iter()
         .position(|f| *f == current_file_name)
         .unwrap_or(0);
-
     Frame::none()
         .fill(Color32::from_rgb(25, 32, 42))
         .inner_margin(Margin::symmetric(6.0, 4.0))
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-
                 if unique_files.len() > 1 {
                     ui.label(RichText::new("File:").color(pal::TEXT_DIM).small());
                     if ui
@@ -464,7 +437,6 @@ fn render_file_panel(
                     }
                     ui.separator();
                 }
-
                 ui.label(RichText::new("Hunk:").color(pal::TEXT_DIM).small());
                 if ui
                     .add_enabled(current_hunk_idx > 0, Button::new("◀").small())
@@ -563,12 +535,14 @@ fn render_file_panel(
                         apply_clicked = true;
                     }
                 });
+                ui.add(Separator::default().vertical());
+                if ui.selectable_label(app.show_debug, "🐞 Debug").clicked() {
+                    app.show_debug = !app.show_debug;
+                }
             });
         });
-
     ui.add(Separator::default());
     let len = app.file_lines.len();
-
     if len > 0 {
         if app.is_searching {
             ui.input(|i| {
@@ -685,7 +659,6 @@ fn render_file_panel(
                     }
                 }
             });
-
             if !new_text.is_empty() {
                 app.vim_buffer.push_str(&new_text);
                 let buf = app.vim_buffer.trim().to_string();
@@ -747,7 +720,6 @@ fn render_file_panel(
             }
         }
     }
-
     if go_prev_file {
         let mut prev_file_hunk = None;
         for (i, h) in app.hunks.iter().enumerate() {
@@ -775,7 +747,6 @@ fn render_file_panel(
             return;
         }
     }
-
     if prev_hunk && current_hunk_idx > 0 {
         app.current_hunk -= 1;
         app.load_hunk();
@@ -862,7 +833,6 @@ fn render_file_panel(
             app.scroll_to_match = true;
         }
     }
-
     let file_lines = app.file_lines.clone();
     let merged_range = app.merged_range;
     let auto_start = mr.file_start;
@@ -875,7 +845,6 @@ fn render_file_panel(
     let git_statuses = app.git_statuses.clone();
     let mut did_scroll = false;
     let mut set_cursor: Option<usize> = None;
-
     let delete_file_indices: HashSet<usize> = app
         .search_rows
         .iter()
@@ -888,7 +857,6 @@ fn render_file_panel(
         .filter(|r| matches!(r.kind, RowKind::Equal))
         .filter_map(|r| r.file_idx)
         .collect();
-
     ScrollArea::both()
         .id_source("file_scroll")
         .auto_shrink([false, false])
@@ -897,7 +865,6 @@ fn render_file_panel(
                 let in_auto_match = i >= auto_start && i < auto_end;
                 let anchor_here = file_anchors.values().find(|a| a.line == i);
                 let is_anchor = anchor_here.is_some();
-
                 let is_cursor = cursor_line == Some(i);
                 let in_merged = merged_range.map_or(false, |(rs, re)| i >= rs && i < re);
                 let is_delete = in_auto_match && delete_file_indices.contains(&i);
@@ -907,16 +874,13 @@ fn render_file_panel(
                 let is_current_search = is_search_hit && current_search_line == Some(i);
                 let is_auto_start_line =
                     in_auto_match && i == auto_start && file_anchors.is_empty();
-
                 let git_status = git_statuses.get(i).copied().unwrap_or(GitStatus::Unchanged);
-
                 let row_is_tall = is_anchor;
                 let desired = Vec2::new(
                     ui.available_width(),
                     if row_is_tall { row_h + 6.0 } else { row_h },
                 );
                 let (rect, row_resp) = ui.allocate_exact_size(desired, Sense::click());
-
                 let should_scroll = scroll_to_match
                     && (is_cursor
                         || (cursor_line.is_none() && is_anchor)
@@ -925,7 +889,6 @@ fn render_file_panel(
                     ui.scroll_to_rect(rect, Some(Align::Center));
                     did_scroll = true;
                 }
-
                 if let Some(anchor) = anchor_here {
                     let anchor_bg = pal::BG_ANCHOR;
                     ui.painter().rect_filled(rect, 2.0, anchor_bg);
@@ -985,13 +948,11 @@ fn render_file_panel(
                     } else {
                         pal::BG_ROW_ODD
                     };
-
                     let final_bg = if is_auto_start_line {
                         Color32::TRANSPARENT
                     } else {
                         base_bg
                     };
-
                     let row_bg = if is_current_search {
                         Color32::from_rgb(70, 60, 15)
                     } else if is_search_hit {
@@ -1000,8 +961,6 @@ fn render_file_panel(
                         final_bg
                     };
                     ui.painter().rect_filled(rect, 0.0, row_bg);
-
-                    // Git Gutter (Far Left)
                     let git_color = match git_status {
                         GitStatus::Added => Color32::from_rgb(40, 130, 60),
                         GitStatus::Modified => Color32::from_rgb(200, 160, 40),
@@ -1012,8 +971,6 @@ fn render_file_panel(
                         let git_bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
                         ui.painter().rect_filled(git_bar, 0.0, git_color);
                     }
-
-                    // Main Status Bar (Shifted right by 2px to make room for Git Gutter)
                     let bar = Rect::from_min_size(
                         Pos2::new(rect.left() + 2.0, rect.top()),
                         Vec2::new(3.0, rect.height()),
@@ -1034,7 +991,6 @@ fn render_file_panel(
                         Color32::TRANSPARENT
                     };
                     ui.painter().rect_filled(bar, 0.0, bar_color);
-
                     if row_resp.clicked() {
                         set_cursor = Some(i);
                     }
@@ -1087,7 +1043,6 @@ fn render_file_panel(
                     } else {
                         pal::TEXT_NORMAL
                     };
-
                     let display_max_chars = if is_auto_start_line {
                         ((panel_w - 68.0 - 215.0) / char_w).floor() as usize
                     } else {
@@ -1101,7 +1056,6 @@ fn render_file_panel(
                         FontId::monospace(11.0),
                         text_color,
                     );
-
                     if is_auto_start_line {
                         let right_box_width = 215.0;
                         let right_box_rect = Rect::from_min_size(
@@ -1113,7 +1067,6 @@ fn render_file_panel(
                             2.0,
                             Color32::from_rgba_premultiplied(28, 60, 40, 230),
                         );
-
                         ui.painter().text(
                             Pos2::new(right_box_rect.left() + 8.0, rect.center().y),
                             Align2::LEFT_CENTER,
@@ -1121,7 +1074,6 @@ fn render_file_panel(
                             FontId::monospace(10.5),
                             Color32::from_rgb(120, 230, 160),
                         );
-
                         let btn_size = Vec2::new(90.0, row_h - 4.0);
                         let btn_rect = Rect::from_min_size(
                             Pos2::new(
@@ -1156,7 +1108,6 @@ fn render_file_panel(
             }
             ui.add_space(row_h * 3.0);
         });
-
     if scroll_to_match && !did_scroll {
         did_scroll = true;
     }
