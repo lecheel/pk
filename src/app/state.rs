@@ -32,6 +32,9 @@ pub struct MergeApp {
     pub vim_buffer: String,
     pub d_pending: bool,
     pub last_action: Option<Action>,
+    pub show_manual_paste: bool,
+    pub manual_paste_text: String,
+    pub initial_patch_path: Option<String>,
     pub file_states: HashMap<String, FileState>,
     pub show_help: bool,
     pub show_debug: bool,
@@ -82,6 +85,9 @@ impl MergeApp {
             vim_buffer: String::new(),
             d_pending: false,
             last_action: None,
+            show_manual_paste: false,
+            manual_paste_text: String::new(),
+            initial_patch_path: initial_patch.clone(),
             file_states: HashMap::new(),
             show_help: false,
             show_debug: false,
@@ -214,6 +220,8 @@ impl MergeApp {
         self.merged_range = None;
         self.history.clear();
         self.vim_buffer.clear();
+        self.show_manual_paste = false;
+        self.manual_paste_text.clear();
         self.d_pending = false;
         self.last_action = None;
         self.file_path.clear();
@@ -299,6 +307,8 @@ impl MergeApp {
         self.scroll_to_match = true;
         self.vim_buffer.clear();
         self.d_pending = false;
+        self.show_manual_paste = false;
+        self.manual_paste_text.clear();
         self.last_action = None;
         self.left_selection = None;
         self.update_git_statuses();
@@ -327,6 +337,8 @@ impl MergeApp {
         self.history.clear();
         self.vim_buffer.clear();
         self.d_pending = false;
+        self.show_manual_paste = false;
+        self.manual_paste_text.clear();
         self.file_anchors.clear();
         self.mark_pending = None;
         self.file_search_query.clear();

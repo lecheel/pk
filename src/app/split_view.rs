@@ -294,6 +294,11 @@ fn render_search_panel(
             if let Some(pasted) = get_clipboard_text() {
                 let parsed_hunks = parse_clipboard_patch(&pasted);
                 if !parsed_hunks.is_empty() {
+                    // Save to temp.md on disk and update the active tracking file
+                    let _ = std::fs::write("temp.md", &pasted);
+                    app.initial_patch_path = Some("temp.md".to_string());
+                    app.patch_text = pasted;
+
                     app.hunks = parsed_hunks;
                     app.current_hunk = 0;
                     app.applied_hunks.clear();
@@ -309,7 +314,6 @@ fn render_search_panel(
                     app.scroll_to_match = true;
                     app.left_selection = None;
 
-                    // If the parsed filename is empty, notify the user to input the filename manually
                     if app.hunks[0].filename.is_empty() {
                         app.set_message(StatusMessage::warning(
                             "Search pattern loaded. Enter the target filename below.",
@@ -317,7 +321,7 @@ fn render_search_panel(
                     } else {
                         app.load_hunk();
                         app.set_message(StatusMessage::success(
-                            "Successfully loaded patch from clipboard",
+                            "Loaded patch from clipboard (saved as temp.md)",
                         ));
                     }
                 } else {
@@ -329,8 +333,112 @@ fn render_search_panel(
                 app.set_message(StatusMessage::error("Could not read text from clipboard"));
             }
         }
+
+        if ui
+            .button("📝 Paste Manually")
+            .on_hover_text("Open a manual input area to paste using Ctrl+V or Shift+Insert")
+            .clicked()
+        {
+            app.show_manual_paste = !app.show_manual_paste;
+        }
+
+        // FIX: clone the path before using it to avoid holding a borrow into `app`
+        if let Some(orig_path) = app.initial_patch_path.clone() {
+            let label = if orig_path.contains("imp.md") || orig_path.ends_with("imp.md") {
+                "🔄 Reload imp.md"
+            } else if orig_path.contains("todo.md") || orig_path.ends_with("todo.md") {
+                "🔄 Reload todo.md"
+            } else if orig_path == "temp.md" {
+                "🔄 Reload temp.md"
+            } else {
+                "🔄 Reload Original"
+            };
+
+            if ui
+                .button(label)
+                .on_hover_text(format!(
+                    "Reload the current session patch file from disk: {}",
+                    orig_path
+                ))
+                .clicked()
+            {
+                if let Ok(content) = std::fs::read_to_string(&orig_path) {
+                    app.patch_text = content;
+                    app.reparse(); // now allowed – no borrow into app
+                    app.set_message(StatusMessage::success(format!(
+                        "Reloaded patch from disk: {}",
+                        orig_path
+                    )));
+                } else {
+                    app.set_message(StatusMessage::error(format!(
+                        "Failed to read {}",
+                        orig_path
+                    )));
+                }
+            }
+        }
     });
     ui.add_space(4.0);
+
+    // --- SINGLE manual paste block (the only one) ---
+    if app.show_manual_paste {
+        ui.group(|ui| {
+            ui.label(
+                RichText::new("Paste patch/search pattern here (Ctrl+V / Shift+Ins):")
+                    .small()
+                    .color(pal::TEXT_DIM),
+            );
+            ui.add(
+                TextEdit::multiline(&mut app.manual_paste_text)
+                    .font(FontId::monospace(9.5))
+                    .desired_width(panel_w - 32.0)
+                    .desired_rows(5),
+            );
+            ui.horizontal(|ui| {
+                if ui.button("⚡ Save to temp.md & Load").clicked() {
+                    let content = app.manual_paste_text.clone();
+                    let filename = "temp.md";
+                    let _ = std::fs::write(filename, &content);
+                    let parsed_hunks = parse_clipboard_patch(&content);
+                    if !parsed_hunks.is_empty() {
+                        app.initial_patch_path = Some("temp.md".to_string());
+                        app.patch_text = content;
+                        app.hunks = parsed_hunks;
+                        app.current_hunk = 0;
+                        app.applied_hunks.clear();
+                        app.merged_range = None;
+                        app.history.clear();
+                        app.vim_buffer.clear();
+                        app.d_pending = false;
+                        app.file_anchors.clear();
+                        app.mark_pending = None;
+                        app.file_search_query.clear();
+                        app.search_matches.clear();
+                        app.cursor_line = None;
+                        app.scroll_to_match = true;
+                        app.left_selection = None;
+                        app.show_manual_paste = false;
+                        if app.hunks[0].filename.is_empty() {
+                            app.set_message(StatusMessage::warning(
+                                "Search pattern loaded. Enter the target filename below.",
+                            ));
+                        } else {
+                            app.load_hunk();
+                            app.set_message(StatusMessage::success(
+                                "Saved to temp.md & successfully loaded!",
+                            ));
+                        }
+                    } else {
+                        app.set_message(StatusMessage::error("Input content is empty or invalid"));
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    app.show_manual_paste = false;
+                }
+            });
+        });
+        ui.add_space(4.0);
+    }
 
     let mut filename_changed = false;
     if let Some(hunk) = app.hunks.get_mut(app.current_hunk) {
