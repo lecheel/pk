@@ -6,23 +6,26 @@ pub struct PatchHunk {
 }
 
 pub fn parse_patches(content: &str) -> Vec<PatchHunk> {
-    if content.contains("*** Begin Patch") {
-        return parse_unified_patches(content);
+    if content.contains("*** Begin Patch")
+        || content.contains("diff --git")
+        || content.contains("--- a/")
+        || content.contains("+++ b/")
+    {
+        return parse_git_or_unified_patches(content);
     }
-
     let mut hunks = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0;
+    let mut current_filename = String::new();
     while i < lines.len() {
         let trimmed = lines[i].trim();
         if trimmed.starts_with("filename ") {
-            let filename = trimmed["filename ".len()..].trim().to_string();
+            current_filename = trimmed["filename ".len()..].trim().to_string();
             i += 1;
-            while i < lines.len() && !lines[i].contains("<<<<<<< SEARCH") {
+        } else if trimmed.contains("<<<<<<< SEARCH") {
+            if current_filename.is_empty() {
                 i += 1;
-            }
-            if i >= lines.len() {
-                break;
+                continue;
             }
             i += 1;
             let mut search = Vec::new();
@@ -36,39 +39,57 @@ pub fn parse_patches(content: &str) -> Vec<PatchHunk> {
             i += 1;
             let mut replace = Vec::new();
             while i < lines.len() && !lines[i].contains(">>>>>>> REPLACE") {
+                if lines[i].trim().starts_with("filename ") || lines[i].contains("<<<<<<< SEARCH") {
+                    break;
+                }
                 replace.push(lines[i].to_string());
                 i += 1;
             }
-            hunks.push(PatchHunk {
-                filename,
-                search,
-                replace,
-            });
+            if i < lines.len() && lines[i].contains(">>>>>>> REPLACE") {
+                i += 1;
+            }
+            if !search.is_empty() || !replace.is_empty() {
+                hunks.push(PatchHunk {
+                    filename: current_filename.clone(),
+                    search,
+                    replace,
+                });
+            }
+        } else {
+            i += 1;
         }
-        i += 1;
     }
     hunks
 }
 
-fn parse_unified_patches(content: &str) -> Vec<PatchHunk> {
+fn parse_git_or_unified_patches(content: &str) -> Vec<PatchHunk> {
     let mut hunks = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0;
     let mut current_filename = String::new();
-
     while i < lines.len() {
         let line = lines[i];
         if line.starts_with("*** Update File: ") {
             current_filename = line["*** Update File: ".len()..].trim().to_string();
         } else if line.starts_with("*** Add File: ") {
             current_filename = line["*** Add File: ".len()..].trim().to_string();
-        } else if line.trim() == "@@" {
+        } else if line.starts_with("diff --git ") {
+            if let Some(b_part) = line.split(" b/").nth(1) {
+                current_filename = b_part.trim().to_string();
+            }
+        } else if line.starts_with("+++ b/") {
+            current_filename = line["+++ b/".len()..].trim().to_string();
+        } else if line.starts_with("@@ ") || line.trim() == "@@" {
             i += 1;
             let mut search = Vec::new();
             let mut replace = Vec::new();
             while i < lines.len() {
                 let l = lines[i];
-                if l.trim() == "@@" || l.starts_with("*** ") {
+                if l.starts_with("diff --git ")
+                    || l.starts_with("*** ")
+                    || l.starts_with("@@ ")
+                    || l.trim() == "@@"
+                {
                     break;
                 }
                 if let Some(stripped) = l.strip_prefix(' ') {
@@ -85,6 +106,9 @@ fn parse_unified_patches(content: &str) -> Vec<PatchHunk> {
                 i += 1;
             }
             if !search.is_empty() || !replace.is_empty() {
+                if current_filename.is_empty() {
+                    current_filename = "unknown_file".to_string();
+                }
                 hunks.push(PatchHunk {
                     filename: current_filename.clone(),
                     search,
