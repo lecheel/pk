@@ -1409,6 +1409,8 @@ fn render_file_panel(
     let mut set_del_end: Option<usize> = None;
     let mut clear_del = false;
     let mut perform_block_delete: Option<(usize, usize)> = None;
+    let mut set_anchor_a_start: Option<usize> = None;
+    let mut set_anchor_a_end: Option<usize> = None;
     let delete_file_indices: HashSet<usize> = app
         .search_rows
         .iter()
@@ -1735,6 +1737,15 @@ fn render_file_panel(
                 row_resp.context_menu(|ui| {
                     ui.label(RichText::new(format!("Line {}", i + 1)).strong());
                     ui.separator();
+                    if ui.button("Set Anchor 'a' (ma) Start").clicked() {
+                        set_anchor_a_start = Some(i);
+                        ui.close_menu();
+                    }
+                    if ui.button("Set Anchor 'a' (ma) End").clicked() {
+                        set_anchor_a_end = Some(i);
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button("Set Block Delete Start").clicked() {
                         set_del_start = Some(i);
                         ui.close_menu();
@@ -1795,5 +1806,11 @@ fn render_file_panel(
     }
     if let Some((min, max)) = perform_block_delete {
         app.delete_block_range(min, max);
+    }
+    if let Some(val) = set_anchor_a_start {
+        app.set_mark_a(val);
+    }
+    if let Some(val) = set_anchor_a_end {
+        app.set_mark_b(val);
     }
 }

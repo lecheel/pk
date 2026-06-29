@@ -138,6 +138,8 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
         .filter(|l| !l.trim().is_empty())
         .take(2)
         .collect();
+    let first_non_empty = search.iter().find(|l| !l.trim().is_empty());
+    let last_non_empty = search.iter().rev().find(|l| !l.trim().is_empty());
     for window_size in min_window..=max_window {
         for start in 0..=file.len().saturating_sub(window_size) {
             let window = &file[start..start + window_size];
@@ -149,6 +151,17 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
                 }
             }
             if !all_present {
+                continue;
+            }
+            let win_first = window.iter().find(|l| !l.trim().is_empty());
+            let win_last = window.iter().rev().find(|l| !l.trim().is_empty());
+            let boundary_match = match (first_non_empty, win_first, last_non_empty, win_last) {
+                (Some(s_first), Some(w_first), Some(s_last), Some(w_last)) => {
+                    s_first.trim() == w_first.trim() && s_last.trim() == w_last.trim()
+                }
+                _ => false,
+            };
+            if !boundary_match {
                 continue;
             }
             let raw = lcs_diff(search, window);
@@ -222,9 +235,20 @@ pub fn compute_match_for_window(
     let end = file_end.min(file.len());
     let window = &file[file_start..end];
     let raw = lcs_diff(search, window);
-
     let valuable_search_count = search.iter().filter(|l| is_valuable_line(l)).count();
-    let score = if valuable_search_count > 0 {
+    let first_non_empty = search.iter().find(|l| !l.trim().is_empty());
+    let last_non_empty = search.iter().rev().find(|l| !l.trim().is_empty());
+    let win_first = window.iter().find(|l| !l.trim().is_empty());
+    let win_last = window.iter().rev().find(|l| !l.trim().is_empty());
+    let boundary_match = match (first_non_empty, win_first, last_non_empty, win_last) {
+        (Some(s_first), Some(w_first), Some(s_last), Some(w_last)) => {
+            s_first.trim() == w_first.trim() && s_last.trim() == w_last.trim()
+        }
+        _ => false,
+    };
+    let score = if !boundary_match {
+        0.0
+    } else if valuable_search_count > 0 {
         let mut matched_valuable = 0;
         for (kind, left, _) in &raw {
             if *kind == RowKind::Equal {
