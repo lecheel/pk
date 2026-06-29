@@ -21,8 +21,25 @@ impl MergeMatching for MergeApp {
             }
         };
         if self.file_lines.is_empty() {
-            self.match_result = None;
-            self.search_rows = Vec::new();
+            if hunk.search.is_empty() && !hunk.replace.is_empty() {
+                // New file creation: build rows for the replace lines
+                let mr = MatchResult {
+                    score: 100.0,
+                    file_start: 0,
+                    file_end: 0,
+                    rows: vec![],
+                    candidates: vec![],
+                };
+                self.search_rows = Self::build_search_rows(hunk, &mr);
+                self.match_result = Some(mr);
+                if self.cursor_line.is_none() {
+                    self.cursor_line = Some(0);
+                }
+                self.scroll_to_match = true;
+            } else {
+                self.match_result = None;
+                self.search_rows = Vec::new();
+            }
         } else {
             let best = diff::find_best_match(&hunk.search, &self.file_lines);
             if best.score <= 15.0 {
