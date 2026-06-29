@@ -21,6 +21,28 @@ pub struct MatchResult {
     pub rows: Vec<DiffRow>,
     pub candidates: Vec<(usize, usize, f32)>,
 }
+pub fn is_valuable_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.len() == 1 {
+        let c = trimmed.chars().next().unwrap();
+        if c == '}'
+            || c == '{'
+            || c == ']'
+            || c == '['
+            || c == ')'
+            || c == '('
+            || c == ','
+            || c == ';'
+            || c == '.'
+        {
+            return false;
+        }
+    }
+    true
+}
 pub fn diff_patch(
     search: &[String],
     replace: &[String],
@@ -74,10 +96,26 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
         };
     }
     let search_len = search.len();
+    let valuable_search_count = search.iter().filter(|l| is_valuable_line(l)).count();
+
     if search_len > file.len() {
         let raw = lcs_diff(search, file);
-        let matched = raw.iter().filter(|(k, _, _)| *k == RowKind::Equal).count();
-        let score = (matched as f32 / search_len as f32) * 100.0;
+        let score = if valuable_search_count > 0 {
+            let mut matched_valuable = 0;
+            for (kind, left, _) in &raw {
+                if *kind == RowKind::Equal {
+                    if let Some(ref l) = left {
+                        if is_valuable_line(l) {
+                            matched_valuable += 1;
+                        }
+                    }
+                }
+            }
+            (matched_valuable as f32 / valuable_search_count as f32) * 100.0
+        } else {
+            let matched = raw.iter().filter(|(k, _, _)| *k == RowKind::Equal).count();
+            (matched as f32 / search_len as f32) * 100.0
+        };
         let rows = build_rows(&raw, 1, 1);
         return MatchResult {
             score,
@@ -98,8 +136,24 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
         for start in 0..=file.len().saturating_sub(window_size) {
             let window = &file[start..start + window_size];
             let raw = lcs_diff(search, window);
-            let matched = raw.iter().filter(|(k, _, _)| *k == RowKind::Equal).count();
-            let score = matched as f32 / search_len as f32;
+
+            let score = if valuable_search_count > 0 {
+                let mut matched_valuable = 0;
+                for (kind, left, _) in &raw {
+                    if *kind == RowKind::Equal {
+                        if let Some(ref l) = left {
+                            if is_valuable_line(l) {
+                                matched_valuable += 1;
+                            }
+                        }
+                    }
+                }
+                matched_valuable as f32 / valuable_search_count as f32
+            } else {
+                let matched = raw.iter().filter(|(k, _, _)| *k == RowKind::Equal).count();
+                matched as f32 / search_len as f32
+            };
+
             let extra = window_size.saturating_sub(search_len);
             let penalty = extra as f32 * 0.03;
             let adjusted = score - penalty;
@@ -110,7 +164,7 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
                 best_raw = raw;
             }
             let pct = (adjusted * 100.0).clamp(0.0, 100.0);
-            if pct >= 30.0 {
+            if pct >= 15.0 {
                 all_candidates.push((start, start + window_size, pct));
             }
         }
@@ -152,8 +206,25 @@ pub fn compute_match_for_window(
     let end = file_end.min(file.len());
     let window = &file[file_start..end];
     let raw = lcs_diff(search, window);
-    let matched = raw.iter().filter(|(k, _, _)| *k == RowKind::Equal).count();
-    let score = (matched as f32 / search.len().max(1) as f32) * 100.0;
+
+    let valuable_search_count = search.iter().filter(|l| is_valuable_line(l)).count();
+    let score = if valuable_search_count > 0 {
+        let mut matched_valuable = 0;
+        for (kind, left, _) in &raw {
+            if *kind == RowKind::Equal {
+                if let Some(ref l) = left {
+                    if is_valuable_line(l) {
+                        matched_valuable += 1;
+                    }
+                }
+            }
+        }
+        (matched_valuable as f32 / valuable_search_count as f32) * 100.0
+    } else {
+        let matched = raw.iter().filter(|(k, _, _)| *k == RowKind::Equal).count();
+        (matched as f32 / search.len().max(1) as f32) * 100.0
+    };
+
     let rows = build_rows(&raw, 1, file_start + 1);
     MatchResult {
         score,

@@ -1,16 +1,15 @@
+//--+ file:///src/app/matching.rs
 use super::palette::pal;
 use super::state::MergeApp;
 use super::types::SearchRow;
 use crate::diff::{self, MatchResult, RowKind};
 use crate::patch::PatchHunk;
 use eframe::egui::Color32;
-
 pub trait MergeMatching {
     fn recompute_match(&mut self);
     fn build_search_rows(hunk: &PatchHunk, mr: &MatchResult) -> Vec<SearchRow>;
     fn score_appearance(score: f32) -> (Color32, Color32, &'static str);
 }
-
 impl MergeMatching for MergeApp {
     fn recompute_match(&mut self) {
         let hunk = match self.hunks.get(self.current_hunk) {
@@ -21,12 +20,17 @@ impl MergeMatching for MergeApp {
                 return;
             }
         };
-
         if self.file_lines.is_empty() {
             self.match_result = None;
             self.search_rows = Vec::new();
         } else {
             let best = diff::find_best_match(&hunk.search, &self.file_lines);
+            if best.score <= 15.0 {
+                // Ignore extremely low scores/trivial matches
+                self.match_result = None;
+                self.search_rows = Vec::new();
+                return;
+            }
             let mr = if best.candidates.is_empty() {
                 best
             } else {
@@ -50,7 +54,6 @@ impl MergeMatching for MergeApp {
             self.scroll_to_match = true;
         }
     }
-
     fn build_search_rows(hunk: &PatchHunk, mr: &MatchResult) -> Vec<SearchRow> {
         let patch_diff = diff::diff_patch(&hunk.search, &hunk.replace);
         let mut rows = Vec::new();
@@ -84,7 +87,6 @@ impl MergeMatching for MergeApp {
         }
         rows
     }
-
     fn score_appearance(score: f32) -> (Color32, Color32, &'static str) {
         if score >= 95.0 {
             (Color32::from_rgb(20, 70, 30), pal::ACCENT_GOOD, "✓✓")
