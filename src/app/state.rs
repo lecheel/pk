@@ -33,6 +33,7 @@ pub enum LineActionKind {
 }
 
 pub struct MergeApp {
+    pub quit_requested: bool,
     pub patch_text: String,
     pub hunks: Vec<PatchHunk>,
     pub current_hunk: usize,
@@ -93,6 +94,7 @@ impl MergeApp {
             .unwrap_or_default();
         let start_pwd_is_repo = git2::Repository::discover(&start_pwd).is_ok();
         let mut app = Self {
+            quit_requested: false,
             patch_text: String::new(),
             hunks: Vec::new(),
             current_hunk: 0,
@@ -483,6 +485,14 @@ impl MergeApp {
 
 impl eframe::App for MergeApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // --- Graceful exit via Alt+Q ---
+        if ctx.input(|i| i.key_pressed(Key::Q) && i.modifiers.alt) {
+            self.quit_requested = true;
+        }
+        if self.quit_requested {
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+            self.quit_requested = false;
+        }
         if self.message.is_some() {
             if self.message_until.is_none() {
                 self.message_until = Some(ctx.input(|i| i.time) + 6.0);

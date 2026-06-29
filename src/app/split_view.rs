@@ -1197,6 +1197,16 @@ fn render_file_panel(
                 if i.key_pressed(Key::Minus) && i.modifiers.alt {
                     go_prev_file = true;
                 }
+                if i.key_pressed(Key::W) && i.modifiers.alt {
+                    app.save_file_state();
+                    app.set_message(StatusMessage::success("File saved"));
+                    // Optionally recompute match to reflect changes
+                    app.recompute_match();
+                }
+                if i.key_pressed(Key::Q) && i.modifiers.alt {
+                    app.quit_requested = true;
+                }
+
                 if i.key_pressed(Key::ArrowDown) {
                     app.cursor_line = Some((cur + 1).min(len - 1));
                     cursor_changed = true;
