@@ -1141,6 +1141,12 @@ fn render_file_panel(
 
                 ui.add(Separator::default().vertical());
                 if ui
+                    .selectable_label(app.show_git_status_window, "📝 Git Status (F1)")
+                    .clicked()
+                {
+                    app.show_git_status_window = !app.show_git_status_window;
+                }
+                if ui
                     .selectable_label(app.show_git_diff_window, "📝 Git Diff (F4)")
                     .clicked()
                 {
