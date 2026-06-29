@@ -325,10 +325,19 @@ fn render_search_panel(
             };
             let is_applied = app.applied_hunks.contains(&app.current_hunk);
             let (banner_bg, banner_fg, _icon) = MergeApp::score_appearance(mr.score);
+            let is_new_file_creation = app
+                .current_hunk()
+                .map(|h| h.search.is_empty())
+                .unwrap_or(false);
             let (banner_bg, banner_text) = if is_applied {
                 (
                     Color32::from_rgb(30, 40, 30),
                     format!("✓ Applied — hunk {}", app.current_hunk + 1),
+                )
+            } else if is_new_file_creation {
+                (
+                    Color32::from_rgb(20, 45, 25),
+                    "✚ New file / Append".to_string(),
                 )
             } else {
                 (
@@ -628,8 +637,12 @@ fn render_file_panel(
     let file_anchors = app.file_anchors.clone();
     let candidate_count = mr.candidates.len();
     let candidate_idx = app.candidate_index;
+    let is_new_file_creation = app
+        .current_hunk()
+        .map(|h| h.search.is_empty())
+        .unwrap_or(false);
     let is_applied = app.applied_hunks.contains(&app.current_hunk);
-    let score_ok = mr.score > 60.0 || !file_anchors.is_empty();
+    let score_ok = is_new_file_creation || mr.score > 60.0 || !file_anchors.is_empty();
     let can_apply = !is_applied && score_ok;
     let apply_line = if file_anchors.is_empty() {
         mr.file_start + 1
@@ -1540,10 +1553,7 @@ fn render_file_panel(
                                     }
                                     RowKind::Equal => {
                                         if let Some(ref text) = row.right {
-                                            ui.colored_label(
-                                                pal::TEXT_DIM,
-                                                format!("  {}", text),
-                                            );
+                                            ui.colored_label(pal::TEXT_DIM, format!("  {}", text));
                                         }
                                     }
                                 }

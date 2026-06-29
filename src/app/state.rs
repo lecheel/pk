@@ -290,6 +290,12 @@ impl MergeApp {
     }
 
     pub fn resolve_apply_range(&self) -> Option<(usize, usize)> {
+        if let Some(hunk) = self.current_hunk() {
+            if hunk.search.is_empty() {
+                // If search is empty, treat as a new file or append operation
+                return Some((self.file_lines.len(), self.file_lines.len()));
+            }
+        }
         self.match_result
             .as_ref()
             .map(|mr| (mr.file_start, mr.file_end))
@@ -426,6 +432,16 @@ impl MergeApp {
                             self.set_message(StatusMessage::warning(format!(
                                 "File not found — using embedded sample ({})",
                                 e
+                            )));
+                        } else if hunk.search.is_empty() {
+                            self.file_text = String::new();
+                            self.file_lines = Vec::new();
+                            self.applied_hunks.clear();
+                            self.merged_range = None;
+                            self.history.clear();
+                            self.set_message(StatusMessage::info(format!(
+                                "✚ Ready to create new file: {}",
+                                path
                             )));
                         } else {
                             self.file_text = String::new();
