@@ -82,17 +82,27 @@ pub struct MergeApp {
     pub del_start: Option<usize>,
     pub del_end: Option<usize>,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
     WaitingKey,
 }
+
 impl MergeApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_patch: Option<String>) -> Self {
         cc.egui_ctx.set_visuals(Visuals::dark());
-        let start_pwd = std::env::current_dir()
+
+        let current_pwd = std::env::current_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
-        let start_pwd_is_repo = git2::Repository::discover(&start_pwd).is_ok();
+
+        let start_repo = git2::Repository::discover(&current_pwd).ok();
+        let start_pwd_is_repo = start_repo.is_some();
+        let start_pwd = start_repo
+            .as_ref()
+            .and_then(|r| r.workdir().map(|w| w.display().to_string()))
+            .unwrap_or_else(|| current_pwd.clone());
+
         let mut app = Self {
             quit_requested: false,
             patch_text: String::new(),
@@ -143,6 +153,7 @@ impl MergeApp {
             del_start: None,
             del_end: None,
         };
+
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
             let path = std::path::Path::new(&patch_file);
@@ -151,7 +162,12 @@ impl MergeApp {
                 if let Some(parent) = path.parent() {
                     let parent_str = parent.display().to_string();
                     if !parent_str.is_empty() {
-                        app.base_dir = parent_str;
+                        // Use the git toplevel repo home dir if discoverable from the patch's location
+                        let patch_repo = git2::Repository::discover(&parent_str).ok();
+                        app.base_dir = patch_repo
+                            .as_ref()
+                            .and_then(|r| r.workdir().map(|w| w.display().to_string()))
+                            .unwrap_or(parent_str);
                     }
                 }
                 loaded_patch = true;
@@ -166,15 +182,18 @@ impl MergeApp {
                 )));
             }
         }
+
         if !loaded_patch {
             app.patch_text = DEFAULT_PATCH.to_string();
             app.set_message(StatusMessage::info(
                 "No patch file provided — using embedded demo patch. Press ? for help.",
             ));
         }
+
         app.reparse();
         app
     }
+
     pub fn is_hunk_match_ok(&self, hunk_idx: usize) -> bool {
         if let Some(hunk) = self.hunks.get(hunk_idx) {
             if hunk.search.is_empty() {
@@ -233,10 +252,12 @@ impl MergeApp {
             }
         }
     }
+
     pub fn set_message(&mut self, msg: StatusMessage) {
         self.message = Some(msg);
         self.message_until = None;
     }
+
     pub fn set_mark(&mut self, id: char, line: usize) {
         self.file_anchors.insert(
             id,
@@ -253,22 +274,27 @@ impl MergeApp {
             id
         )));
     }
+
     pub fn set_mark_a(&mut self, line: usize) {
         self.set_mark('a', line);
     }
+
     pub fn set_mark_b(&mut self, line: usize) {
         self.set_mark('b', line);
     }
+
     pub fn clear_marks(&mut self) {
         self.file_anchors.clear();
         self.mark_pending = None;
         self.scroll_to_match = true;
     }
+
     pub fn resolve_apply_range(&self) -> Option<(usize, usize)> {
         self.match_result
             .as_ref()
             .map(|mr| (mr.file_start, mr.file_end))
     }
+
     pub fn toggle_line_removal(&mut self, line_idx: usize) {
         if let Some(pos) = self
             .pending_line_actions
@@ -324,6 +350,7 @@ impl MergeApp {
         self.git_hunks =
             super::git_ops::group_git_hunks(&self.git_diff_rows, self.file_lines.len());
     }
+
     pub fn reparse(&mut self) {
         self.save_file_state();
         self.hunks = crate::patch::parse_patches(&self.patch_text);
@@ -345,6 +372,7 @@ impl MergeApp {
         self.del_end = None;
         self.load_hunk();
     }
+
     pub fn save_file_state(&mut self) {
         if self.file_path.is_empty() {
             return;
@@ -359,6 +387,7 @@ impl MergeApp {
             },
         );
     }
+
     pub fn load_hunk(&mut self) {
         let hunk = match self.hunks.get(self.current_hunk) {
             Some(h) => h.clone(),
@@ -436,14 +465,17 @@ impl MergeApp {
         self.update_git_statuses();
         self.recompute_match();
     }
+
     pub fn current_hunk(&self) -> Option<&PatchHunk> {
         self.hunks.get(self.current_hunk)
     }
+
     pub fn hunk_summary(&self) -> (usize, usize, usize) {
         let applied = self.applied_hunks.len();
         let total = self.hunks.len();
         (applied, total - applied, total)
     }
+
     pub fn truncate_owned(text: &str, max_chars: usize) -> String {
         if text.chars().count() > max_chars {
             let mut s: String = text.chars().take(max_chars.saturating_sub(1)).collect();
@@ -453,6 +485,7 @@ impl MergeApp {
             text.to_string()
         }
     }
+
     pub fn reset_for_new_file(&mut self) {
         self.applied_hunks.clear();
         self.merged_range = None;
@@ -485,7 +518,6 @@ impl MergeApp {
 
 impl eframe::App for MergeApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // --- Graceful exit via Alt+Q ---
         if ctx.input(|i| i.key_pressed(Key::Q) && i.modifiers.alt) {
             self.quit_requested = true;
         }
@@ -709,7 +741,6 @@ impl eframe::App for MergeApp {
         }
         super::toolbar::render_toolbar(self, ctx);
         super::status_bar::render_status_bar(self, ctx);
-
         CentralPanel::default().show(ctx, |ui| {
             if self.hunks.is_empty() {
                 ui.vertical_centered(|ui| {
@@ -727,11 +758,9 @@ impl eframe::App for MergeApp {
             }
             super::split_view::render_split_view(self, ui);
         });
-
         if self.show_help {
             super::help::render_help_overlay(self, ctx);
         }
-
         if self.show_debug {
             let mut show_debug = self.show_debug;
             Window::new("🐞 App diagnostics")
