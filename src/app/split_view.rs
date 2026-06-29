@@ -1088,7 +1088,29 @@ fn render_file_panel(
                                     app.mark_pending = None;
                                 }
                             }
-                        } else if txt != "?" && txt != "m" && txt != "o" && txt != "O" {
+                        } else if txt == "o" {
+                            if let Some(cur) = app.cursor_line {
+                                app.save_history();
+                                if cur + 1 <= app.file_lines.len() {
+                                    app.file_lines.insert(cur + 1, String::new());
+                                    app.cursor_line = Some(cur + 1);
+                                    app.scroll_to_match = true;
+                                    app.recompute_match();
+                                    app.update_git_statuses();
+                                    app.set_message(StatusMessage::info("Opened new line below"));
+                                }
+                            }
+                        } else if txt == "O" {
+                            if let Some(cur) = app.cursor_line {
+                                app.save_history();
+                                app.file_lines.insert(cur, String::new());
+                                app.cursor_line = Some(cur);
+                                app.scroll_to_match = true;
+                                app.recompute_match();
+                                app.update_git_statuses();
+                                app.set_message(StatusMessage::info("Opened new line above"));
+                            }
+                        } else if txt != "?" && txt != "m" {
                             new_text.push_str(&txt);
                         }
                     }
