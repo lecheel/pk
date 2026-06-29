@@ -190,6 +190,7 @@ fn render_git_diff_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_w: f3
             }
         });
 }
+// In src/app/split_view.rs
 fn render_search_panel(
     app: &mut MergeApp,
     ui: &mut Ui,
@@ -277,6 +278,36 @@ fn render_search_panel(
                         }
                     }
                 }
+
+                // Double-click handler to search for the line text in the right-side file panel
+                if resp.double_clicked() {
+                    let q = line.trim().to_string();
+                    app.file_search_query = q.clone();
+                    let q_lower = q.to_lowercase();
+                    if q_lower.is_empty() {
+                        app.search_matches.clear();
+                    } else {
+                        app.search_matches = app
+                            .file_lines
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, l)| l.to_lowercase().contains(&q_lower))
+                            .map(|(i, _)| i)
+                            .collect();
+                        if !app.search_matches.is_empty() {
+                            app.search_match_idx = 0;
+                            app.cursor_line = Some(app.search_matches[0]);
+                            app.scroll_to_match = true;
+                        } else {
+                            app.search_matches.clear();
+                            app.set_message(StatusMessage::warning(format!(
+                                "No matches found for '{}'",
+                                q
+                            )));
+                        }
+                    }
+                }
+
                 ui.painter().rect_filled(rect, 0.0, bg);
                 let bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
                 ui.painter().rect_filled(
