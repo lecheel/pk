@@ -26,9 +26,13 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mono_h = ui.text_style_height(&TextStyle::Monospace);
     let row_h = mono_h + 4.0;
     let char_w = mono_h * 0.60;
+
+    // Draw Headers
     ui.horizontal(|ui| {
         let hunk = app.current_hunk().unwrap();
-        let header_bg = if app.show_git_diff_window {
+        let header_bg = if app.show_git_status_window {
+            Color32::from_rgb(20, 45, 25)
+        } else if app.show_git_diff_window {
             Color32::from_rgb(58, 28, 28)
         } else {
             Color32::from_rgb(28, 38, 58)
@@ -39,12 +43,16 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
             .show(ui, |ui| {
                 ui.set_min_width(left_w);
                 ui.set_max_width(left_w);
-                let header_text = if app.show_git_diff_window {
+                let header_text = if app.show_git_status_window {
+                    format!("GIT STATUS  ·  Repository")
+                } else if app.show_git_diff_window {
                     format!("GIT DIFF  ·  {}", hunk.filename)
                 } else {
                     format!("SEARCH  ·  {}", hunk.filename)
                 };
-                let header_color = if app.show_git_diff_window {
+                let header_color = if app.show_git_status_window {
+                    Color32::from_rgb(120, 230, 160)
+                } else if app.show_git_diff_window {
                     Color32::from_rgb(235, 120, 120)
                 } else {
                     Color32::from_rgb(120, 180, 255)
@@ -84,21 +92,206 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
             });
     });
     ui.add(Separator::default());
+
+    // Body Layout using absolute side-by-side child UIs
     let body_rect = ui.available_rect_before_wrap();
     let mut left_rect = body_rect;
     left_rect.set_width(left_w);
     let mut right_rect = body_rect;
     right_rect.min.x = body_rect.min.x + left_w + 2.0;
     right_rect.set_width(right_w);
+
     let mut left_ui = ui.child_ui(left_rect, Layout::top_down(Align::LEFT), None);
-    if app.show_git_diff_window {
+    if app.show_git_status_window {
+        render_git_status_panel(app, &mut left_ui, row_h, char_w, left_w);
+    } else if app.show_git_diff_window {
         render_git_diff_panel(app, &mut left_ui, row_h, char_w, left_w);
     } else {
         render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
     }
+
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
     render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
 }
+
+fn render_git_status_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_w: f32, panel_w: f32) {
+    let max_chars = ((panel_w - 90.0) / char_w).floor() as usize;
+    ScrollArea::vertical()
+        .id_source("git_status_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let desired = Vec2::new(ui.available_width(), row_h + 2.0);
+            let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+            ui.painter()
+                .rect_filled(rect, 2.0, Color32::from_rgb(20, 35, 25));
+            ui.painter().text(
+                Pos2::new(rect.left() + 8.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                "📝 GIT REPOSITORY STATUS  ·  press ESC to close",
+                FontId::monospace(11.0),
+                Color32::from_rgb(120, 230, 160),
+            );
+            ui.add_space(4.0);
+
+            let repo = git2::Repository::discover(&app.base_dir).ok();
+            let mut file_statuses = Vec::new();
+            if let Some(ref r) = repo {
+                let mut opts = git2::StatusOptions::new();
+                opts.include_untracked(true);
+                if let Ok(statuses) = r.statuses(Some(&mut opts)) {
+                    for entry in statuses.iter() {
+                        if let Some(path) = entry.path() {
+                            let status = entry.status();
+                            let status_char = if status.is_index_new() || status.is_wt_new() {
+                                'A'
+                            } else if status.is_index_deleted() || status.is_wt_deleted() {
+                                'D'
+                            } else {
+                                'M'
+                            };
+
+                            let mut additions = 0;
+                            let mut deletions = 0;
+                            let mut diff_opts = git2::DiffOptions::new();
+                            diff_opts.pathspec(path);
+                            if let Ok(diff) = r.diff_index_to_workdir(None, Some(&mut diff_opts)) {
+                                let _ = diff.foreach(
+                                    &mut |_, _| true,
+                                    None,
+                                    None,
+                                    Some(&mut |_, _, line| {
+                                        let origin = line.origin();
+                                        if origin == '+' {
+                                            additions += 1;
+                                        } else if origin == '-' {
+                                            deletions += 1;
+                                        }
+                                        true
+                                    }),
+                                );
+                            }
+
+                            file_statuses.push((
+                                path.to_string(),
+                                status_char,
+                                additions,
+                                deletions,
+                            ));
+                        }
+                    }
+                }
+            }
+
+            if file_statuses.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(20.0);
+                    ui.label(
+                        RichText::new("No modified or untracked files in the repository.")
+                            .color(pal::TEXT_DIM),
+                    );
+                });
+                return;
+            }
+
+            for (path, status_char, additions, deletions) in file_statuses {
+                let (base_bg, badge_color, prefix) = match status_char {
+                    'A' => (pal::BG_INSERT, Color32::from_rgb(40, 150, 60), "A"),
+                    'D' => (pal::BG_DELETE, Color32::from_rgb(200, 40, 40), "D"),
+                    _ => (
+                        Color32::from_rgba_premultiplied(45, 38, 15, 100),
+                        Color32::from_rgb(200, 160, 40),
+                        "M",
+                    ),
+                };
+
+                let desired = Vec2::new(ui.available_width(), row_h);
+                let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+
+                let is_hovered = resp.hovered();
+                let bg = if is_hovered {
+                    Color32::from_rgba_premultiplied(50, 50, 60, 150)
+                } else {
+                    base_bg
+                };
+
+                ui.painter().rect_filled(rect, 0.0, bg);
+
+                let status_bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
+                ui.painter().rect_filled(status_bar, 0.0, badge_color);
+
+                ui.painter().text(
+                    Pos2::new(rect.left() + 8.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    format!("[{}]", prefix),
+                    FontId::monospace(10.5),
+                    badge_color,
+                );
+
+                let mut stats_str = String::new();
+                if additions > 0 {
+                    stats_str.push_str(&format!("+{} ", additions));
+                }
+                if deletions > 0 {
+                    stats_str.push_str(&format!("-{} ", deletions));
+                }
+
+                ui.painter().text(
+                    Pos2::new(rect.left() + 40.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    &stats_str,
+                    FontId::monospace(10.0),
+                    if additions > 0 && deletions > 0 {
+                        pal::TEXT_DIM
+                    } else if additions > 0 {
+                        pal::TEXT_INSERT
+                    } else {
+                        pal::TEXT_DELETE
+                    },
+                );
+
+                let path_x = rect.left() + 100.0;
+                let display = MergeApp::truncate_owned(&path, max_chars);
+
+                ui.painter().text(
+                    Pos2::new(path_x, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    &display,
+                    FontId::monospace(11.0),
+                    pal::TEXT_NORMAL,
+                );
+
+                if resp.clicked() {
+                    if let Some(pos) = app
+                        .hunks
+                        .iter()
+                        .position(|h| h.filename == path || path.contains(&h.filename))
+                    {
+                        app.current_hunk = pos;
+                        app.load_hunk();
+                    } else {
+                        let target_path = std::path::Path::new(&app.base_dir)
+                            .join(&path)
+                            .display()
+                            .to_string();
+                        if target_path != app.file_path {
+                            app.save_file_state();
+                            app.file_path = target_path;
+                            if let Ok(content) = std::fs::read_to_string(&app.file_path) {
+                                app.file_text = content;
+                                app.file_lines = app.file_text.lines().map(String::from).collect();
+                                app.applied_hunks.clear();
+                                app.merged_range = None;
+                                app.history.clear();
+                                app.recompute_match();
+                                app.update_git_statuses();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+}
+
 fn render_git_diff_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_w: f32, panel_w: f32) {
     let max_chars = ((panel_w - 68.0) / char_w).floor() as usize;
     ScrollArea::vertical()

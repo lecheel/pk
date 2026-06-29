@@ -72,6 +72,7 @@ pub struct MergeApp {
     pub git_diff_rows: Vec<crate::diff::DiffRow>,
     pub git_hunks: Vec<super::git_ops::GitDiffHunk>,
     pub show_git_diff_window: bool,
+    pub show_git_status_window: bool,
     pub filter_low_matches: bool,
     pub sync_anchors: Vec<SyncAnchor>,
     pub pending_sync: Option<PendingSync>,
@@ -131,6 +132,7 @@ impl MergeApp {
             git_diff_rows: Vec::new(),
             git_hunks: Vec::new(),
             show_git_diff_window: false,
+            show_git_status_window: false,
             filter_low_matches: false,
             sync_anchors: Vec::new(),
             pending_sync: None,
@@ -470,6 +472,7 @@ impl MergeApp {
         self.git_statuses.clear();
         self.git_diff_rows.clear();
         self.git_hunks.clear();
+        self.show_git_status_window = false;
         self.sync_anchors.clear();
         self.pending_sync = None;
         self.pending_line_actions.clear();
@@ -497,6 +500,9 @@ impl eframe::App for MergeApp {
         if ctx.input(|i| i.key_pressed(Key::F3)) {
             self.show_debug = !self.show_debug;
         }
+        if ctx.input(|i| i.key_pressed(Key::F1)) {
+            self.show_git_status_window = !self.show_git_status_window;
+        }
         if !ctx.wants_keyboard_input() || self.is_searching {
             ctx.input(|i| {
                 if i.key_pressed(Key::Escape) {
@@ -506,6 +512,8 @@ impl eframe::App for MergeApp {
                         self.show_debug = false;
                     } else if self.show_git_diff_window {
                         self.show_git_diff_window = false;
+                    } else if self.show_git_status_window {
+                        self.show_git_status_window = false;
                     } else if self.is_searching {
                         self.is_searching = false;
                         self.file_search_query.clear();
