@@ -361,7 +361,8 @@ fn render_search_panel(
     });
     ui.add_space(4.0);
 
-    // --- SINGLE manual paste block (the only one) ---
+    // In render_search_panel, replace the manual paste block with:
+
     if app.show_manual_paste {
         ui.group(|ui| {
             ui.label(
@@ -369,12 +370,21 @@ fn render_search_panel(
                     .small()
                     .color(pal::TEXT_DIM),
             );
-            ui.add_sized(
-                [panel_w - 32.0, row_h * 5.0],
-                TextEdit::multiline(&mut app.manual_paste_text)
-                    .font(FontId::monospace(9.5))
-                    .desired_rows(5),
-            );
+
+            // Use ScrollArea with max_height instead of add_sized
+            ScrollArea::vertical()
+                .id_source("manual_paste_scroll")
+                .max_height(row_h * 5.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add(
+                        TextEdit::multiline(&mut app.manual_paste_text)
+                            .font(FontId::monospace(9.5))
+                            .desired_width(panel_w - 32.0)
+                            .desired_rows(5),
+                    );
+                });
+
             ui.horizontal(|ui| {
                 if ui.button("⚡ Save to temp.md & Load").clicked() {
                     let content = app.manual_paste_text.clone();
@@ -1601,7 +1611,11 @@ fn render_file_panel(
                 }
                 if is_anchor_start {
                     let anchor = anchor_here.unwrap();
-                    let text = if anchor.id == 'a' { "ma".to_string() } else { format!("m{}", anchor.id) };
+                    let text = if anchor.id == 'a' {
+                        "ma".to_string()
+                    } else {
+                        format!("m{}", anchor.id)
+                    };
                     ui.painter().text(
                         Pos2::new(rect.left() + 44.0, rect.center().y),
                         Align2::LEFT_CENTER,
@@ -1678,13 +1692,33 @@ fn render_file_panel(
                             pal::TEXT_ANCHOR,
                         );
                         next_x += 14.0;
-                        let dec_s_rect = Rect::from_min_size(Pos2::new(next_x, rect.center().y - btn_h / 2.0), Vec2::new(btn_w, btn_h));
-                        if ui.put(dec_s_rect, Button::new(RichText::new("▲").small().monospace()).fill(Color32::from_rgb(65, 50, 10))).clicked() {
+                        let dec_s_rect = Rect::from_min_size(
+                            Pos2::new(next_x, rect.center().y - btn_h / 2.0),
+                            Vec2::new(btn_w, btn_h),
+                        );
+                        if ui
+                            .put(
+                                dec_s_rect,
+                                Button::new(RichText::new("▲").small().monospace())
+                                    .fill(Color32::from_rgb(65, 50, 10)),
+                            )
+                            .clicked()
+                        {
                             adjust_start_by = -1;
                         }
                         next_x += btn_w + 2.0;
-                        let inc_s_rect = Rect::from_min_size(Pos2::new(next_x, rect.center().y - btn_h / 2.0), Vec2::new(btn_w, btn_h));
-                        if ui.put(inc_s_rect, Button::new(RichText::new("▼").small().monospace()).fill(Color32::from_rgb(65, 50, 10))).clicked() {
+                        let inc_s_rect = Rect::from_min_size(
+                            Pos2::new(next_x, rect.center().y - btn_h / 2.0),
+                            Vec2::new(btn_w, btn_h),
+                        );
+                        if ui
+                            .put(
+                                inc_s_rect,
+                                Button::new(RichText::new("▼").small().monospace())
+                                    .fill(Color32::from_rgb(65, 50, 10)),
+                            )
+                            .clicked()
+                        {
                             adjust_start_by = 1;
                         }
                         let btn_size = Vec2::new(65.0, row_h - 4.0);
@@ -1757,13 +1791,33 @@ fn render_file_panel(
                         pal::TEXT_ANCHOR,
                     );
                     next_x += 62.0;
-                    let dec_e_rect = Rect::from_min_size(Pos2::new(next_x, rect.center().y - btn_h / 2.0), Vec2::new(btn_w, btn_h));
-                    if ui.put(dec_e_rect, Button::new(RichText::new("▲").small().monospace()).fill(Color32::from_rgb(65, 50, 10))).clicked() {
+                    let dec_e_rect = Rect::from_min_size(
+                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
+                        Vec2::new(btn_w, btn_h),
+                    );
+                    if ui
+                        .put(
+                            dec_e_rect,
+                            Button::new(RichText::new("▲").small().monospace())
+                                .fill(Color32::from_rgb(65, 50, 10)),
+                        )
+                        .clicked()
+                    {
                         adjust_end_by = -1;
                     }
                     next_x += btn_w + 2.0;
-                    let inc_e_rect = Rect::from_min_size(Pos2::new(next_x, rect.center().y - btn_h / 2.0), Vec2::new(btn_w, btn_h));
-                    if ui.put(inc_e_rect, Button::new(RichText::new("▼").small().monospace()).fill(Color32::from_rgb(65, 50, 10))).clicked() {
+                    let inc_e_rect = Rect::from_min_size(
+                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
+                        Vec2::new(btn_w, btn_h),
+                    );
+                    if ui
+                        .put(
+                            inc_e_rect,
+                            Button::new(RichText::new("▼").small().monospace())
+                                .fill(Color32::from_rgb(65, 50, 10)),
+                        )
+                        .clicked()
+                    {
                         adjust_end_by = 1;
                     }
                 } else if is_auto_start_line && mr.score > 0.0 {
@@ -1795,13 +1849,33 @@ fn render_file_panel(
                         Color32::from_rgb(180, 220, 190),
                     );
                     next_x += 14.0;
-                    let dec_s_rect = Rect::from_min_size(Pos2::new(next_x, rect.center().y - btn_h / 2.0), Vec2::new(btn_w, btn_h));
-                    if ui.put(dec_s_rect, Button::new(RichText::new("▲").small().monospace()).fill(Color32::from_rgb(40, 55, 45))).clicked() {
+                    let dec_s_rect = Rect::from_min_size(
+                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
+                        Vec2::new(btn_w, btn_h),
+                    );
+                    if ui
+                        .put(
+                            dec_s_rect,
+                            Button::new(RichText::new("▲").small().monospace())
+                                .fill(Color32::from_rgb(40, 55, 45)),
+                        )
+                        .clicked()
+                    {
                         adjust_start_by = -1;
                     }
                     next_x += btn_w + 2.0;
-                    let inc_s_rect = Rect::from_min_size(Pos2::new(next_x, rect.center().y - btn_h / 2.0), Vec2::new(btn_w, btn_h));
-                    if ui.put(inc_s_rect, Button::new(RichText::new("▼").small().monospace()).fill(Color32::from_rgb(40, 55, 45))).clicked() {
+                    let inc_s_rect = Rect::from_min_size(
+                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
+                        Vec2::new(btn_w, btn_h),
+                    );
+                    if ui
+                        .put(
+                            inc_s_rect,
+                            Button::new(RichText::new("▼").small().monospace())
+                                .fill(Color32::from_rgb(40, 55, 45)),
+                        )
+                        .clicked()
+                    {
                         adjust_start_by = 1;
                     }
                     let btn_size = Vec2::new(65.0, row_h - 4.0);
@@ -1851,13 +1925,33 @@ fn render_file_panel(
                         Color32::from_rgb(120, 230, 160),
                     );
                     next_x += 62.0;
-                    let dec_e_rect = Rect::from_min_size(Pos2::new(next_x, rect.center().y - btn_h / 2.0), Vec2::new(btn_w, btn_h));
-                    if ui.put(dec_e_rect, Button::new(RichText::new("▲").small().monospace()).fill(Color32::from_rgb(40, 55, 45))).clicked() {
+                    let dec_e_rect = Rect::from_min_size(
+                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
+                        Vec2::new(btn_w, btn_h),
+                    );
+                    if ui
+                        .put(
+                            dec_e_rect,
+                            Button::new(RichText::new("▲").small().monospace())
+                                .fill(Color32::from_rgb(40, 55, 45)),
+                        )
+                        .clicked()
+                    {
                         adjust_end_by = -1;
                     }
                     next_x += btn_w + 2.0;
-                    let inc_e_rect = Rect::from_min_size(Pos2::new(next_x, rect.center().y - btn_h / 2.0), Vec2::new(btn_w, btn_h));
-                    if ui.put(inc_e_rect, Button::new(RichText::new("▼").small().monospace()).fill(Color32::from_rgb(40, 55, 45))).clicked() {
+                    let inc_e_rect = Rect::from_min_size(
+                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
+                        Vec2::new(btn_w, btn_h),
+                    );
+                    if ui
+                        .put(
+                            inc_e_rect,
+                            Button::new(RichText::new("▼").small().monospace())
+                                .fill(Color32::from_rgb(40, 55, 45)),
+                        )
+                        .clicked()
+                    {
                         adjust_end_by = 1;
                     }
                 }
