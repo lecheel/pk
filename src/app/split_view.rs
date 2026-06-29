@@ -399,6 +399,8 @@ fn render_file_panel(
     let mut next_search_match = false;
     let mut prev_search_match = false;
     let mut clear_search = false;
+    let mut go_next_hunk = false; // Moved up here
+    let mut go_prev_hunk = false; // Moved up here
 
     let current_hunk_idx = app.current_hunk;
     let total_hunks = app.hunks.len();
@@ -457,25 +459,28 @@ fn render_file_panel(
                         clear_marks_flag = true;
                     }
                 } else {
-                    ui.label(RichText::new("Cand:").color(pal::TEXT_DIM).small());
+                    // ▲ and ▼ buttons mapping EXACTLY to L and Shift+L
                     if ui
-                        .add_enabled(candidate_idx > 0, Button::new("◀").small())
+                        .add(Button::new("^").small())
+                        .on_hover_text("Previous (Shift+L)")
                         .clicked()
                     {
-                        prev_candidate = true;
+                        if candidate_count > 1 && candidate_idx > 0 {
+                            prev_candidate = true;
+                        } else {
+                            go_prev_hunk = true;
+                        }
                     }
-                    ui.label(
-                        RichText::new(format!("{}/{}", candidate_idx + 1, candidate_count.max(1)))
-                            .monospace(),
-                    );
                     if ui
-                        .add_enabled(
-                            candidate_idx + 1 < candidate_count,
-                            Button::new("▶").small(),
-                        )
+                        .add(Button::new("v").small())
+                        .on_hover_text("Next (L)")
                         .clicked()
                     {
-                        next_candidate = true;
+                        if candidate_count > 1 && candidate_idx + 1 < candidate_count {
+                            next_candidate = true;
+                        } else {
+                            go_next_hunk = true;
+                        }
                     }
                 }
                 ui.add(Separator::default().vertical());
@@ -516,22 +521,11 @@ fn render_file_panel(
                         apply_clicked = true;
                     }
                 });
-                if current_hunk_idx < total_hunks - 1 {
-                    if ui
-                        .small_button("Skip →")
-                        .on_hover_text("Skip to next hunk without applying")
-                        .clicked()
-                    {
-                        next_hunk = true;
-                    }
-                }
             });
         });
 
     ui.add(Separator::default());
     let len = app.file_lines.len();
-    let mut go_next_hunk = false;
-    let mut go_prev_hunk = false;
 
     if len > 0 {
         if app.is_searching {
@@ -589,9 +583,17 @@ fn render_file_panel(
                 }
                 if i.key_pressed(Key::L) {
                     if i.modifiers.shift {
-                        go_prev_hunk = true;
+                        if candidate_count > 1 && candidate_idx > 0 {
+                            prev_candidate = true;
+                        } else {
+                            go_prev_hunk = true;
+                        }
                     } else {
-                        go_next_hunk = true;
+                        if candidate_count > 1 && candidate_idx + 1 < candidate_count {
+                            next_candidate = true;
+                        } else {
+                            go_next_hunk = true;
+                        }
                     }
                 }
                 if i.key_pressed(Key::Slash) {
