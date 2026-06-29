@@ -1080,7 +1080,13 @@ fn render_file_panel(
                                 let c = txt.chars().next().unwrap();
                                 if c.is_ascii_alphabetic() {
                                     if let Some(cur) = app.cursor_line {
-                                        app.set_mark(c, cur);
+                                        if c == 'a' {
+                                            app.set_mark_a(cur);
+                                        } else if c == 'b' || c == 'A' {
+                                            app.set_mark_b(cur);
+                                        } else {
+                                            app.set_mark(c, cur);
+                                        }
                                     }
                                     app.mark_pending = None;
                                 } else {
@@ -1489,6 +1495,7 @@ fn render_file_panel(
                     ui.scroll_to_rect(rect, Some(Align::Center));
                     did_scroll = true;
                 }
+
                 if let Some(anchor) = anchor_here {
                     let anchor_bg = pal::BG_ANCHOR;
                     ui.painter().rect_filled(rect, 2.0, anchor_bg);
@@ -1629,7 +1636,7 @@ fn render_file_panel(
                     ui.painter().text(
                         Pos2::new(rect.left() + 10.0, rect.center().y),
                         Align2::LEFT_CENTER,
-                        format!("⚓ ma range end: line {}", anchor.end_line.unwrap() + 1),
+                        format!("⚓ mA range end: line {}", anchor.end_line.unwrap() + 1),
                         FontId::monospace(10.5),
                         pal::TEXT_ANCHOR,
                     );
@@ -2006,7 +2013,7 @@ fn render_file_panel(
                         set_anchor_a_start = Some(i);
                         ui.close_menu();
                     }
-                    if ui.button("Set Anchor 'a' (ma) End").clicked() {
+                    if ui.button("Set Anchor 'a' (mA) End").clicked() {
                         set_anchor_a_end = Some(i);
                         ui.close_menu();
                     }
