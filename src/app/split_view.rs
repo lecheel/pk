@@ -475,90 +475,98 @@ fn render_search_panel(
                     },
                 );
             }
-            if !hunk.replace.is_empty() {
-                ui.add_space(4.0);
-                let (sep_rect, _) =
-                    ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-                ui.painter().rect_filled(sep_rect, 0.0, pal::SEPARATOR);
-                ui.add_space(2.0);
-                let (hdr_rect, _) =
-                    ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::hover());
-                ui.painter()
-                    .rect_filled(hdr_rect, 0.0, Color32::from_rgb(22, 44, 28));
-                ui.painter().text(
-                    Pos2::new(hdr_rect.left() + 8.0, hdr_rect.center().y),
-                    Align2::LEFT_CENTER,
-                    "REPLACE →",
-                    FontId::monospace(10.0),
-                    pal::TEXT_INSERT,
-                );
-                let btn_size = Vec2::new(30.0, row_h - 4.0);
-                let btn_line_size = Vec2::new(55.0, row_h - 4.0);
-                let mut x_offset = 4.0;
-                let btn_rect = Rect::from_min_size(
-                    Pos2::new(
-                        hdr_rect.right() - btn_size.x - x_offset,
-                        hdr_rect.center().y - btn_size.y / 2.0,
-                    ),
-                    btn_size,
-                );
-                let btn_text = if let Some((&id, _)) = app.file_anchors.iter().next() {
-                    format!(">{}", id)
+            // Always render the REPLACE/DELETE section so the apply button is available
+            ui.add_space(4.0);
+            let (sep_rect, _) =
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+            ui.painter().rect_filled(sep_rect, 0.0, pal::SEPARATOR);
+            ui.add_space(2.0);
+            let (hdr_rect, _) =
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::hover());
+
+            let (hdr_bg, hdr_text, hdr_color) = if hunk.replace.is_empty() {
+                (Color32::from_rgb(45, 20, 20), "DELETE →", pal::TEXT_DELETE)
+            } else {
+                (Color32::from_rgb(22, 44, 28), "REPLACE →", pal::TEXT_INSERT)
+            };
+
+            ui.painter().rect_filled(hdr_rect, 0.0, hdr_bg);
+            ui.painter().text(
+                Pos2::new(hdr_rect.left() + 8.0, hdr_rect.center().y),
+                Align2::LEFT_CENTER,
+                hdr_text,
+                FontId::monospace(10.0),
+                hdr_color,
+            );
+            let btn_size = Vec2::new(30.0, row_h - 4.0);
+            let btn_line_size = Vec2::new(55.0, row_h - 4.0);
+            let mut x_offset = 4.0;
+            let btn_rect = Rect::from_min_size(
+                Pos2::new(
+                    hdr_rect.right() - btn_size.x - x_offset,
+                    hdr_rect.center().y - btn_size.y / 2.0,
+                ),
+                btn_size,
+            );
+            let btn_text = if let Some((&id, _)) = app.file_anchors.iter().next() {
+                format!(">{}", id)
+            } else {
+                ">".to_string()
+            };
+            let btn = Button::new(
+                RichText::new(&btn_text)
+                    .color(Color32::WHITE)
+                    .strong()
+                    .monospace(),
+            )
+            .fill(Color32::from_rgb(40, 90, 55))
+            .min_size(btn_size);
+            let resp = ui.put(btn_rect, btn);
+            if resp.clicked() {
+                if let Some((&id, _)) = app.file_anchors.iter().next() {
+                    apply_clicked_id = Some(id);
                 } else {
-                    ">".to_string()
-                };
-                let btn = Button::new(
-                    RichText::new(&btn_text)
+                    apply_clicked = true;
+                }
+            }
+            resp.context_menu(|ui| {
+                if app.file_anchors.is_empty() {
+                    ui.label("No markers set.");
+                    ui.label("Use 'm' + letter in file panel.");
+                } else {
+                    ui.label("Select target marker:");
+                    ui.separator();
+                    for (&mid, _) in app.file_anchors.iter() {
+                        if ui.button(format!(">{}", mid)).clicked() {
+                            apply_clicked_id = Some(mid);
+                            ui.close_menu();
+                        }
+                    }
+                }
+            });
+            x_offset += btn_size.x + 4.0;
+            if let Some(cur_ln) = app.cursor_line {
+                let btn_line_rect = Rect::from_min_size(
+                    Pos2::new(
+                        hdr_rect.right() - btn_line_size.x - x_offset,
+                        hdr_rect.center().y - btn_line_size.y / 2.0,
+                    ),
+                    btn_line_size,
+                );
+                let btn_line = Button::new(
+                    RichText::new(format!(">({})", cur_ln + 1))
                         .color(Color32::WHITE)
                         .strong()
                         .monospace(),
                 )
                 .fill(Color32::from_rgb(40, 90, 55))
-                .min_size(btn_size);
-                let resp = ui.put(btn_rect, btn);
-                if resp.clicked() {
-                    if let Some((&id, _)) = app.file_anchors.iter().next() {
-                        apply_clicked_id = Some(id);
-                    } else {
-                        apply_clicked = true;
-                    }
+                .min_size(btn_line_size);
+
+                if ui.put(btn_line_rect, btn_line).clicked() {
+                    apply_clicked_line = Some(cur_ln);
                 }
-                resp.context_menu(|ui| {
-                    if app.file_anchors.is_empty() {
-                        ui.label("No markers set.");
-                        ui.label("Use 'm' + letter in file panel.");
-                    } else {
-                        ui.label("Select target marker:");
-                        ui.separator();
-                        for (&mid, _) in app.file_anchors.iter() {
-                            if ui.button(format!(">{}", mid)).clicked() {
-                                apply_clicked_id = Some(mid);
-                                ui.close_menu();
-                            }
-                        }
-                    }
-                });
-                x_offset += btn_size.x + 4.0;
-                if let Some(cur_ln) = app.cursor_line {
-                    let btn_line_rect = Rect::from_min_size(
-                        Pos2::new(
-                            hdr_rect.right() - btn_line_size.x - x_offset,
-                            hdr_rect.center().y - btn_line_size.y / 2.0,
-                        ),
-                        btn_line_size,
-                    );
-                    let btn_line = Button::new(
-                        RichText::new(format!(">({})", cur_ln + 1))
-                            .color(Color32::WHITE)
-                            .strong()
-                            .monospace(),
-                    )
-                    .fill(Color32::from_rgb(40, 90, 55))
-                    .min_size(btn_line_size);
-                    if ui.put(btn_line_rect, btn_line).clicked() {
-                        apply_clicked_line = Some(cur_ln);
-                    }
-                }
+
+                // Only render the replace lines if they exist
                 for (line_idx, line) in hunk.replace.iter().enumerate() {
                     let desired = Vec2::new(ui.available_width(), row_h);
                     let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
@@ -579,6 +587,7 @@ fn render_search_panel(
                         FontId::monospace(11.0),
                         pal::TEXT_INSERT,
                     );
+
                     let display = MergeApp::truncate_owned(line, max_chars);
                     ui.painter().text(
                         Pos2::new(rect.left() + 54.0, rect.center().y),
@@ -591,9 +600,10 @@ fn render_search_panel(
                             Color32::from_rgb(155, 235, 165)
                         },
                     );
-                }
-            }
+                } // end of for loop over hunk.replace
+            } // end of else (render replace lines)
         });
+
     if let Some(sel) = set_selection {
         app.left_selection = Some(sel);
     }
