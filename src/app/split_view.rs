@@ -285,32 +285,15 @@ fn render_search_panel(
             if let Some(pasted) = get_clipboard_text() {
                 let parsed_hunks = parse_clipboard_patch(&pasted);
                 if !parsed_hunks.is_empty() {
-                    // Save to temp.md on disk and update the active tracking file
                     let _ = std::fs::write("temp.md", &pasted);
                     app.initial_patch_path = Some("temp.md".to_string());
                     app.patch_text = pasted;
-
-                    app.hunks = parsed_hunks;
-                    app.current_hunk = 0;
-                    app.applied_hunks.clear();
-                    app.merged_range = None;
-                    app.history.clear();
-                    app.vim_buffer.clear();
-                    app.d_pending = false;
-                    app.file_anchors.clear();
-                    app.mark_pending = None;
-                    app.file_search_query.clear();
-                    app.search_matches.clear();
-                    app.cursor_line = None;
-                    app.scroll_to_match = true;
-                    app.left_selection = None;
-
+                    app.reparse();
                     if app.hunks[0].filename.is_empty() {
                         app.set_message(StatusMessage::warning(
                             "Search pattern loaded. Enter the target filename below.",
                         ));
                     } else {
-                        app.load_hunk();
                         app.set_message(StatusMessage::success(
                             "Loaded patch from clipboard (saved as temp.md)",
                         ));
@@ -386,10 +369,10 @@ fn render_search_panel(
                     .small()
                     .color(pal::TEXT_DIM),
             );
-            ui.add(
+            ui.add_sized(
+                [panel_w - 32.0, row_h * 5.0],
                 TextEdit::multiline(&mut app.manual_paste_text)
                     .font(FontId::monospace(9.5))
-                    .desired_width(panel_w - 32.0)
                     .desired_rows(5),
             );
             ui.horizontal(|ui| {
