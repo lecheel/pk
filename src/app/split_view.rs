@@ -4,8 +4,10 @@ use super::palette::pal;
 use super::state::{MarkPending, MergeApp};
 use super::types::{Action, FileAnchor, SearchRow, StatusMessage};
 use crate::diff::RowKind;
+use crate::patch::PatchHunk;
 use eframe::egui::*;
 use std::collections::HashSet;
+
 pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mr = match app.match_result.clone() {
         Some(m) => m,
@@ -190,7 +192,83 @@ fn render_git_diff_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_w: f3
             }
         });
 }
+
 // In src/app/split_view.rs
+
+#[cfg(not(target_arch = "wasm32"))]
+fn get_clipboard_text() -> Option<String> {
+    arboard::Clipboard::new()
+        .ok()
+        .and_then(|mut cb| cb.get_text().ok())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn get_clipboard_text() -> Option<String> {
+    None
+}
+
+/// Smart parser to convert raw clipboard text into search-only or standard hunks
+fn parse_clipboard_patch(pasted: &str) -> Vec<PatchHunk> {
+    let trimmed = pasted.trim();
+
+    // If it is a standard patch block, parse it using the app's default parser
+    if trimmed.contains("<patch>") {
+        return crate::patch::parse_patches(pasted);
+    }
+
+    // If it has unified diff headers, try default patch parsing
+    if trimmed.contains("diff --git") || trimmed.contains("--- ") || trimmed.contains("+++ ") {
+        let hunks = crate::patch::parse_patches(pasted);
+        if !hunks.is_empty() {
+            return hunks;
+        }
+    }
+
+    // Otherwise, treat the entire clipboard content as a raw search pattern
+    let lines: Vec<String> = pasted.lines().map(|s| s.to_string()).collect();
+    if lines.is_empty() {
+        return Vec::new();
+    }
+
+    let mut filename = String::new();
+    let mut search_start = 0;
+
+    let first_line = lines[0].trim();
+    if first_line.starts_with("filename ") {
+        filename = first_line
+            .strip_prefix("filename ")
+            .unwrap()
+            .trim()
+            .to_string();
+        search_start = 1;
+    } else if first_line.starts_with("+++ b/") {
+        filename = first_line
+            .strip_prefix("+++ b/")
+            .unwrap()
+            .trim()
+            .to_string();
+        search_start = 1;
+    } else if first_line.starts_with("+++ ") {
+        filename = first_line.strip_prefix("+++ ").unwrap().trim().to_string();
+        search_start = 1;
+    }
+
+    // Gather all lines and strip diff markers if present
+    let search_lines: Vec<String> = lines[search_start..]
+        .iter()
+        .filter(|l| {
+            !l.starts_with("<<<<<<<") && !l.starts_with("=======") && !l.starts_with(">>>>>>>")
+        })
+        .cloned()
+        .collect();
+
+    vec![PatchHunk {
+        filename,
+        search: search_lines,
+        replace: Vec::new(), // No replace block for raw search pattern pastes
+    }]
+}
+
 fn render_search_panel(
     app: &mut MergeApp,
     ui: &mut Ui,
@@ -204,6 +282,85 @@ fn render_search_panel(
     let mut apply_clicked_id: Option<char> = None;
     let mut apply_clicked = false;
     let mut apply_clicked_line: Option<usize> = None;
+
+    // Clipboard and Filename Adjustments Header
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        if ui
+            .button("📋 Paste Patch")
+            .on_hover_text("Load and reparse a patch directly from your system clipboard")
+            .clicked()
+        {
+            if let Some(pasted) = get_clipboard_text() {
+                let parsed_hunks = parse_clipboard_patch(&pasted);
+                if !parsed_hunks.is_empty() {
+                    app.hunks = parsed_hunks;
+                    app.current_hunk = 0;
+                    app.applied_hunks.clear();
+                    app.merged_range = None;
+                    app.history.clear();
+                    app.vim_buffer.clear();
+                    app.d_pending = false;
+                    app.file_anchors.clear();
+                    app.mark_pending = None;
+                    app.file_search_query.clear();
+                    app.search_matches.clear();
+                    app.cursor_line = None;
+                    app.scroll_to_match = true;
+                    app.left_selection = None;
+
+                    // If the parsed filename is empty, notify the user to input the filename manually
+                    if app.hunks[0].filename.is_empty() {
+                        app.set_message(StatusMessage::warning(
+                            "Search pattern loaded. Enter the target filename below.",
+                        ));
+                    } else {
+                        app.load_hunk();
+                        app.set_message(StatusMessage::success(
+                            "Successfully loaded patch from clipboard",
+                        ));
+                    }
+                } else {
+                    app.set_message(StatusMessage::error(
+                        "Clipboard content is empty or invalid",
+                    ));
+                }
+            } else {
+                app.set_message(StatusMessage::error("Could not read text from clipboard"));
+            }
+        }
+    });
+    ui.add_space(4.0);
+
+    let mut filename_changed = false;
+    if let Some(hunk) = app.hunks.get_mut(app.current_hunk) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Target File:").color(pal::TEXT_DIM).small());
+            let mut filename = hunk.filename.clone();
+            let edit_resp = ui.add(
+                TextEdit::singleline(&mut filename)
+                    .text_color(pal::TEXT_NORMAL)
+                    .font(FontId::monospace(10.0))
+                    .desired_width(panel_w - 120.0),
+            );
+            if edit_resp.changed() {
+                hunk.filename = filename;
+            }
+            if ui.small_button("Reload").clicked()
+                || (edit_resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)))
+            {
+                filename_changed = true;
+            }
+        });
+        ui.add_space(4.0);
+    }
+    ui.separator();
+    ui.add_space(2.0);
+
+    if filename_changed {
+        app.load_hunk();
+    }
+
     ScrollArea::vertical()
         .id_source("search_scroll")
         .auto_shrink([false, false])
@@ -487,6 +644,7 @@ fn render_search_panel(
         app.apply_merge(Some(ln), None);
     }
 }
+
 fn render_file_panel(
     app: &mut MergeApp,
     ui: &mut Ui,

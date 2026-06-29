@@ -9,3 +9,4 @@ rfd = "0.15"
 git2 = "0.19"
 syn = { version = "2.0", features = ["full", "visit"] }
 quote = "1.0"
+arboard = "3.6.1"
