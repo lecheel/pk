@@ -33,7 +33,6 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                         );
                     }
                 }
-
                 if let Some(line) = app.cursor_line {
                     ui.add(Separator::default().vertical());
                     ui.label(
@@ -43,19 +42,17 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                             .small(),
                     );
                 }
-
-                // show active file anchor
-                if let Some(fa) = app.file_anchor {
+                if !app.file_anchors.is_empty() {
+                    let labels: Vec<String> =
+                        app.file_anchors.values().map(|f| f.label()).collect();
                     ui.add(Separator::default().vertical());
                     ui.label(
-                        RichText::new(format!("⚓ {}", fa.label()))
+                        RichText::new(format!("⚓ {}", labels.join("  ")))
                             .color(pal::TEXT_ANCHOR)
                             .monospace()
                             .small(),
                     );
                 }
-
-                // pending mark mode indicator
                 if app.mark_pending.is_some() {
                     ui.add(Separator::default().vertical());
                     ui.label(
@@ -65,8 +62,6 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                             .strong(),
                     );
                 }
-
-                // vim buffer
                 if !app.vim_buffer.is_empty() {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
@@ -76,7 +71,6 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                         );
                     });
                 }
-
                 if let Some(ref msg) = app.message {
                     ui.add(Separator::default().vertical());
                     ui.label(RichText::new(&msg.text).color(msg.color()).small());

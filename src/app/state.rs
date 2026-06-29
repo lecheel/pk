@@ -5,7 +5,7 @@ use crate::app::pal;
 use crate::diff::MatchResult;
 use crate::patch::PatchHunk;
 use eframe::egui::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub struct MergeApp {
     pub patch_text: String,
@@ -34,25 +34,13 @@ pub struct MergeApp {
     pub file_states: HashMap<String, FileState>,
     pub show_help: bool,
     pub show_minimap: bool,
-
-    // ── Left panel (search) selection ────────────────────────────────────────
-    /// Row range selected in the search/replace panel (search-panel row indices).
     pub left_selection: Option<(usize, usize)>,
-
-    // ── Right panel (file) marks ─────────────────────────────────────────────
-    /// `ma` / `mb` marks in the file panel.
-    /// Replaces the old `manual_anchor`, `mark_mode`, and `mark_a` fields.
-    /// None  → use auto-match anchor.
-    /// Some  → user-placed anchor; `b` filled after `mb` is set.
-    pub file_anchor: Option<FileAnchor>,
-
-    /// True while waiting for the user to press 'a' or 'b' after 'm'.
+    pub file_anchors: BTreeMap<char, FileAnchor>,
     pub mark_pending: Option<MarkPending>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
-    /// User pressed 'm', waiting for 'a' or 'b'
     WaitingKey,
 }
 
@@ -89,10 +77,9 @@ impl MergeApp {
             show_help: false,
             show_minimap: true,
             left_selection: None,
-            file_anchor: None,
+            file_anchors: BTreeMap::new(),
             mark_pending: None,
         };
-
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
             let path = std::path::Path::new(&patch_file);
@@ -113,7 +100,6 @@ impl MergeApp {
                 )));
             }
         }
-
         if !loaded_patch {
             app.patch_text = DEFAULT_PATCH.to_string();
             app.set_message(StatusMessage::info(
@@ -123,65 +109,35 @@ impl MergeApp {
         app.reparse();
         app
     }
-
-    // ── message ───────────────────────────────────────────────────────────────
-
     pub fn set_message(&mut self, msg: StatusMessage) {
         self.message = Some(msg);
         self.message_until = None;
     }
-
-    // ── mark helpers ──────────────────────────────────────────────────────────
-
-    /// Set mark-a at `line` in the file panel.
-    /// Clears any existing b, and links to the current left_selection.
+    pub fn set_mark(&mut self, id: char, line: usize) {
+        self.file_anchors.insert(id, FileAnchor { id, line });
+        self.set_message(StatusMessage::info(format!(
+            "⚓ m{} set at line {} — press >{} to apply",
+            id,
+            line + 1,
+            id
+        )));
+    }
     pub fn set_mark_a(&mut self, line: usize) {
-        self.file_anchor = Some(FileAnchor::start_only(line));
-        self.set_message(StatusMessage::info(format!(
-            "⚓ ma set at line {} — press mb to set end, or > / A to apply",
-            line + 1
-        )));
+        self.set_mark('a', line);
     }
-
     pub fn set_mark_b(&mut self, line: usize) {
-        let (a, b) = if let Some(anchor) = &mut self.file_anchor {
-            let b = line.max(anchor.a);
-            anchor.b = Some(b + 1);
-            (anchor.a + 1, b + 1) // a and b are line numbers (1‑based) for the message
-        } else {
-            self.set_message(StatusMessage::warning(
-                "Set ma first (cursor on line, then 'ma')",
-            ));
-            return;
-        };
-        self.set_message(StatusMessage::info(format!(
-            "⚓ ma:{}–mb:{} range set — press > / A to apply",
-            a, b,
-        )));
+        self.set_mark('b', line);
     }
-
-    /// Clear both marks.
     pub fn clear_marks(&mut self) {
-        self.file_anchor = None;
+        self.file_anchors.clear();
         self.mark_pending = None;
         self.scroll_to_match = true;
     }
-
-    // ── apply_merge uses file_anchor ──────────────────────────────────────────
-
-    /// Returns (file_start, file_end) for the current apply operation.
-    /// Priority: file_anchor > auto match_result.
     pub fn resolve_apply_range(&self) -> Option<(usize, usize)> {
-        if let Some(fa) = self.file_anchor {
-            return Some((fa.file_start(), fa.file_end()));
-        }
         self.match_result
             .as_ref()
             .map(|mr| (mr.file_start, mr.file_end))
     }
-
-    // ── parse / load ──────────────────────────────────────────────────────────
-
     pub fn reparse(&mut self) {
         self.save_file_state();
         self.hunks = crate::patch::parse_patches(&self.patch_text);
@@ -195,7 +151,6 @@ impl MergeApp {
         self.file_states.clear();
         self.load_hunk();
     }
-
     pub fn save_file_state(&mut self) {
         if self.file_path.is_empty() {
             return;
@@ -210,7 +165,6 @@ impl MergeApp {
             },
         );
     }
-
     pub fn load_hunk(&mut self) {
         let hunk = match self.hunks.get(self.current_hunk) {
             Some(h) => h.clone(),
@@ -220,7 +174,6 @@ impl MergeApp {
             .join(&hunk.filename)
             .display()
             .to_string();
-
         if path != self.file_path {
             self.save_file_state();
             self.file_path = path.clone();
@@ -266,8 +219,7 @@ impl MergeApp {
                 }
             }
         }
-
-        self.file_anchor = None;
+        self.file_anchors.clear();
         self.mark_pending = None;
         self.file_search_query.clear();
         self.search_matches.clear();
@@ -281,17 +233,14 @@ impl MergeApp {
         self.left_selection = None;
         self.recompute_match();
     }
-
     pub fn current_hunk(&self) -> Option<&PatchHunk> {
         self.hunks.get(self.current_hunk)
     }
-
     pub fn hunk_summary(&self) -> (usize, usize, usize) {
         let applied = self.applied_hunks.len();
         let total = self.hunks.len();
         (applied, total - applied, total)
     }
-
     pub fn truncate_owned(text: &str, max_chars: usize) -> String {
         if text.chars().count() > max_chars {
             let mut s: String = text.chars().take(max_chars.saturating_sub(1)).collect();
@@ -301,13 +250,12 @@ impl MergeApp {
             text.to_string()
         }
     }
-
     pub fn reset_for_new_file(&mut self) {
         self.applied_hunks.clear();
         self.merged_range = None;
         self.history.clear();
         self.vim_buffer.clear();
-        self.file_anchor = None;
+        self.file_anchors.clear();
         self.mark_pending = None;
         self.file_search_query.clear();
         self.search_matches.clear();
@@ -322,7 +270,6 @@ impl MergeApp {
 
 impl eframe::App for MergeApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // message expiry
         if self.message.is_some() {
             if self.message_until.is_none() {
                 self.message_until = Some(ctx.input(|i| i.time) + 6.0);
@@ -334,7 +281,6 @@ impl eframe::App for MergeApp {
                 }
             }
         }
-
         if !ctx.wants_keyboard_input() || self.is_searching {
             ctx.input(|i| {
                 if i.key_pressed(Key::Escape) {
@@ -345,7 +291,7 @@ impl eframe::App for MergeApp {
                         self.file_search_query.clear();
                         self.search_matches.clear();
                         self.scroll_to_match = true;
-                    } else if self.file_anchor.is_some() || self.mark_pending.is_some() {
+                    } else if !self.file_anchors.is_empty() || self.mark_pending.is_some() {
                         self.clear_marks();
                     } else if self.left_selection.is_some() {
                         self.left_selection = None;
@@ -367,7 +313,6 @@ impl eframe::App for MergeApp {
                 }
             });
         }
-
         if self.is_searching {
             TopBottomPanel::bottom("vim_search_prompt")
                 .frame(
@@ -404,8 +349,6 @@ impl eframe::App for MergeApp {
                     });
                 });
         }
-
-        // Mark-pending HUD — show at bottom when 'm' was pressed
         if self.mark_pending.is_some() {
             TopBottomPanel::bottom("mark_hud")
                 .frame(
@@ -423,16 +366,18 @@ impl eframe::App for MergeApp {
                         );
                         ui.label(
                             RichText::new(
-                                "→ press  a  (set ma start)  ·  b  (set mb end)  ·  ESC cancel",
+                                "→ press any letter (a, b, c...) to set marker  ·  ESC cancel",
                             )
                             .color(pal::TEXT_NORMAL)
                             .monospace()
                             .small(),
                         );
-                        if let Some(fa) = self.file_anchor {
+                        if !self.file_anchors.is_empty() {
+                            let labels: Vec<String> =
+                                self.file_anchors.values().map(|f| f.label()).collect();
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 ui.label(
-                                    RichText::new(fa.label())
+                                    RichText::new(labels.join("  "))
                                         .color(pal::TEXT_ANCHOR)
                                         .monospace()
                                         .small(),
@@ -442,14 +387,11 @@ impl eframe::App for MergeApp {
                     });
                 });
         }
-
         super::toolbar::render_toolbar(self, ctx);
         super::status_bar::render_status_bar(self, ctx);
-
         if self.show_help {
             super::help::render_help_overlay(self, ctx);
         }
-
         CentralPanel::default().show(ctx, |ui| {
             if self.hunks.is_empty() {
                 ui.vertical_centered(|ui| {

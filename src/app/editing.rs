@@ -3,7 +3,7 @@ use super::state::MergeApp;
 use super::types::{Action, StatusMessage};
 
 impl MergeApp {
-    pub fn apply_merge(&mut self) {
+    pub fn apply_merge(&mut self, forced_line: Option<usize>, anchor_id: Option<char>) {
         if self.applied_hunks.contains(&self.current_hunk) {
             self.set_message(StatusMessage::warning(format!(
                 "Hunk {} already applied",
@@ -16,9 +16,20 @@ impl MergeApp {
             None => return,
         };
 
-        let (file_start, file_end) = match self.resolve_apply_range() {
-            Some(r) => r,
-            None => return,
+        let (file_start, file_end) = if let Some(id) = anchor_id {
+            if let Some(anchor) = self.file_anchors.get(&id) {
+                (anchor.line, anchor.line)
+            } else {
+                self.set_message(StatusMessage::error(format!("Marker {} not found", id)));
+                return;
+            }
+        } else if let Some(ln) = forced_line {
+            (ln, ln)
+        } else {
+            match self.resolve_apply_range() {
+                Some(r) => r,
+                None => return,
+            }
         };
 
         if let Some((ms, me)) = self.merged_range {
@@ -29,23 +40,27 @@ impl MergeApp {
             }
         }
 
-        self.history.push((self.file_lines.clone(), self.current_hunk));
-
+        self.history
+            .push((self.file_lines.clone(), self.current_hunk));
         let mut output: Vec<String> = Vec::new();
         output.extend_from_slice(&self.file_lines[..file_start]);
         let replace_start = output.len();
         output.extend(hunk.replace.iter().cloned());
         let replace_end = output.len();
         output.extend_from_slice(&self.file_lines[file_end..]);
-
         self.file_lines = output;
         self.merged_range = Some((replace_start, replace_end));
         self.applied_hunks.insert(self.current_hunk);
-        self.file_anchor = None;           // clear marks after apply
+
+        if let Some(id) = anchor_id {
+            self.file_anchors.remove(&id);
+        } else if forced_line.is_none() {
+            self.file_anchors.clear();
+        }
+
         self.mark_pending = None;
         self.cursor_line = Some(replace_start);
         self.scroll_to_match = true;
-
         self.set_message(StatusMessage::success(format!(
             "✓ Hunk {} applied at line {} — {} line(s) replaced with {}",
             self.current_hunk + 1,
@@ -89,7 +104,8 @@ impl MergeApp {
     pub fn delete_lines(&mut self, count: usize) {
         if let Some(start) = self.cursor_line {
             if start < self.file_lines.len() {
-                self.history.push((self.file_lines.clone(), self.current_hunk));
+                self.history
+                    .push((self.file_lines.clone(), self.current_hunk));
                 let end = (start + count).min(self.file_lines.len());
                 self.file_lines.drain(start..end);
                 self.merged_range = None;
