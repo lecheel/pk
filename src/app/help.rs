@@ -1,8 +1,7 @@
-use eframe::egui::*;
-
+// file: src/app/help.rs
 use super::palette::pal;
 use super::state::MergeApp;
-
+use eframe::egui::*;
 pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
     let screen = ctx.screen_rect();
     let overlay_w = 420.0_f32;
@@ -11,13 +10,11 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
         (screen.center().x - overlay_w / 2.0).max(8.0),
         (screen.center().y - overlay_h / 2.0).max(8.0),
     );
-
     let overlay_rect = Rect::from_min_size(pos, Vec2::new(overlay_w, overlay_h));
     let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("help_overlay")));
     painter.rect_filled(screen, 0.0, Color32::from_black_alpha(160));
     painter.rect_filled(overlay_rect, 6.0, Color32::from_rgb(22, 28, 38));
     painter.rect_stroke(overlay_rect, 6.0, Stroke::new(1.0, pal::SEPARATOR));
-
     Area::new(Id::new("help_area"))
         .fixed_pos(pos)
         .show(ctx, |ui| {
@@ -41,7 +38,6 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
             ui.add_space(8.0);
             ui.add(Separator::default());
             ui.add_space(4.0);
-
             let shortcuts: &[(&str, &str)] = &[
                 ("Navigation", ""),
                 ("↑ / ↓", "Move cursor one line"),
@@ -59,13 +55,14 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
                 ("dd / Ndd", "Delete 1 or N lines at cursor"),
                 ("u", "Undo last edit"),
                 (".", "Repeat last action"),
+                ("ma", "Set mark 'a' for selected lines"),
+                (">", "Apply replace at mark 'a'"),
                 ("", ""),
                 ("UI", ""),
                 ("?", "Toggle this help"),
-                ("M", "Toggle hunk minimap"),
-                ("Esc", "Close help / clear anchor"),
+                ("o", "Toggle hunk minimap"),
+                ("Esc", "Close help / clear anchor / marks"),
             ];
-
             ScrollArea::vertical()
                 .max_height(overlay_h - 100.0)
                 .show(ui, |ui| {
@@ -94,7 +91,6 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
                         }
                     }
                 });
-
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.add_space(16.0);

@@ -26,7 +26,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
             return;
         }
     };
-
     let available = ui.available_size();
     let divider = 0.38_f32;
     let left_w = (available.x * divider).floor() - 1.0;
@@ -34,7 +33,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mono_h = ui.text_style_height(&TextStyle::Monospace);
     let row_h = mono_h + 4.0;
     let char_w = mono_h * 0.60;
-
     ui.horizontal(|ui| {
         Frame::none()
             .fill(Color32::from_rgb(28, 38, 58))
@@ -69,25 +67,21 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                 );
             });
     });
-
     ui.add(Separator::default());
-
     let body_rect = ui.available_rect_before_wrap();
     let mut left_rect = body_rect;
     left_rect.set_width(left_w);
     let mut right_rect = body_rect;
     right_rect.min.x = body_rect.min.x + left_w + 2.0;
     right_rect.set_width(right_w);
-
     let mut left_ui = ui.child_ui(left_rect, Layout::top_down(Align::LEFT), None);
     render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
-
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
     render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
 }
 
 fn render_search_panel(
-    app: &MergeApp,
+    app: &mut MergeApp,
     ui: &mut Ui,
     mr: &crate::diff::MatchResult,
     row_h: f32,
@@ -95,16 +89,17 @@ fn render_search_panel(
     panel_w: f32,
 ) {
     let max_chars = ((panel_w - 58.0) / char_w).floor() as usize;
+    let mut set_selection: Option<(usize, usize)> = None;
+
     ScrollArea::vertical()
         .id_source("search_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let hunk = match app.current_hunk() {
-                Some(h) => h,
+                Some(h) => h.clone(),
                 None => return,
             };
             let is_applied = app.applied_hunks.contains(&app.current_hunk);
-
             let (banner_bg, banner_fg, _icon) = MergeApp::score_appearance(mr.score);
             let (banner_bg, banner_text) = if is_applied {
                 (
@@ -122,7 +117,6 @@ fn render_search_panel(
                     ),
                 )
             };
-
             let desired = Vec2::new(ui.available_width(), row_h + 2.0);
             let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
             ui.painter().rect_filled(rect, 2.0, banner_bg);
@@ -134,7 +128,6 @@ fn render_search_panel(
                 if is_applied { pal::TEXT_DIM } else { banner_fg },
             );
             ui.add_space(2.0);
-
             let search_file_map: Vec<Option<usize>> = app
                 .search_rows
                 .iter()
@@ -142,20 +135,49 @@ fn render_search_panel(
                 .map(|r| r.file_idx)
                 .collect();
 
+            let pointer_down = ui.input(|i| i.pointer.primary_down());
+            let pointer_pressed = ui.input(|i| i.pointer.primary_pressed());
+            let pointer_dragging = ui.input(|i| i.pointer.is_decidedly_dragging());
+
             for (line_idx, line) in hunk.search.iter().enumerate() {
                 let file_idx = search_file_map.get(line_idx).copied().flatten();
                 let is_matched = file_idx.is_some();
-
-                let (bg, prefix_color, prefix) = if is_matched {
+                let (base_bg, prefix_color, prefix) = if is_matched {
                     (pal::BG_MATCH, pal::TEXT_INSERT, "= ")
                 } else {
                     (pal::BG_DELETE, pal::TEXT_DELETE, "- ")
                 };
 
-                let desired = Vec2::new(ui.available_width(), row_h);
-                let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-                ui.painter().rect_filled(rect, 0.0, bg);
+                let is_selected = app
+                    .left_selection
+                    .map_or(false, |(s, e)| line_idx >= s && line_idx <= e);
+                let is_marked = app
+                    .mark_a
+                    .map_or(false, |(s, e)| line_idx >= s && line_idx <= e);
 
+                let bg = if is_marked {
+                    Color32::from_rgb(80, 60, 10)
+                } else if is_selected {
+                    Color32::from_rgb(50, 50, 70)
+                } else {
+                    base_bg
+                };
+
+                let desired = Vec2::new(ui.available_width(), row_h);
+                let (rect, resp) = ui.allocate_exact_size(desired, Sense::click_and_drag());
+
+                if resp.hovered() {
+                    if pointer_pressed {
+                        set_selection = Some((line_idx, line_idx));
+                    } else if pointer_dragging && pointer_down {
+                        if let Some(start_sel) = app.left_selection {
+                            set_selection =
+                                Some((start_sel.0.min(line_idx), start_sel.1.max(line_idx)));
+                        }
+                    }
+                }
+
+                ui.painter().rect_filled(rect, 0.0, bg);
                 let bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
                 ui.painter().rect_filled(
                     bar,
@@ -166,7 +188,6 @@ fn render_search_panel(
                         pal::TEXT_DELETE
                     },
                 );
-
                 let num_text = if let Some(fi) = file_idx {
                     format!("{:>4}", fi + 1)
                 } else {
@@ -183,7 +204,6 @@ fn render_search_panel(
                         pal::TEXT_DIM
                     },
                 );
-
                 ui.painter().text(
                     Pos2::new(rect.left() + 38.0, rect.center().y),
                     Align2::LEFT_CENTER,
@@ -191,7 +211,6 @@ fn render_search_panel(
                     FontId::monospace(11.0),
                     prefix_color,
                 );
-
                 let display = MergeApp::truncate_owned(line, max_chars);
                 ui.painter().text(
                     Pos2::new(rect.left() + 54.0, rect.center().y),
@@ -205,14 +224,12 @@ fn render_search_panel(
                     },
                 );
             }
-
             if !hunk.replace.is_empty() {
                 ui.add_space(4.0);
                 let (sep_rect, _) =
                     ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
                 ui.painter().rect_filled(sep_rect, 0.0, pal::SEPARATOR);
                 ui.add_space(2.0);
-
                 let (hdr_rect, _) =
                     ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::hover());
                 ui.painter()
@@ -225,14 +242,40 @@ fn render_search_panel(
                     pal::TEXT_INSERT,
                 );
 
+                let btn_size = Vec2::new(24.0, row_h - 4.0);
+                let btn_rect = Rect::from_min_size(
+                    Pos2::new(
+                        hdr_rect.right() - 28.0,
+                        hdr_rect.center().y - btn_size.y / 2.0,
+                    ),
+                    btn_size,
+                );
+                let btn = Button::new(
+                    RichText::new(">")
+                        .color(Color32::WHITE)
+                        .strong()
+                        .monospace(),
+                )
+                .fill(Color32::from_rgb(40, 90, 55))
+                .min_size(btn_size);
+                if ui.put(btn_rect, btn).clicked() {
+                    let sel = app.mark_a.or(app.left_selection);
+                    if let Some((s, _)) = sel {
+                        if let Some(row) = app.search_rows.get(s) {
+                            if let Some(idx) = row.file_idx {
+                                app.manual_anchor = Some(idx);
+                                app.apply_merge();
+                            }
+                        }
+                    }
+                }
+
                 for (line_idx, line) in hunk.replace.iter().enumerate() {
                     let desired = Vec2::new(ui.available_width(), row_h);
                     let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
                     ui.painter().rect_filled(rect, 0.0, pal::BG_INSERT);
-
                     let bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
                     ui.painter().rect_filled(bar, 0.0, pal::BAR_MATCH);
-
                     ui.painter().text(
                         Pos2::new(rect.left() + 4.0, rect.center().y),
                         Align2::LEFT_CENTER,
@@ -262,6 +305,10 @@ fn render_search_panel(
                 }
             }
         });
+
+    if let Some(sel) = set_selection {
+        app.left_selection = Some(sel);
+    }
 }
 
 fn render_file_panel(
@@ -273,7 +320,6 @@ fn render_file_panel(
     panel_w: f32,
 ) {
     let max_chars = ((panel_w - 68.0) / char_w).floor() as usize;
-
     let mut prev_hunk = false;
     let mut next_hunk = false;
     let mut prev_candidate = false;
@@ -284,7 +330,6 @@ fn render_file_panel(
     let mut next_search_match = false;
     let mut prev_search_match = false;
     let mut clear_search = false;
-
     let current_hunk_idx = app.current_hunk;
     let total_hunks = app.hunks.len();
     let manual_anchor = app.manual_anchor;
@@ -297,14 +342,12 @@ fn render_file_panel(
     } else {
         mr.file_start + 1
     };
-
     Frame::none()
         .fill(Color32::from_rgb(25, 32, 42))
         .inner_margin(Margin::symmetric(6.0, 4.0))
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-
                 ui.label(RichText::new("Hunk:").color(pal::TEXT_DIM).small());
                 if ui
                     .add_enabled(current_hunk_idx > 0, Button::new("◀").small())
@@ -323,13 +366,10 @@ fn render_file_panel(
                 {
                     next_hunk = true;
                 }
-
                 if is_applied {
                     ui.label(RichText::new("✓").color(pal::ACCENT_GOOD).strong());
                 }
-
                 ui.add(Separator::default().vertical());
-
                 if let Some(anchor) = manual_anchor {
                     ui.label(
                         RichText::new(format!("⚓ {}", anchor + 1))
@@ -365,9 +405,7 @@ fn render_file_panel(
                         next_candidate = true;
                     }
                 }
-
                 ui.add(Separator::default().vertical());
-
                 if !app.file_search_query.is_empty() && !app.is_searching {
                     ui.label(
                         RichText::new(format!("🔍 {}", app.file_search_query))
@@ -383,9 +421,7 @@ fn render_file_panel(
                         clear_search = true;
                     }
                 }
-
                 ui.add(Separator::default().vertical());
-
                 ui.add_enabled_ui(can_apply, |ui| {
                     let btn_text = if is_applied {
                         "✓ Applied".to_string()
@@ -407,7 +443,6 @@ fn render_file_panel(
                         apply_clicked = true;
                     }
                 });
-
                 if current_hunk_idx < total_hunks - 1 {
                     if ui
                         .small_button("Skip →")
@@ -419,13 +454,10 @@ fn render_file_panel(
                 }
             });
         });
-
     ui.add(Separator::default());
-
     let len = app.file_lines.len();
     let mut go_next_hunk = false;
     let mut go_prev_hunk = false;
-
     if len > 0 {
         if app.is_searching {
             ui.input(|i| {
@@ -454,10 +486,8 @@ fn render_file_panel(
         } else if !ui.ctx().wants_keyboard_input() {
             let mut cursor_changed = false;
             let mut new_text = String::new();
-
             ui.input(|i| {
                 let cur = app.cursor_line.unwrap_or(0);
-
                 if i.key_pressed(Key::ArrowDown) {
                     app.cursor_line = Some((cur + 1).min(len - 1));
                     cursor_changed = true;
@@ -482,7 +512,6 @@ fn render_file_panel(
                     app.cursor_line = Some(len - 1);
                     cursor_changed = true;
                 }
-
                 if i.key_pressed(Key::L) {
                     if i.modifiers.shift {
                         go_prev_hunk = true;
@@ -490,14 +519,12 @@ fn render_file_panel(
                         go_next_hunk = true;
                     }
                 }
-
                 if i.key_pressed(Key::Slash) {
                     app.is_searching = true;
                     app.file_search_query.clear();
                     app.search_matches.clear();
                     clear_search = true;
                 }
-
                 if i.key_pressed(Key::Space) {
                     if let Some(cur) = app.cursor_line {
                         app.manual_anchor = Some(cur);
@@ -507,7 +534,6 @@ fn render_file_panel(
                         )));
                     }
                 }
-
                 if i.key_pressed(Key::A) {
                     let in_hunk = if let Some(anchor) = manual_anchor {
                         cur == anchor
@@ -522,22 +548,36 @@ fn render_file_panel(
                         cursor_changed = true;
                     }
                 }
-
                 for event in i.events.clone() {
                     if let Event::Text(txt) = event {
-                        if txt != "?" && txt != "m" && txt != "M" {
+                        if txt == "m" {
+                            app.mark_mode = true;
+                        } else if app.mark_mode && txt == "a" {
+                            if app.left_selection.is_some() {
+                                app.mark_a = app.left_selection;
+                                app.set_message(super::types::StatusMessage::info(format!(
+                                    "⚓ Mark 'a' set"
+                                )));
+                            } else {
+                                app.set_message(super::types::StatusMessage::warning(
+                                    "No selection to mark",
+                                ));
+                            }
+                            app.mark_mode = false;
+                        } else if app.mark_mode {
+                            app.mark_mode = false;
+                        }
+                        if txt != "?" && txt != "m" && txt != "M" && txt != "o" && txt != "O" {
                             new_text.push_str(&txt);
                         }
                     }
                 }
             });
-
             if !new_text.is_empty() {
                 app.vim_buffer.push_str(&new_text);
                 let buf = app.vim_buffer.trim().to_string();
                 let lower_buf = buf.to_lowercase();
                 let mut clear_buffer = false;
-
                 if buf == "n" {
                     next_search_match = true;
                     clear_buffer = true;
@@ -585,18 +625,15 @@ fn render_file_panel(
                         clear_buffer = true;
                     }
                 }
-
                 if clear_buffer {
                     app.vim_buffer.clear();
                 }
             }
-
             if cursor_changed {
                 app.scroll_to_match = true;
             }
         }
     }
-
     if prev_hunk && current_hunk_idx > 0 {
         app.current_hunk -= 1;
         app.load_hunk();
@@ -607,12 +644,10 @@ fn render_file_panel(
         app.load_hunk();
         return;
     }
-
     if clear_anchor {
         app.manual_anchor = None;
         app.scroll_to_match = true;
     }
-
     if prev_candidate && app.candidate_index > 0 {
         app.candidate_index -= 1;
         app.scroll_to_match = true;
@@ -625,13 +660,11 @@ fn render_file_panel(
         app.recompute_match();
         return;
     }
-
     if clear_search {
         app.file_search_query.clear();
         app.search_matches.clear();
         app.scroll_to_match = true;
     }
-
     if find_text {
         let q = app.file_search_query.trim().to_lowercase();
         if q.is_empty() {
@@ -657,7 +690,6 @@ fn render_file_panel(
             }
         }
     }
-
     if next_search_match && !app.search_matches.is_empty() {
         app.search_match_idx = (app.search_match_idx + 1) % app.search_matches.len();
         app.cursor_line = Some(app.search_matches[app.search_match_idx]);
@@ -672,7 +704,6 @@ fn render_file_panel(
         app.cursor_line = Some(app.search_matches[app.search_match_idx]);
         app.scroll_to_match = true;
     }
-
     if go_next_hunk {
         if app.current_hunk < app.hunks.len() - 1 {
             app.current_hunk += 1;
@@ -693,7 +724,6 @@ fn render_file_panel(
             app.scroll_to_match = true;
         }
     }
-
     let file_lines = app.file_lines.clone();
     let manual_anchor_check = app.manual_anchor;
     let merged_range = app.merged_range;
@@ -706,7 +736,6 @@ fn render_file_panel(
     let cursor_line = app.cursor_line;
     let mut did_scroll = false;
     let mut set_cursor: Option<usize> = None;
-
     let delete_file_indices: HashSet<usize> = app
         .search_rows
         .iter()
@@ -719,7 +748,6 @@ fn render_file_panel(
         .filter(|r| matches!(r.kind, RowKind::Equal))
         .filter_map(|r| r.file_idx)
         .collect();
-
     ScrollArea::both()
         .id_source("file_scroll")
         .auto_shrink([false, false])
@@ -734,7 +762,6 @@ fn render_file_panel(
                 let is_search_hit = !search_query.is_empty()
                     && line.to_lowercase().contains(&search_query.to_lowercase());
                 let is_current_search = is_search_hit && current_search_line == Some(i);
-
                 let row_is_tall = is_anchor
                     || (in_auto_match && i == auto_start && manual_anchor_check.is_none());
                 let desired = Vec2::new(
@@ -742,7 +769,6 @@ fn render_file_panel(
                     if row_is_tall { row_h + 6.0 } else { row_h },
                 );
                 let (rect, row_resp) = ui.allocate_exact_size(desired, Sense::click());
-
                 let should_scroll = scroll_to_match
                     && (is_cursor
                         || (cursor_line.is_none() && is_anchor)
@@ -753,7 +779,6 @@ fn render_file_panel(
                     ui.scroll_to_rect(rect, Some(Align::Center));
                     did_scroll = true;
                 }
-
                 if is_anchor {
                     ui.painter().rect_filled(rect, 2.0, pal::BG_ANCHOR);
                     let dash_y = rect.center().y;
@@ -854,7 +879,6 @@ fn render_file_panel(
                         base_bg
                     };
                     ui.painter().rect_filled(rect, 0.0, row_bg);
-
                     let bar = Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
                     let bar_color = if in_merged {
                         pal::BAR_MERGED
@@ -874,7 +898,6 @@ fn render_file_panel(
                         Color32::TRANSPARENT
                     };
                     ui.painter().rect_filled(bar, 0.0, bar_color);
-
                     let diff_prefix = if in_auto_match && manual_anchor_check.is_none() {
                         if is_delete {
                             Some(("-", pal::TEXT_DELETE))
@@ -886,11 +909,9 @@ fn render_file_panel(
                     } else {
                         None
                     };
-
                     if row_resp.clicked() {
                         set_cursor = Some(i);
                     }
-
                     let num_color = if in_merged {
                         pal::TEXT_LNUM_ACTIVE
                     } else if is_delete {
@@ -902,7 +923,6 @@ fn render_file_panel(
                     } else {
                         pal::TEXT_LNUM
                     };
-
                     ui.painter().text(
                         Pos2::new(rect.left() + 6.0, rect.center().y),
                         Align2::LEFT_CENTER,
@@ -910,7 +930,6 @@ fn render_file_panel(
                         FontId::monospace(11.0),
                         num_color,
                     );
-
                     if let Some((glyph, glyph_color)) = diff_prefix {
                         ui.painter().text(
                             Pos2::new(rect.left() + 48.0, rect.center().y),
@@ -920,7 +939,6 @@ fn render_file_panel(
                             glyph_color,
                         );
                     }
-
                     let text_color = if in_merged {
                         pal::TEXT_MERGED
                     } else if is_delete {
@@ -941,7 +959,6 @@ fn render_file_panel(
                         text_color,
                     );
                 }
-
                 if in_auto_match && i == auto_end.saturating_sub(1) && manual_anchor_check.is_none()
                 {
                     let (sep_rect, _) = ui
@@ -949,24 +966,20 @@ fn render_file_panel(
                     ui.painter().rect_filled(sep_rect, 0.0, pal::BAR_MATCH);
                 }
             }
-
             ui.add_space(row_h * 3.0);
         });
-
     if scroll_to_match && !did_scroll {
         did_scroll = true;
     }
     if did_scroll {
         app.scroll_to_match = false;
     }
-
     if let Some(cur_line) = set_cursor {
         app.cursor_line = Some(cur_line);
         if let Some(idx) = app.search_matches.iter().position(|&x| x == cur_line) {
             app.search_match_idx = idx;
         }
     }
-
     if apply_clicked {
         app.apply_merge();
     }

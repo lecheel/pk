@@ -35,6 +35,9 @@ pub struct MergeApp {
     pub file_states: HashMap<String, FileState>,
     pub show_help: bool,
     pub show_minimap: bool,
+    pub left_selection: Option<(usize, usize)>,
+    pub mark_mode: bool,
+    pub mark_a: Option<(usize, usize)>,
 }
 
 impl MergeApp {
@@ -70,8 +73,10 @@ impl MergeApp {
             file_states: HashMap::new(),
             show_help: false,
             show_minimap: true,
+            left_selection: None,
+            mark_mode: false,
+            mark_a: None,
         };
-
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
             let path = std::path::Path::new(&patch_file);
@@ -92,23 +97,19 @@ impl MergeApp {
                 )));
             }
         }
-
         if !loaded_patch {
             app.patch_text = DEFAULT_PATCH.to_string();
             app.set_message(StatusMessage::info(
                 "No patch file provided — using embedded demo patch. Press ? for help.",
             ));
         }
-
         app.reparse();
         app
     }
-
     pub fn set_message(&mut self, msg: StatusMessage) {
         self.message = Some(msg);
         self.message_until = None;
     }
-
     pub fn reparse(&mut self) {
         self.save_file_state();
         self.hunks = crate::patch::parse_patches(&self.patch_text);
@@ -122,7 +123,6 @@ impl MergeApp {
         self.file_states.clear();
         self.load_hunk();
     }
-
     pub fn save_file_state(&mut self) {
         if self.file_path.is_empty() {
             return;
@@ -137,22 +137,18 @@ impl MergeApp {
             },
         );
     }
-
     pub fn load_hunk(&mut self) {
         let hunk = match self.hunks.get(self.current_hunk) {
             Some(h) => h.clone(),
             None => return,
         };
-
         let path = std::path::Path::new(&self.base_dir)
             .join(&hunk.filename)
             .display()
             .to_string();
-
         if path != self.file_path {
             self.save_file_state();
             self.file_path = path.clone();
-
             if let Some(saved) = self.file_states.get(&path).cloned() {
                 self.file_lines = saved.lines;
                 self.applied_hunks = saved.applied_hunks;
@@ -195,7 +191,6 @@ impl MergeApp {
                 }
             }
         }
-
         self.manual_anchor = None;
         self.file_search_query.clear();
         self.search_matches.clear();
@@ -206,19 +201,19 @@ impl MergeApp {
         self.scroll_to_match = true;
         self.vim_buffer.clear();
         self.last_action = None;
+        self.left_selection = None;
+        self.mark_mode = false;
+        self.mark_a = None;
         self.recompute_match();
     }
-
     pub fn current_hunk(&self) -> Option<&PatchHunk> {
         self.hunks.get(self.current_hunk)
     }
-
     pub fn hunk_summary(&self) -> (usize, usize, usize) {
         let applied = self.applied_hunks.len();
         let total = self.hunks.len();
         (applied, total - applied, total)
     }
-
     pub fn truncate_owned(text: &str, max_chars: usize) -> String {
         if text.chars().count() > max_chars {
             let mut s: String = text.chars().take(max_chars.saturating_sub(1)).collect();
@@ -228,7 +223,6 @@ impl MergeApp {
             text.to_string()
         }
     }
-
     pub fn reset_for_new_file(&mut self) {
         self.applied_hunks.clear();
         self.merged_range = None;
@@ -242,6 +236,9 @@ impl MergeApp {
         self.candidate_index = 0;
         self.cursor_line = None;
         self.scroll_to_match = true;
+        self.left_selection = None;
+        self.mark_mode = false;
+        self.mark_a = None;
     }
 }
 
@@ -258,7 +255,6 @@ impl eframe::App for MergeApp {
                 }
             }
         }
-
         if !ctx.wants_keyboard_input() || self.is_searching {
             ctx.input(|i| {
                 if i.key_pressed(Key::Escape) {
@@ -272,6 +268,10 @@ impl eframe::App for MergeApp {
                     } else if self.manual_anchor.is_some() {
                         self.manual_anchor = None;
                         self.scroll_to_match = true;
+                    } else if self.mark_a.is_some() {
+                        self.mark_a = None;
+                    } else if self.left_selection.is_some() {
+                        self.left_selection = None;
                     }
                 }
                 if !self.is_searching
@@ -284,13 +284,12 @@ impl eframe::App for MergeApp {
                 if !self.is_searching
                     && i.events
                         .iter()
-                        .any(|e| matches!(e, Event::Text(t) if t == "m" || t == "M"))
+                        .any(|e| matches!(e, Event::Text(t) if t == "o" || t == "O"))
                 {
                     self.show_minimap = !self.show_minimap;
                 }
             });
         }
-
         if self.is_searching {
             TopBottomPanel::bottom("vim_search_prompt")
                 .frame(
@@ -327,14 +326,11 @@ impl eframe::App for MergeApp {
                     });
                 });
         }
-
         super::toolbar::render_toolbar(self, ctx);
         super::status_bar::render_status_bar(self, ctx);
-
         if self.show_help {
             super::help::render_help_overlay(self, ctx);
         }
-
         CentralPanel::default().show(ctx, |ui| {
             if self.hunks.is_empty() {
                 ui.vertical_centered(|ui| {
