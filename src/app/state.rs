@@ -176,7 +176,10 @@ impl MergeApp {
             if hunk.search.is_empty() {
                 return true;
             }
-            let current_file_name = self.current_hunk().map(|h| h.filename.clone()).unwrap_or_default();
+            let current_file_name = self
+                .current_hunk()
+                .map(|h| h.filename.clone())
+                .unwrap_or_default();
             if hunk.filename != current_file_name {
                 return true;
             }
@@ -231,7 +234,14 @@ impl MergeApp {
         self.message_until = None;
     }
     pub fn set_mark(&mut self, id: char, line: usize) {
-        self.file_anchors.insert(id, FileAnchor { id, line });
+        self.file_anchors.insert(
+            id,
+            FileAnchor {
+                id,
+                line,
+                end_line: None,
+            },
+        );
         self.set_message(StatusMessage::info(format!(
             "⚓ m{} set at line {} — press >{} to apply",
             id,

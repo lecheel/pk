@@ -77,11 +77,16 @@ pub struct FileState {
 pub struct FileAnchor {
     pub id: char,
     pub line: usize,
+    pub end_line: Option<usize>,
 }
 
 impl FileAnchor {
     pub fn start_only(id: char, line: usize) -> Self {
-        Self { id, line }
+        Self {
+            id,
+            line,
+            end_line: None,
+        }
     }
     pub fn file_start(&self) -> usize {
         self.line
