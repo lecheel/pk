@@ -160,6 +160,43 @@ impl MergeApp {
         };
         match std::fs::write(&path, &content) {
             Ok(_) => {
+                if self.format_on_save {
+                    let cmd = if self.fmt_command.is_empty() {
+                        "rustfmt".to_string()
+                    } else {
+                        self.fmt_command.clone()
+                    };
+                    let parts: Vec<&str> = cmd.split_whitespace().collect();
+                    if !parts.is_empty() {
+                        let mut command = std::process::Command::new(parts[0]);
+                        for arg in &parts[1..] {
+                            command.arg(arg);
+                        }
+                        command.arg(&path);
+
+                        match command.output() {
+                            Ok(output) => {
+                                if output.status.success() {
+                                    if let Ok(formatted_content) = std::fs::read_to_string(&path) {
+                                        self.file_text = formatted_content.clone();
+                                        self.file_lines = self.file_text.lines().map(String::from).collect();
+                                        self.recompute_match();
+                                        self.update_git_statuses();
+                                    }
+                                    self.save_file_state();
+                                    self.set_message(StatusMessage::success(format!("Saved & formatted → {}", path)));
+                                } else {
+                                    let err = String::from_utf8_lossy(&output.stderr);
+                                    self.set_message(StatusMessage::error(format!("Save ok, but fmt failed: {}", err.trim())));
+                                }
+                            }
+                            Err(e) => {
+                                self.set_message(StatusMessage::error(format!("Save ok, but failed to run fmt: {}", e)));
+                            }
+                        }
+                        return;
+                    }
+                }
                 self.save_file_state();
                 self.set_message(StatusMessage::success(format!("Saved → {}", path)));
             }
@@ -168,6 +205,7 @@ impl MergeApp {
             }
         }
     }
+
 
     pub fn save_all_files(&mut self) {
         self.save_file_state();

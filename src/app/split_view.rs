@@ -876,96 +876,115 @@ fn render_file_panel(
                 }
             });
         // In src/app/split_view.rs (inside render_file_panel)
-        } else if !ui.ctx().wants_keyboard_input() {
-            let mut cursor_changed = false;
-            let mut new_text = String::new();
-            ui.input(|i| {
-                let cur = app.cursor_line.unwrap_or(0);
-                if i.key_pressed(Key::Equals) && i.modifiers.alt {
-                    go_next_file = true;
-                }
-                if i.key_pressed(Key::Minus) && i.modifiers.alt {
-                    go_prev_file = true;
-                }
-                if i.key_pressed(Key::W) && i.modifiers.alt {
-                    app.save_file_state();
-                    app.set_message(StatusMessage::success("File saved"));
-                    // Optionally recompute match to reflect changes
-                    app.recompute_match();
-                }
-                if i.key_pressed(Key::Q) && i.modifiers.alt {
-                    app.quit_requested = true;
-                }
-                if i.key_pressed(Key::ArrowDown) {
-                    app.cursor_line = Some((cur + 1).min(len - 1));
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::ArrowUp) {
-                    app.cursor_line = Some(cur.saturating_sub(1));
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::PageDown) {
-                    app.cursor_line = Some((cur + 20).min(len - 1));
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::PageUp) {
-                    app.cursor_line = Some(cur.saturating_sub(20));
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::Home) {
-                    app.cursor_line = Some(0);
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::End) {
-                    app.cursor_line = Some(len - 1);
-                    cursor_changed = true;
-                }
-                if i.key_pressed(Key::Escape) {
-                    if app.is_visual_mode {
-                        app.is_visual_mode = false;
-                        app.visual_start = None;
-                    } else if app.d_pending {
-                        app.d_pending = false;
-                        app.vim_buffer.clear();
+            } else if !ui.ctx().wants_keyboard_input() {
+                let mut cursor_changed = false;
+                let mut new_text = String::new();
+                ui.input(|i| {
+                    // Intercept all input if we are waiting for a mark key
+                    if app.mark_pending == Some(MarkPending::WaitingKey) {
+                        for event in i.events.clone() {
+                            if let Event::Text(txt) = event {
+                                if txt.len() == 1 {
+                                    let c = txt.chars().next().unwrap();
+                                    if c == 'a' || c == 'A' {
+                                        // Silently ignore ma and mA
+                                    } else if c.is_ascii_alphabetic() {
+                                        if let Some(cur) = app.cursor_line {
+                                            app.set_mark(c, cur);
+                                        }
+                                    }
+                                    app.mark_pending = None;
+                                }
+                            }
+                        }
+                        return;
                     }
-                }
-                if i.key_pressed(Key::D) {
-                    if app.is_visual_mode {
+
+                    let cur = app.cursor_line.unwrap_or(0);
+                    if i.key_pressed(Key::Equals) && i.modifiers.alt {
+                        go_next_file = true;
+                    }
+                    if i.key_pressed(Key::Minus) && i.modifiers.alt {
+                        go_prev_file = true;
+                    }
+                    if i.key_pressed(Key::W) && i.modifiers.alt {
+                        app.save_file_state();
+                        app.set_message(StatusMessage::success("File saved"));
+                        app.recompute_match();
+                    }
+                    if i.key_pressed(Key::Q) && i.modifiers.alt {
+                        app.quit_requested = true;
+                    }
+                    if i.key_pressed(Key::ArrowDown) {
+                        app.cursor_line = Some((cur + 1).min(len - 1));
+                        cursor_changed = true;
+                    }
+                    if i.key_pressed(Key::ArrowUp) {
+                        app.cursor_line = Some(cur.saturating_sub(1));
+                        cursor_changed = true;
+                    }
+                    if i.key_pressed(Key::PageDown) {
+                        app.cursor_line = Some((cur + 20).min(len - 1));
+                        cursor_changed = true;
+                    }
+                    if i.key_pressed(Key::PageUp) {
+                        app.cursor_line = Some(cur.saturating_sub(20));
+                        cursor_changed = true;
+                    }
+                    if i.key_pressed(Key::Home) {
+                        app.cursor_line = Some(0);
+                        cursor_changed = true;
+                    }
+                    if i.key_pressed(Key::End) {
+                        app.cursor_line = Some(len - 1);
+                        cursor_changed = true;
+                    }
+                    if i.key_pressed(Key::Escape) {
+                        if app.is_visual_mode {
+                            app.is_visual_mode = false;
+                            app.visual_start = None;
+                        } else if app.d_pending {
+                            app.d_pending = false;
+                            app.vim_buffer.clear();
+                        }
+                    }
+                    if i.key_pressed(Key::D) {
+                        if app.is_visual_mode {
+                            visual_delete = true;
+                        } else {
+                            app.d_pending = true;
+                        }
+                    }
+                    if i.key_pressed(Key::X) && app.is_visual_mode {
                         visual_delete = true;
-                    } else {
-                        app.d_pending = true;
                     }
-                }
-                if i.key_pressed(Key::X) && app.is_visual_mode {
-                    visual_delete = true;
-                }
-                if i.key_pressed(Key::L) && !app.d_pending && app.vim_buffer.is_empty() {
-                    if i.modifiers.shift {
-                        if candidate_count > 1 && candidate_idx > 0 {
-                            prev_candidate = true;
+                    if i.key_pressed(Key::L) && !app.d_pending && app.vim_buffer.is_empty() {
+                        if i.modifiers.shift {
+                            if candidate_count > 1 && candidate_idx > 0 {
+                                prev_candidate = true;
+                            } else {
+                                go_prev_hunk = true;
+                            }
                         } else {
-                            go_prev_hunk = true;
-                        }
-                    } else {
-                        if candidate_count > 1 && candidate_idx + 1 < candidate_count {
-                            next_candidate = true;
-                        } else {
-                            go_next_hunk = true;
+                            if candidate_count > 1 && candidate_idx + 1 < candidate_count {
+                                next_candidate = true;
+                            } else {
+                                go_next_hunk = true;
+                            }
                         }
                     }
-                }
-                if i.key_pressed(Key::Slash) && !app.d_pending && app.vim_buffer.is_empty() {
-                    app.is_searching = true;
-                    app.file_search_query.clear();
-                    app.search_matches.clear();
-                    clear_search = true;
-                }
-                if i.key_pressed(Key::Space) && !app.d_pending && app.vim_buffer.is_empty() {
-                    if let Some(cur) = app.cursor_line {
-                        app.set_mark_a(cur);
+                    if i.key_pressed(Key::Slash) && !app.d_pending && app.vim_buffer.is_empty() {
+                        app.is_searching = true;
+                        app.file_search_query.clear();
+                        app.search_matches.clear();
+                        clear_search = true;
                     }
-                }
-                if i.key_pressed(Key::A) && !app.d_pending && app.vim_buffer.is_empty() {
+                    if i.key_pressed(Key::Space) && !app.d_pending && app.vim_buffer.is_empty() {
+                        if let Some(cur) = app.cursor_line {
+                            app.set_mark_a(cur);
+                        }
+                    }
+                    if i.key_pressed(Key::A) && !app.d_pending && app.vim_buffer.is_empty() {
                     let in_hunk = if file_anchors.is_empty() {
                         cur >= mr.file_start && cur < mr.file_end
                     } else {
@@ -991,21 +1010,6 @@ fn render_file_panel(
                             }
                         } else if txt == "m" {
                             app.mark_pending = Some(MarkPending::WaitingKey);
-                        } else if app.mark_pending == Some(MarkPending::WaitingKey) {
-                            if txt.len() == 1 {
-                                let c = txt.chars().next().unwrap();
-                                if c == 'a' || c == 'A' {
-                                    // Silently ignore ma and mA, just clear the pending state
-                                    app.mark_pending = None;
-                                } else if c.is_ascii_alphabetic() {
-                                    if let Some(cur) = app.cursor_line {
-                                        app.set_mark(c, cur);
-                                    }
-                                    app.mark_pending = None;
-                                } else {
-                                    app.mark_pending = None;
-                                }
-                            }
                         } else if txt == "o" {
                             if let Some(cur) = app.cursor_line {
                                 app.save_history();

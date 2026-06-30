@@ -86,6 +86,9 @@ pub struct MergeApp {
     pub del_end: Option<usize>,
     pub is_visual_mode: bool,
     pub visual_start: Option<usize>,
+    pub format_on_save: bool,
+    pub fmt_command: String,
+    pub show_settings: bool,
     pub available_repos: Vec<RepoInfo>,
     pub active_repo_id: Option<String>,
     pub daemon_error: Option<String>,
@@ -170,6 +173,9 @@ impl MergeApp {
             del_end: None,
             is_visual_mode: false,
             visual_start: None,
+            format_on_save: true,
+            fmt_command: "rustfmt".to_string(),
+            show_settings: false,
             available_repos: Vec::new(),
             active_repo_id: active_repo_id.clone(),
             daemon_error: None,
@@ -337,15 +343,19 @@ impl MergeApp {
                 return Some((self.file_lines.len(), self.file_lines.len()));
             }
         }
-        
+
         // If 'a' mark is set, use it as the explicit start
         if let Some(a) = self.file_anchors.get(&'a') {
             let start = a.line;
             let end = if let Some(b) = self.file_anchors.get(&'b') {
                 // If 'b' is also set, use the max of a, b, and their ends
                 let mut e = a.line.max(b.line);
-                if let Some(a_end) = a.end_line { e = e.max(a_end); }
-                if let Some(b_end) = b.end_line { e = e.max(b_end); }
+                if let Some(a_end) = a.end_line {
+                    e = e.max(a_end);
+                }
+                if let Some(b_end) = b.end_line {
+                    e = e.max(b_end);
+                }
                 e
             } else {
                 // If only 'a' is set, use its end_line, or default to the auto-match end
@@ -353,18 +363,20 @@ impl MergeApp {
                     self.match_result
                         .as_ref()
                         .map(|mr| mr.file_end.saturating_sub(1))
-                        .unwrap_or(start)
+                        .unwrap_or(start),
                 )
             };
             return Some((start, end + 1)); // +1 because file_end is exclusive
-
-    }
+        }
 
         if let Some(mr) = self.match_result.as_ref() {
-            println!("[DEBUG resolve_apply_range] No anchors. Using match_result: ({}, {})", mr.file_start, mr.file_end);
+            println!(
+                "[DEBUG resolve_apply_range] No anchors. Using match_result: ({}, {})",
+                mr.file_start, mr.file_end
+            );
             return Some((mr.file_start, mr.file_end));
         }
-        
+
         println!("[DEBUG resolve_apply_range] No match and no anchors. Returning None.");
         None
     }
@@ -658,6 +670,8 @@ impl eframe::App for MergeApp {
                 if i.key_pressed(Key::Escape) {
                     if self.show_repos_window {
                         self.show_repos_window = false;
+                    } else if self.show_settings {
+                        self.show_settings = false;
                     } else if self.show_help {
                         self.show_help = false;
                     } else if self.show_debug {
@@ -870,6 +884,51 @@ impl eframe::App for MergeApp {
         });
         if self.show_help {
             super::help::render_help_overlay(self, ctx);
+        }
+        if self.show_settings {
+            let mut show_settings = self.show_settings;
+            Window::new("⚙ Settings")
+                .open(&mut show_settings)
+                .collapsible(false)
+                .resizable(false)
+                .default_size(Vec2::new(400.0, 180.0))
+                .show(ctx, |ui| {
+                    ui.heading("Formatter Settings");
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.format_on_save, "Format on Save");
+                    });
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label("Command:");
+                        ui.add(
+                            TextEdit::singleline(&mut self.fmt_command)
+                                .desired_width(250.0)
+                                .hint_text("rustfmt"),
+                        );
+                    });
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("Examples:").color(pal::TEXT_DIM).small());
+                    ui.label(
+                        RichText::new("rustfmt")
+                            .color(pal::TEXT_DIM)
+                            .small()
+                            .monospace(),
+                    );
+                    ui.label(
+                        RichText::new("rustfmt --edition 2021")
+                            .color(pal::TEXT_DIM)
+                            .small()
+                            .monospace(),
+                    );
+                    ui.label(
+                        RichText::new("cargo fmt --")
+                            .color(pal::TEXT_DIM)
+                            .small()
+                            .monospace(),
+                    );
+                });
+            self.show_settings = show_settings;
         }
         if self.show_repos_window {
             let mut show_repos = self.show_repos_window;
