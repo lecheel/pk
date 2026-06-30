@@ -1,4 +1,3 @@
-//--+ src/app/split_view.rs
 use super::clipboard_utils::{get_clipboard_text, parse_clipboard_patch};
 use super::git_ops::GitStatus;
 use super::git_panels::{render_git_diff_panel, render_git_status_panel};
@@ -9,6 +8,8 @@ use super::types::{Action, FileAnchor, SearchRow, StatusMessage};
 use crate::diff::RowKind;
 use eframe::egui::*;
 use std::collections::HashSet;
+use std::sync::mpsc;
+
 pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mr = match app.match_result.clone() {
         Some(m) => m,
@@ -27,10 +28,18 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mono_h = ui.text_style_height(&TextStyle::Monospace);
     let row_h = mono_h + 4.0;
     let char_w = mono_h * 0.60;
-    // Draw Headers
+
     ui.horizontal(|ui| {
         let hunk = app.current_hunk().unwrap();
-        let header_bg = if app.show_git_status_window {
+        let header_bg = if app.fmt_error.is_some() {
+            Color32::from_rgb(58, 28, 28)
+        } else if app.show_settings {
+            Color32::from_rgb(28, 38, 58)
+        } else if app.show_repos_window {
+            Color32::from_rgb(20, 45, 25)
+        } else if app.show_debug {
+            Color32::from_rgb(40, 30, 10)
+        } else if app.show_git_status_window {
             Color32::from_rgb(20, 45, 25)
         } else if app.show_git_diff_window {
             Color32::from_rgb(58, 28, 28)
@@ -43,14 +52,30 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
             .show(ui, |ui| {
                 ui.set_min_width(left_w);
                 ui.set_max_width(left_w);
-                let header_text = if app.show_git_status_window {
+                let header_text = if app.fmt_error.is_some() {
+                    format!("FORMAT ERROR")
+                } else if app.show_settings {
+                    format!("SETTINGS")
+                } else if app.show_repos_window {
+                    format!("ACTIVE REPOSITORY")
+                } else if app.show_debug {
+                    format!("DEBUG DIAGNOSTICS")
+                } else if app.show_git_status_window {
                     format!("GIT STATUS  ·  Repository")
                 } else if app.show_git_diff_window {
                     format!("GIT DIFF  ·  {}", hunk.filename)
                 } else {
                     format!("SEARCH  ·  {}", hunk.filename)
                 };
-                let header_color = if app.show_git_status_window {
+                let header_color = if app.fmt_error.is_some() {
+                    Color32::from_rgb(235, 120, 120)
+                } else if app.show_settings {
+                    Color32::from_rgb(120, 180, 255)
+                } else if app.show_repos_window {
+                    Color32::from_rgb(120, 230, 160)
+                } else if app.show_debug {
+                    Color32::from_rgb(220, 180, 50)
+                } else if app.show_git_status_window {
                     Color32::from_rgb(120, 230, 160)
                 } else if app.show_git_diff_window {
                     Color32::from_rgb(235, 120, 120)
@@ -92,24 +117,411 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
             });
     });
     ui.add(Separator::default());
-    // Body Layout using absolute side-by-side child UIs
+
     let body_rect = ui.available_rect_before_wrap();
     let mut left_rect = body_rect;
     left_rect.set_width(left_w);
     let mut right_rect = body_rect;
     right_rect.min.x = body_rect.min.x + left_w + 2.0;
     right_rect.set_width(right_w);
+
     let mut left_ui = ui.child_ui(left_rect, Layout::top_down(Align::LEFT), None);
-    if app.show_git_status_window {
+
+    if app.fmt_error.is_some() {
+        render_fmt_error_panel(app, &mut left_ui);
+    } else if app.show_settings {
+        render_settings_panel(app, &mut left_ui);
+    } else if app.show_repos_window {
+        render_repos_panel(app, &mut left_ui);
+    } else if app.show_debug {
+        render_debug_panel(app, &mut left_ui);
+    } else if app.show_git_status_window {
         render_git_status_panel(app, &mut left_ui, row_h, char_w, left_w);
     } else if app.show_git_diff_window {
         render_git_diff_panel(app, &mut left_ui, row_h, char_w, left_w);
     } else {
         render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
     }
+
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
     render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
 }
+
+fn render_fmt_error_panel(app: &mut MergeApp, ui: &mut Ui) {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("⚠ Format Error")
+                .color(pal::ACCENT_BAD)
+                .strong()
+                .font(FontId::monospace(18.0)),
+        );
+        if ui.button("✕ Dismiss").clicked() {
+            app.fmt_error = None;
+        }
+    });
+    ui.separator();
+    ui.add_space(12.0);
+    ui.label(
+        RichText::new("rustfmt failed to format the file. Please fix the syntax errors:")
+            .color(pal::ACCENT_BAD)
+            .size(15.0),
+    );
+    ui.add_space(8.0);
+    ScrollArea::vertical()
+        .id_source("fmt_error_scroll")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            if let Some(err) = &app.fmt_error {
+                ui.label(
+                    RichText::new(err)
+                        .color(pal::TEXT_NORMAL)
+                        .font(FontId::monospace(14.0)),
+                );
+            }
+        });
+}
+
+fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("⚙ Settings")
+                .color(Color32::from_rgb(120, 180, 255))
+                .strong()
+                .monospace(),
+        );
+        if ui.button("✕ Close").clicked() {
+            app.show_settings = false;
+        }
+    });
+    ui.separator();
+    ui.add_space(8.0);
+    ui.heading("Formatter Settings");
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut app.format_on_save, "Format on Save");
+    });
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Command:");
+        ui.add(
+            TextEdit::singleline(&mut app.fmt_command)
+                .desired_width(ui.available_width() - 80.0)
+                .hint_text("rustfmt"),
+        );
+    });
+    ui.add_space(8.0);
+    ui.label(RichText::new("Examples:").color(pal::TEXT_DIM).small());
+    ui.label(
+        RichText::new("rustfmt")
+            .color(pal::TEXT_DIM)
+            .small()
+            .monospace(),
+    );
+    ui.label(
+        RichText::new("rustfmt --edition 2021")
+            .color(pal::TEXT_DIM)
+            .small()
+            .monospace(),
+    );
+    ui.label(
+        RichText::new("cargo fmt --")
+            .color(pal::TEXT_DIM)
+            .small()
+            .monospace(),
+    );
+}
+
+fn render_repos_panel(app: &mut MergeApp, ui: &mut Ui) {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("📂 Active Repository")
+                .color(Color32::from_rgb(120, 230, 160))
+                .strong()
+                .monospace(),
+        );
+        if ui.button("✕ Close").clicked() {
+            app.show_repos_window = false;
+        }
+    });
+    ui.separator();
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.label("Select the repository where file paths should resolve:");
+        if ui.button("🔄 Refresh").clicked() {
+            let (tx, rx) = mpsc::channel();
+            app.repo_receiver = rx;
+            std::thread::spawn(move || {
+                let res = super::daemon::fetch_repos();
+                let _ = tx.send(res);
+            });
+        }
+    });
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(4.0);
+    if app.available_repos.is_empty() {
+        ui.label(
+            RichText::new(if app.daemon_error.is_some() {
+                format!("⚠️ Daemon error: {}", app.daemon_error.as_ref().unwrap())
+            } else {
+                "No repos registered. Use 'cli add-repo' to register one.".to_string()
+            })
+            .color(pal::TEXT_DIM),
+        );
+    } else {
+        ScrollArea::vertical()
+            .id_source("repos_scroll")
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                let repos_clone = app.available_repos.clone();
+                for repo in repos_clone.iter() {
+                    let is_active = app.active_repo_id.as_deref() == Some(repo.id.as_str());
+                    let bg = if is_active { Color32::from_rgb(30, 45, 30) } else { pal::BG_PANEL };
+                    Frame::none()
+                        .fill(bg)
+                        .stroke(Stroke::new(1.0, if is_active { pal::ACCENT_GOOD } else { pal::SEPARATOR }))
+                        .rounding(4.0)
+                        .inner_margin(Margin::symmetric(8.0, 6.0))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(if is_active { "→ " } else { "  " }).color(pal::ACCENT_GOOD).monospace());
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(&repo.id).color(pal::TEXT_NORMAL).strong().monospace());
+                                        if let Some(branch) = &repo.git_branch {
+                                            ui.label(RichText::new(format!("[{}]", branch)).color(pal::TEXT_DIM).small());
+                                        }
+                                        if is_active {
+                                            ui.label(RichText::new("↑ active").color(pal::ACCENT_GOOD).small());
+                                        }
+                                    });
+                                    let files = repo.file_count.unwrap_or(0);
+                                    ui.label(RichText::new(format!("{}  ({} files)", repo.source_path, files)).color(pal::TEXT_DIM).small());
+                                });
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    if is_active {
+                                        if ui.button("✕ Clear").clicked() {
+                                            app.active_repo_id = None;
+                                            super::daemon::clear_active_repo();
+                                            app.set_message(StatusMessage::info("Cleared active repo. Paths must be fully qualified."));
+                                        }
+                                    } else {
+                                        if ui.button("Use").clicked() {
+                                            app.active_repo_id = Some(repo.id.clone());
+                                            app.base_dir = repo.source_path.clone();
+                                            app.start_pwd = repo.source_path.clone();
+                                            app.start_pwd_is_repo = true;
+                                            super::daemon::set_active_repo(&repo.id);
+                                            app.set_message(StatusMessage::success(format!("✅ Active repo: {}. Files will be looked up in repo '{}'", repo.id, repo.id)));
+                                            app.show_repos_window = false;
+                                            app.reparse();
+                                        }
+                                    }
+                                    if ui.button("🔄 Sync").clicked() {
+                                        let id = repo.id.clone();
+                                        let ctx_clone = ui.ctx().clone();
+                                        app.set_message(StatusMessage::info(format!("Syncing {}...", id)));
+                                        std::thread::spawn(move || {
+                                            match super::daemon::sync_repo(&id) {
+                                                Ok(_) => {},
+                                                Err(_) => {},
+                                            }
+                                            ctx_clone.request_repaint();
+                                        });
+                                    }
+                                });
+                            });
+                        });
+                    ui.add_space(4.0);
+                }
+            });
+    }
+}
+
+fn render_debug_panel(app: &mut MergeApp, ui: &mut Ui) {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("🐞 App diagnostics")
+                .color(Color32::from_rgb(220, 180, 50))
+                .strong()
+                .monospace(),
+        );
+        if ui.button("✕ Close").clicked() {
+            app.show_debug = false;
+        }
+    });
+    ui.separator();
+    ui.add_space(8.0);
+
+    ScrollArea::vertical()
+        .id_source("debug_scroll")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            let mut report = String::new();
+            ui.heading("Paths & directory mappings");
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Start PWD:").strong());
+                ui.label(RichText::new(&app.start_pwd).monospace());
+                if app.start_pwd_is_repo {
+                    ui.colored_label(Color32::from_rgb(120, 220, 160), "(Git Repo)");
+                } else {
+                    ui.colored_label(Color32::from_rgb(230, 100, 100), "(Not Git Repo)");
+                }
+            });
+            report.push_str(&format!(
+                "Start PWD: {} (Git Repo: {})\n",
+                app.start_pwd, app.start_pwd_is_repo
+            ));
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Base directory:").strong());
+                ui.label(RichText::new(&app.base_dir).monospace());
+            });
+            report.push_str(&format!("Base Directory: {}\n", app.base_dir));
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Current file path:").strong());
+                ui.label(RichText::new(&app.file_path).monospace());
+            });
+            report.push_str(&format!("Current File Path: {}\n", app.file_path));
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(8.0);
+            ui.heading("Git mapping diagnostics");
+            let repo_root = std::path::Path::new(&app.base_dir);
+            match git2::Repository::discover(repo_root) {
+                Ok(repo) => {
+                    ui.colored_label(Color32::from_rgb(120, 220, 160), "✔ Git repository found");
+                    report.push_str("Git Repo: Found\n");
+                    if let Some(workdir) = repo.workdir() {
+                        ui.horizontal(|ui| {
+                            ui.label("Repo workdir:");
+                            ui.label(RichText::new(workdir.to_string_lossy()).monospace());
+                        });
+                        report.push_str(&format!("Repo workdir: {}\n", workdir.to_string_lossy()));
+                        let file_path = std::path::Path::new(&app.file_path);
+                        let abs_file_path = if file_path.is_absolute() {
+                            file_path.to_path_buf()
+                        } else if let Ok(cwd) = std::env::current_dir() {
+                            cwd.join(file_path)
+                        } else {
+                            file_path.to_path_buf()
+                        };
+                        let abs_workdir = if workdir.is_absolute() {
+                            workdir.to_path_buf()
+                        } else if let Ok(cwd) = std::env::current_dir() {
+                            cwd.join(workdir)
+                        } else {
+                            workdir.to_path_buf()
+                        };
+                        let clean_path = |p: &std::path::Path| -> String {
+                            let s = p.to_string_lossy().replace('\\', "/");
+                            if let Some(stripped) = s.strip_prefix("//?/") {
+                                stripped.to_string()
+                            } else {
+                                s
+                            }
+                        };
+                        let clean_file = clean_path(&abs_file_path);
+                        let clean_work = clean_path(&abs_workdir);
+                        ui.horizontal(|ui| {
+                            ui.label("Normalized file path:");
+                            ui.label(RichText::new(&clean_file).monospace());
+                        });
+                        report.push_str(&format!("Normalized file path: {}\n", clean_file));
+                        ui.horizontal(|ui| {
+                            ui.label("Normalized workdir:");
+                            ui.label(RichText::new(&clean_work).monospace());
+                        });
+                        report.push_str(&format!("Normalized workdir: {}\n", clean_work));
+                        if clean_file.starts_with(&clean_work) {
+                            let rel = &clean_file[clean_work.len()..].trim_start_matches('/');
+                            ui.colored_label(
+                                Color32::from_rgb(120, 220, 160),
+                                format!("✔ Relative path match: {}", rel),
+                            );
+                            report.push_str(&format!("Relative path match: {}\n", rel));
+                        } else {
+                            ui.colored_label(
+                                Color32::from_rgb(230, 100, 100),
+                                "❌ Path mismatch: File is not inside the repo workdir.",
+                            );
+                            report.push_str(
+                                "Relative path match: Mismatch (File not inside repo workdir)\n",
+                            );
+                        }
+                    } else {
+                        ui.colored_label(
+                            Color32::from_rgb(230, 100, 100),
+                            "❌ Git repo missing working directory",
+                        );
+                        report.push_str("Git Repo Workdir: Missing\n");
+                    }
+                }
+                Err(e) => {
+                    ui.colored_label(
+                        Color32::from_rgb(230, 100, 100),
+                        format!("❌ Git lookup error: {}", e),
+                    );
+                    report.push_str(&format!("Git lookup error: {}\n", e));
+                }
+            }
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(8.0);
+            ui.heading("Buffers & state summary");
+            ui.label(format!("Total patches in file: {}", app.hunks.len()));
+            ui.label(format!("Current hunk index: {}", app.current_hunk));
+            ui.label(format!("Applied hunks indices: {:?}", app.applied_hunks));
+            ui.label(format!("File lines: {}", app.file_lines.len()));
+            ui.label(format!("Git status indexes: {}", app.git_statuses.len()));
+            report.push_str(&format!("Total patches: {}\n", app.hunks.len()));
+            report.push_str(&format!("Current hunk index: {}\n", app.current_hunk));
+            report.push_str(&format!("Applied hunk indices: {:?}\n", app.applied_hunks));
+            report.push_str(&format!("File lines: {}\n", app.file_lines.len()));
+            report.push_str(&format!("Git status indexes: {}\n", app.git_statuses.len()));
+            let (mut unchanged, mut added, mut modified, mut deleted) = (0, 0, 0, 0);
+            for status in &app.git_statuses {
+                match status {
+                    super::git_ops::GitStatus::Unchanged => unchanged += 1,
+                    super::git_ops::GitStatus::Added => added += 1,
+                    super::git_ops::GitStatus::Modified => modified += 1,
+                    super::git_ops::GitStatus::Deleted => deleted += 1,
+                }
+            }
+            ui.horizontal(|ui| {
+                ui.label("Gutter distribution:");
+                ui.colored_label(
+                    Color32::from_gray(160),
+                    format!("Unchanged: {} ", unchanged),
+                );
+                ui.colored_label(
+                    Color32::from_rgb(120, 220, 160),
+                    format!("Added: {} ", added),
+                );
+                ui.colored_label(
+                    Color32::from_rgb(220, 200, 100),
+                    format!("Modified: {} ", modified),
+                );
+                ui.colored_label(
+                    Color32::from_rgb(235, 120, 120),
+                    format!("Deleted: {}", deleted),
+                );
+            });
+            report.push_str(&format!(
+                "Gutter: Unchanged: {}, Added: {}, Modified: {}, Deleted: {}\n",
+                unchanged, added, modified, deleted
+            ));
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                if ui.button("📋 Copy Diagnostics").clicked() {
+                    ui.ctx().copy_text(report);
+                }
+                if ui.button("Force update git status").clicked() {
+                    app.update_git_statuses();
+                }
+            });
+        });
+}
+
 fn render_search_panel(
     app: &mut MergeApp,
     ui: &mut Ui,
@@ -123,7 +535,7 @@ fn render_search_panel(
     let mut apply_clicked_id: Option<char> = None;
     let mut apply_clicked = false;
     let mut apply_clicked_line: Option<usize> = None;
-    // Clipboard and Filename Adjustments Header
+
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         if ui
@@ -192,7 +604,7 @@ fn render_search_panel(
             {
                 if let Ok(content) = std::fs::read_to_string(&orig_path) {
                     app.patch_text = content;
-                    app.reparse(); // now allowed – no borrow into app
+                    app.reparse();
                     app.set_message(StatusMessage::success(format!(
                         "Reloaded patch from disk: {}",
                         orig_path
@@ -207,7 +619,7 @@ fn render_search_panel(
         }
     });
     ui.add_space(4.0);
-    // In render_search_panel, replace the manual paste block with:
+
     if app.show_manual_paste {
         ui.group(|ui| {
             ui.label(
@@ -215,7 +627,6 @@ fn render_search_panel(
                     .small()
                     .color(pal::TEXT_DIM),
             );
-            // Use ScrollArea with max_height instead of add_sized
             ScrollArea::vertical()
                 .id_source("manual_paste_scroll")
                 .max_height(row_h * 5.0)
@@ -273,6 +684,7 @@ fn render_search_panel(
         });
         ui.add_space(4.0);
     }
+
     let mut filename_changed = false;
     if let Some(hunk) = app.hunks.get_mut(app.current_hunk) {
         ui.horizontal(|ui| {
@@ -297,9 +709,11 @@ fn render_search_panel(
     }
     ui.separator();
     ui.add_space(2.0);
+
     if filename_changed {
         app.load_hunk();
     }
+
     ScrollArea::vertical()
         .id_source("search_scroll")
         .auto_shrink([false, false])
@@ -314,6 +728,7 @@ fn render_search_panel(
                 .current_hunk()
                 .map(|h| h.search.is_empty())
                 .unwrap_or(false);
+
             let (banner_bg, banner_text) = if is_applied {
                 (
                     Color32::from_rgb(30, 40, 30),
@@ -335,6 +750,7 @@ fn render_search_panel(
                     ),
                 )
             };
+
             let desired = Vec2::new(ui.available_width(), row_h + 2.0);
             let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
             ui.painter().rect_filled(rect, 2.0, banner_bg);
@@ -345,16 +761,20 @@ fn render_search_panel(
                 FontId::monospace(11.0),
                 if is_applied { pal::TEXT_DIM } else { banner_fg },
             );
+
             ui.add_space(2.0);
+
             let search_file_map: Vec<Option<usize>> = app
                 .search_rows
                 .iter()
                 .filter(|r| matches!(r.kind, RowKind::Equal | RowKind::Delete))
                 .map(|r| r.file_idx)
                 .collect();
+
             let pointer_down = ui.input(|i| i.pointer.primary_down());
             let pointer_pressed = ui.input(|i| i.pointer.primary_pressed());
             let pointer_dragging = ui.input(|i| i.pointer.is_decidedly_dragging());
+
             for (line_idx, line) in hunk.search.iter().enumerate() {
                 let file_idx = search_file_map.get(line_idx).copied().flatten();
                 let is_matched = file_idx.is_some();
@@ -383,7 +803,6 @@ fn render_search_panel(
                         }
                     }
                 }
-                // Double-click handler to search for the line text in the right-side file panel
                 if resp.double_clicked() {
                     let q = line.trim().to_string();
                     app.file_search_query = q.clone();
@@ -458,12 +877,12 @@ fn render_search_panel(
                     },
                 );
             }
-            // Always render the REPLACE/DELETE section so the apply button is available
             ui.add_space(4.0);
             let (sep_rect, _) =
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
             ui.painter().rect_filled(sep_rect, 0.0, pal::SEPARATOR);
             ui.add_space(2.0);
+
             let (hdr_rect, _) =
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::hover());
             let (hdr_bg, hdr_text, hdr_color) = if hunk.replace.is_empty() {
@@ -479,6 +898,7 @@ fn render_search_panel(
                 FontId::monospace(10.0),
                 hdr_color,
             );
+
             let btn_size = Vec2::new(30.0, row_h - 4.0);
             let btn_line_size = Vec2::new(55.0, row_h - 4.0);
             let mut x_offset = 4.0;
@@ -525,6 +945,7 @@ fn render_search_panel(
                     }
                 }
             });
+
             x_offset += btn_size.x + 4.0;
             if let Some(cur_ln) = app.cursor_line {
                 let btn_line_rect = Rect::from_min_size(
@@ -545,7 +966,7 @@ fn render_search_panel(
                 if ui.put(btn_line_rect, btn_line).clicked() {
                     apply_clicked_line = Some(cur_ln);
                 }
-                // Only render the replace lines if they exist
+
                 for (line_idx, line) in hunk.replace.iter().enumerate() {
                     let desired = Vec2::new(ui.available_width(), row_h);
                     let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
@@ -608,9 +1029,10 @@ fn render_search_panel(
                             Color32::from_rgb(155, 235, 165)
                         },
                     );
-                } // end of for loop over hunk.replace
-            } // end of else (render replace lines)
+                }
+            }
         });
+
     if let Some(sel) = set_selection {
         app.left_selection = Some(sel);
     }
@@ -624,6 +1046,7 @@ fn render_search_panel(
         app.apply_merge(Some(ln), None);
     }
 }
+
 fn render_file_panel(
     app: &mut MergeApp,
     ui: &mut Ui,
@@ -666,6 +1089,7 @@ fn render_file_panel(
     } else {
         file_anchors.values().next().unwrap().line + 1
     };
+
     let mut unique_files = Vec::new();
     for h in &app.hunks {
         if !unique_files.contains(&h.filename) {
@@ -680,6 +1104,7 @@ fn render_file_panel(
         .iter()
         .position(|f| *f == current_file_name)
         .unwrap_or(0);
+
     Frame::none()
         .fill(Color32::from_rgb(25, 32, 42))
         .inner_margin(Margin::symmetric(6.0, 4.0))
@@ -849,6 +1274,7 @@ fn render_file_panel(
             });
         });
     ui.add(Separator::default());
+
     let len = app.file_lines.len();
     if len > 0 {
         if app.is_searching {
@@ -875,19 +1301,16 @@ fn render_file_panel(
                     }
                 }
             });
-        // In src/app/split_view.rs (inside render_file_panel)
         } else if !ui.ctx().wants_keyboard_input() {
             let mut cursor_changed = false;
             let mut new_text = String::new();
             ui.input(|i| {
-                // Intercept all input if we are waiting for a mark key
                 if app.mark_pending == Some(MarkPending::WaitingKey) {
                     for event in i.events.clone() {
                         if let Event::Text(txt) = event {
                             if txt.len() == 1 {
                                 let c = txt.chars().next().unwrap();
                                 if c == 'a' || c == 'A' {
-                                    // Silently ignore ma and mA
                                 } else if c.is_ascii_alphabetic() {
                                     if let Some(cur) = app.cursor_line {
                                         app.set_mark(c, cur);
@@ -899,7 +1322,6 @@ fn render_file_panel(
                     }
                     return;
                 }
-
                 let cur = app.cursor_line.unwrap_or(0);
                 if i.key_pressed(Key::Equals) && i.modifiers.alt {
                     go_next_file = true;
@@ -1161,7 +1583,7 @@ fn render_file_panel(
                     }
                     if clear_buffer {
                         app.vim_buffer.clear();
-                        app.d_pending = false; // Reset pending state
+                        app.d_pending = false;
                     }
                 }
             }
@@ -1352,6 +1774,7 @@ fn render_file_panel(
             app.scroll_to_match = true;
         }
     }
+
     let file_lines = app.file_lines.clone();
     let merged_range = app.merged_range;
     let auto_start = mr.file_start;
@@ -1372,6 +1795,7 @@ fn render_file_panel(
     } else {
         None
     };
+
     let mut did_scroll = false;
     let mut set_cursor: Option<usize> = None;
     let mut set_del_start: Option<usize> = None;
@@ -1382,6 +1806,7 @@ fn render_file_panel(
     let mut set_anchor_a_end: Option<usize> = None;
     let mut adjust_start_by: i32 = 0;
     let mut adjust_end_by: i32 = 0;
+
     let delete_file_indices: HashSet<usize> = app
         .search_rows
         .iter()
@@ -1394,6 +1819,7 @@ fn render_file_panel(
         .filter(|r| matches!(r.kind, RowKind::Equal))
         .filter_map(|r| r.file_idx)
         .collect();
+
     ScrollArea::both()
         .id_source("file_scroll")
         .auto_shrink([false, false])
@@ -1442,11 +1868,10 @@ fn render_file_panel(
                 let is_anchor_start = anchor_here.is_some();
                 let is_anchor_end = anchor_end_here.is_some();
                 let is_anchor_row = is_anchor_start || is_anchor_end;
-                // Unified rendering logic for all rows
                 let base_bg = if in_visual_selection {
-                    Color32::from_rgb(20, 50, 25) // Dark green background
+                    Color32::from_rgb(20, 50, 25)
                 } else if is_anchor_row {
-                    Color32::from_rgba_premultiplied(45, 38, 15, 60) // Transparent yellow tint
+                    Color32::from_rgba_premultiplied(45, 38, 15, 60)
                 } else if in_block_delete {
                     pal::BG_DELETE
                 } else if in_merged {
@@ -1485,7 +1910,7 @@ fn render_file_panel(
                     Vec2::new(3.0, rect.height()),
                 );
                 let bar_color = if in_visual_selection {
-                    Color32::from_rgb(60, 120, 70) // Matching green bar
+                    Color32::from_rgb(60, 120, 70)
                 } else if is_anchor_row {
                     pal::BAR_ANCHOR
                 } else if in_block_delete {
@@ -1551,7 +1976,6 @@ fn render_file_panel(
                         glyph_color,
                     );
                 }
-                // Draw git hover diff for non-anchor rows
                 let text_color = if is_anchor_row {
                     pal::TEXT_ANCHOR
                 } else if in_block_delete {
@@ -1587,7 +2011,6 @@ fn render_file_panel(
                     FontId::monospace(11.0),
                     text_color,
                 );
-                // Right-aligned control boxes
                 if is_anchor_start {
                     let anchor = anchor_here.unwrap();
                     let is_range_anchor = anchor.id == 'a' && anchor.end_line.is_some();
@@ -1926,6 +2349,7 @@ fn render_file_panel(
             }
             ui.add_space(row_h * 3.0);
         });
+
     if scroll_to_match && !did_scroll {
         did_scroll = true;
     }
@@ -1984,7 +2408,6 @@ fn render_file_panel(
                 },
             );
         }
-        // Use a block to limit the mutable borrow and return the message
         let msg = {
             if let Some(anchor) = app.file_anchors.get_mut(&'a') {
                 if adjust_start_by != 0 {

@@ -211,12 +211,14 @@ impl MergeApp {
                 )));
             }
         }
+
         if !loaded_patch {
             app.patch_text = DEFAULT_PATCH.to_string();
             app.set_message(StatusMessage::info(
                 "No patch file provided — using embedded demo patch. Press ? for help.",
             ));
         }
+
         app.reparse();
         app
     }
@@ -339,18 +341,16 @@ impl MergeApp {
         self.mark_pending = None;
         self.scroll_to_match = true;
     }
+
     pub fn resolve_apply_range(&self) -> Option<(usize, usize)> {
         if let Some(hunk) = self.current_hunk() {
             if hunk.search.is_empty() {
                 return Some((self.file_lines.len(), self.file_lines.len()));
             }
         }
-
-        // If 'a' mark is set, use it as the explicit start
         if let Some(a) = self.file_anchors.get(&'a') {
             let start = a.line;
             let end = if let Some(b) = self.file_anchors.get(&'b') {
-                // If 'b' is also set, use the max of a, b, and their ends
                 let mut e = a.line.max(b.line);
                 if let Some(a_end) = a.end_line {
                     e = e.max(a_end);
@@ -360,7 +360,6 @@ impl MergeApp {
                 }
                 e
             } else {
-                // If only 'a' is set, use its end_line, or default to the auto-match end
                 a.end_line.unwrap_or(
                     self.match_result
                         .as_ref()
@@ -368,9 +367,8 @@ impl MergeApp {
                         .unwrap_or(start),
                 )
             };
-            return Some((start, end + 1)); // +1 because file_end is exclusive
+            return Some((start, end + 1));
         }
-
         if let Some(mr) = self.match_result.as_ref() {
             println!(
                 "[DEBUG resolve_apply_range] No anchors. Using match_result: ({}, {})",
@@ -378,7 +376,6 @@ impl MergeApp {
             );
             return Some((mr.file_start, mr.file_end));
         }
-
         println!("[DEBUG resolve_apply_range] No match and no anchors. Returning None.");
         None
     }
@@ -658,6 +655,7 @@ impl eframe::App for MergeApp {
                 }
             }
         }
+
         if ctx.input(|i| i.key_pressed(Key::F4)) {
             self.show_git_diff_window = !self.show_git_diff_window;
         }
@@ -667,6 +665,7 @@ impl eframe::App for MergeApp {
         if ctx.input(|i| i.key_pressed(Key::F1)) {
             self.show_git_status_window = !self.show_git_status_window;
         }
+
         if !ctx.wants_keyboard_input() || self.is_searching {
             ctx.input(|i| {
                 if i.key_pressed(Key::Escape) {
@@ -707,6 +706,7 @@ impl eframe::App for MergeApp {
                 }
             });
         }
+
         if self.is_searching {
             TopBottomPanel::bottom("vim_search_prompt")
                 .frame(
@@ -743,6 +743,7 @@ impl eframe::App for MergeApp {
                     });
                 });
         }
+
         if self.mark_pending.is_some() {
             TopBottomPanel::bottom("mark_hud")
                 .frame(
@@ -781,6 +782,7 @@ impl eframe::App for MergeApp {
                     });
                 });
         }
+
         if self.pending_sync.is_some() {
             TopBottomPanel::bottom("sync_hud")
                 .frame(
@@ -814,6 +816,7 @@ impl eframe::App for MergeApp {
                     });
                 });
         }
+
         if self.del_start.is_some() || self.del_end.is_some() {
             TopBottomPanel::bottom("block_delete_hud")
                 .frame(
@@ -865,8 +868,10 @@ impl eframe::App for MergeApp {
                     });
                 });
         }
+
         super::toolbar::render_toolbar(self, ctx);
         super::status_bar::render_status_bar(self, ctx);
+
         CentralPanel::default().show(ctx, |ui| {
             if self.hunks.is_empty() {
                 ui.vertical_centered(|ui| {
@@ -884,366 +889,9 @@ impl eframe::App for MergeApp {
             }
             super::split_view::render_split_view(self, ui);
         });
-        if let Some(err) = &self.fmt_error {
-            let mut fmt_error_open = true;
-            Window::new("⚠ Format Error")
-                .open(&mut fmt_error_open)
-                .collapsible(false)
-                .resizable(true)
-                .default_size(Vec2::new(500.0, 300.0))
-                .show(ctx, |ui| {
-                    ui.label(
-                        RichText::new(
-                            "rustfmt failed to format the file. Please fix the syntax errors:",
-                        )
-                        .color(pal::ACCENT_BAD),
-                    );
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-                    ScrollArea::vertical().show(ui, |ui| {
-                        ui.label(
-                            RichText::new(err)
-                                .color(pal::TEXT_NORMAL)
-                                .monospace()
-                                .small(),
-                        );
-                    });
-                });
-            if !fmt_error_open {
-                self.fmt_error = None;
-            }
-        }
+
         if self.show_help {
             super::help::render_help_overlay(self, ctx);
-        }
-        if self.show_settings {
-            let mut show_settings = self.show_settings;
-            Window::new("⚙ Settings")
-                .open(&mut show_settings)
-                .collapsible(false)
-                .resizable(false)
-                .default_size(Vec2::new(400.0, 180.0))
-                .show(ctx, |ui| {
-                    ui.heading("Formatter Settings");
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.format_on_save, "Format on Save");
-                    });
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label("Command:");
-                        ui.add(
-                            TextEdit::singleline(&mut self.fmt_command)
-                                .desired_width(250.0)
-                                .hint_text("rustfmt"),
-                        );
-                    });
-                    ui.add_space(8.0);
-                    ui.label(RichText::new("Examples:").color(pal::TEXT_DIM).small());
-                    ui.label(
-                        RichText::new("rustfmt")
-                            .color(pal::TEXT_DIM)
-                            .small()
-                            .monospace(),
-                    );
-                    ui.label(
-                        RichText::new("rustfmt --edition 2021")
-                            .color(pal::TEXT_DIM)
-                            .small()
-                            .monospace(),
-                    );
-                    ui.label(
-                        RichText::new("cargo fmt --")
-                            .color(pal::TEXT_DIM)
-                            .small()
-                            .monospace(),
-                    );
-                });
-            self.show_settings = show_settings;
-        }
-        if self.show_repos_window {
-            let mut show_repos = self.show_repos_window;
-            Window::new("📂 Active Repository")
-                .open(&mut show_repos)
-                .collapsible(false)
-                .resizable(false)
-                .default_size(Vec2::new(450.0, 300.0))
-                .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new("Select the repository where file paths should resolve:")
-                                .color(pal::TEXT_NORMAL),
-                        );
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.button("🔄 Refresh").clicked() {
-                                let (tx, rx) = mpsc::channel();
-                                self.repo_receiver = rx;
-                                std::thread::spawn(move || {
-                                    let res = daemon::fetch_repos();
-                                    let _ = tx.send(res);
-                                });
-                            }
-                        });
-                    });
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-
-                    if self.available_repos.is_empty() {
-                        ui.label(RichText::new(if self.daemon_error.is_some() {
-                            format!("⚠️ Daemon error: {}", self.daemon_error.as_ref().unwrap())
-                        } else {
-                            "No repos registered. Use 'cli add-repo' to register one.".to_string()
-                        }).color(pal::TEXT_DIM));
-                    } else {
-                        ScrollArea::vertical().show(ui, |ui| {
-                            let repos_clone = self.available_repos.clone();
-                            for repo in repos_clone.iter() {
-                                let is_active = self.active_repo_id.as_deref() == Some(repo.id.as_str());
-                                let bg = if is_active {
-                                    Color32::from_rgb(30, 45, 30)
-                                } else {
-                                    pal::BG_PANEL
-                                };
-                                Frame::none()
-                                    .fill(bg)
-                                    .stroke(Stroke::new(
-                                        1.0,
-                                        if is_active { pal::ACCENT_GOOD } else { pal::SEPARATOR },
-                                    ))
-                                    .rounding(4.0)
-                                    .inner_margin(Margin::symmetric(8.0, 6.0))
-                                    .show(ui, |ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.label(
-                                                RichText::new(if is_active { "→ " } else { "  " })
-                                                    .color(pal::ACCENT_GOOD)
-                                                    .monospace(),
-                                            );
-                                            ui.vertical(|ui| {
-                                                ui.horizontal(|ui| {
-                                                    ui.label(
-                                                        RichText::new(&repo.id)
-                                                            .color(pal::TEXT_NORMAL)
-                                                            .strong()
-                                                            .monospace(),
-                                                    );
-                                                    if let Some(branch) = &repo.git_branch {
-                                                        ui.label(
-                                                            RichText::new(format!("[{}]", branch))
-                                                                .color(pal::TEXT_DIM)
-                                                                .small(),
-                                                        );
-                                                    }
-                                                    if is_active {
-                                                        ui.label(
-                                                            RichText::new("↑ active")
-                                                                .color(pal::ACCENT_GOOD)
-                                                                .small(),
-                                                        );
-                                                    }
-                                                });
-                                                let files = repo.file_count.unwrap_or(0);
-                                                ui.label(
-                                                    RichText::new(format!("{}  ({} files)", repo.source_path, files))
-                                                        .color(pal::TEXT_DIM)
-                                                        .small(),
-                                                );
-                                            });
-                                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                                if is_active {
-                                                    if ui.button("✕ Clear").clicked() {
-                                                        self.active_repo_id = None;
-                                                        daemon::clear_active_repo();
-                                                        self.set_message(StatusMessage::info("Cleared active repo. Paths must be fully qualified."));
-                                                    }
-                                                } else {
-                                                    if ui.button("Use").clicked() {
-                                                        self.active_repo_id = Some(repo.id.clone());
-                                                        self.base_dir = repo.source_path.clone();
-                                                        self.start_pwd = repo.source_path.clone();
-                                                        self.start_pwd_is_repo = true;
-                                                        daemon::set_active_repo(&repo.id);
-                                                        self.set_message(StatusMessage::success(format!(
-                                                            "✅ Active repo: {}. Files will be looked up in repo '{}'",
-                                                            repo.id, repo.id
-                                                        )));
-                                                        self.show_repos_window = false;
-                                                        self.reparse();
-                                                    }
-                                                }
-                                                if ui.button("🔄 Sync").clicked() {
-                                                    let id = repo.id.clone();
-                                                    let ctx_clone = ctx.clone();
-                                                    self.set_message(StatusMessage::info(format!("Syncing {}...", id)));
-                                                    std::thread::spawn(move || {
-                                                        match daemon::sync_repo(&id) {
-                                                            Ok(_) => {},
-                                                            Err(_) => {},
-                                                        }
-                                                        ctx_clone.request_repaint();
-                                                    });
-                                                }
-                                            });
-                                        });
-                                    });
-                                ui.add_space(4.0);
-                            }
-                        });
-                    }
-                });
-            self.show_repos_window = show_repos;
-        }
-        if self.show_debug {
-            let mut show_debug = self.show_debug;
-            Window::new("🐞 App diagnostics")
-                .open(&mut show_debug)
-                .default_size(Vec2::new(550.0, 420.0))
-                .show(ctx, |ui| {
-                    ScrollArea::vertical().show(ui, |ui| {
-                        let mut report = String::new();
-                        ui.heading("Paths & directory mappings");
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Start PWD:").strong());
-                            ui.label(RichText::new(&self.start_pwd).monospace());
-                            if self.start_pwd_is_repo {
-                                ui.colored_label(Color32::from_rgb(120, 220, 160), "(Git Repo)");
-                            } else {
-                                ui.colored_label(Color32::from_rgb(230, 100, 100), "(Not Git Repo)");
-                            }
-                        });
-                        report.push_str(&format!("Start PWD: {} (Git Repo: {})\n", self.start_pwd, self.start_pwd_is_repo));
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Base directory:").strong());
-                            ui.label(RichText::new(&self.base_dir).monospace());
-                        });
-                        report.push_str(&format!("Base Directory: {}\n", self.base_dir));
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Current file path:").strong());
-                            ui.label(RichText::new(&self.file_path).monospace());
-                        });
-                        report.push_str(&format!("Current File Path: {}\n", self.file_path));
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.add_space(8.0);
-                        ui.heading("Git mapping diagnostics");
-                        let repo_root = std::path::Path::new(&self.base_dir);
-                        match git2::Repository::discover(repo_root) {
-                            Ok(repo) => {
-                                ui.colored_label(Color32::from_rgb(120, 220, 160), "✔ Git repository found");
-                                report.push_str("Git Repo: Found\n");
-                                if let Some(workdir) = repo.workdir() {
-                                    ui.horizontal(|ui| {
-                                        ui.label("Repo workdir:");
-                                        ui.label(RichText::new(workdir.to_string_lossy()).monospace());
-                                    });
-                                    report.push_str(&format!("Repo workdir: {}\n", workdir.to_string_lossy()));
-                                    let file_path = std::path::Path::new(&self.file_path);
-                                    let abs_file_path = if file_path.is_absolute() {
-                                        file_path.to_path_buf()
-                                    } else if let Ok(cwd) = std::env::current_dir() {
-                                        cwd.join(file_path)
-                                    } else {
-                                        file_path.to_path_buf()
-                                    };
-                                    let abs_workdir = if workdir.is_absolute() {
-                                        workdir.to_path_buf()
-                                    } else if let Ok(cwd) = std::env::current_dir() {
-                                        cwd.join(workdir)
-                                    } else {
-                                        workdir.to_path_buf()
-                                    };
-                                    let clean_path = |p: &std::path::Path| -> String {
-                                        let s = p.to_string_lossy().replace('\\', "/");
-                                        if let Some(stripped) = s.strip_prefix("//?/") {
-                                            stripped.to_string()
-                                        } else {
-                                            s
-                                        }
-                                    };
-                                    let clean_file = clean_path(&abs_file_path);
-                                    let clean_work = clean_path(&abs_workdir);
-                                    ui.horizontal(|ui| {
-                                        ui.label("Normalized file path:");
-                                        ui.label(RichText::new(&clean_file).monospace());
-                                    });
-                                    report.push_str(&format!("Normalized file path: {}\n", clean_file));
-                                    ui.horizontal(|ui| {
-                                        ui.label("Normalized workdir:");
-                                        ui.label(RichText::new(&clean_work).monospace());
-                                    });
-                                    report.push_str(&format!("Normalized workdir: {}\n", clean_work));
-                                    if clean_file.starts_with(&clean_work) {
-                                        let rel = &clean_file[clean_work.len()..].trim_start_matches('/');
-                                        ui.colored_label(
-                                            Color32::from_rgb(120, 220, 160),
-                                            format!("✔ Relative path match: {}", rel)
-                                        );
-                                        report.push_str(&format!("Relative path match: {}\n", rel));
-                                    } else {
-                                        ui.colored_label(
-                                            Color32::from_rgb(230, 100, 100),
-                                            "❌ Path mismatch: File is not inside the repo workdir."
-                                        );
-                                        report.push_str("Relative path match: Mismatch (File not inside repo workdir)\n");
-                                    }
-                                } else {
-                                    ui.colored_label(Color32::from_rgb(230, 100, 100), "❌ Git repo missing working directory");
-                                    report.push_str("Git Repo Workdir: Missing\n");
-                                }
-                            }
-                            Err(e) => {
-                                ui.colored_label(
-                                    Color32::from_rgb(230, 100, 100),
-                                    format!("❌ Git lookup error: {}", e)
-                                );
-                                report.push_str(&format!("Git lookup error: {}\n", e));
-                            }
-                        }
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.add_space(8.0);
-                        ui.heading("Buffers & state summary");
-                        ui.label(format!("Total patches in file: {}", self.hunks.len()));
-                        ui.label(format!("Current hunk index: {}", self.current_hunk));
-                        ui.label(format!("Applied hunks indices: {:?}", self.applied_hunks));
-                        ui.label(format!("File lines: {}", self.file_lines.len()));
-                        ui.label(format!("Git status indexes: {}", self.git_statuses.len()));
-                        report.push_str(&format!("Total patches: {}\n", self.hunks.len()));
-                        report.push_str(&format!("Current hunk index: {}\n", self.current_hunk));
-                        report.push_str(&format!("Applied hunk indices: {:?}\n", self.applied_hunks));
-                        report.push_str(&format!("File lines: {}\n", self.file_lines.len()));
-                        report.push_str(&format!("Git status indexes: {}\n", self.git_statuses.len()));
-                        let (mut unchanged, mut added, mut modified, mut deleted) = (0, 0, 0, 0);
-                        for status in &self.git_statuses {
-                            match status {
-                                GitStatus::Unchanged => unchanged += 1,
-                                GitStatus::Added => added += 1,
-                                GitStatus::Modified => modified += 1,
-                                GitStatus::Deleted => deleted += 1,
-                            }
-                        }
-                        ui.horizontal(|ui| {
-                            ui.label("Gutter distribution:");
-                            ui.colored_label(Color32::from_gray(160), format!("Unchanged: {} ", unchanged));
-                            ui.colored_label(Color32::from_rgb(120, 220, 160), format!("Added: {} ", added));
-                            ui.colored_label(Color32::from_rgb(220, 200, 100), format!("Modified: {} ", modified));
-                            ui.colored_label(Color32::from_rgb(235, 120, 120), format!("Deleted: {}", deleted));
-                        });
-                        report.push_str(&format!("Gutter: Unchanged: {}, Added: {}, Modified: {}, Deleted: {}\n", unchanged, added, modified, deleted));
-                        ui.add_space(12.0);
-                        ui.horizontal(|ui| {
-                            if ui.button("📋 Copy Diagnostics").clicked() {
-                                ui.ctx().copy_text(report);
-                            }
-                            if ui.button("Force update git status").clicked() {
-                                self.update_git_statuses();
-                            }
-                        });
-                    });
-                });
-            self.show_debug = show_debug;
         }
     }
 }
