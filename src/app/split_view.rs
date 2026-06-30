@@ -1463,6 +1463,21 @@ fn render_file_panel(
                         } else if txt == "+" || txt == "-" {
                             let delta: i32 = if txt == "+" { 1 } else { -1 };
                             if let Some(cur) = app.cursor_line {
+                                // If no anchors exist, treat the auto match boundaries as anchors
+                                if app.file_anchors.is_empty() && mr.score > 0.0 {
+                                    if cur == mr.file_start || cur == mr.file_end.saturating_sub(1)
+                                    {
+                                        app.file_anchors.insert(
+                                            'a',
+                                            FileAnchor {
+                                                id: 'a',
+                                                line: mr.file_start,
+                                                end_line: Some(mr.file_end.saturating_sub(1)),
+                                            },
+                                        );
+                                    }
+                                }
+
                                 let on_end = app
                                     .file_anchors
                                     .values()
@@ -1473,6 +1488,7 @@ fn render_file_panel(
                                     .values()
                                     .find(|a| a.line == cur)
                                     .map(|a| a.id);
+
                                 if let Some(id) = on_end {
                                     if let Some(anchor) = app.file_anchors.get_mut(&id) {
                                         let current_end = anchor.end_line.unwrap_or(anchor.line);
@@ -2477,7 +2493,7 @@ fn render_file_panel(
                 Some(StatusMessage::info(format!(
                     "⚓ Adjusted ma range: lines {}-{}",
                     anchor.file_start() + 1,
-                    anchor.file_end()
+                    anchor.file_end() + 1
                 )))
             } else {
                 None

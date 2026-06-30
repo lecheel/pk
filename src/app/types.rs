@@ -92,7 +92,7 @@ impl FileAnchor {
         self.line
     }
     pub fn file_end(&self) -> usize {
-        self.line
+        self.end_line.unwrap_or(self.line)
     }
     pub fn label(&self) -> String {
         format!("m{}:{}", self.id, self.line + 1)
