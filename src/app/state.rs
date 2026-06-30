@@ -283,6 +283,28 @@ impl MergeApp {
         self.set_mark('b', line);
     }
 
+    pub fn set_mark_a_end(&mut self, line: usize) {
+        if let Some(anchor) = self.file_anchors.get_mut(&'a') {
+            anchor.end_line = Some(line);
+            self.set_message(StatusMessage::info(format!(
+                "⚓ mA range end set at line {}",
+                line + 1
+            )));
+        } else {
+            self.file_anchors.insert(
+                'a',
+                FileAnchor {
+                    id: 'a',
+                    line,
+                    end_line: Some(line),
+                },
+            );
+            self.set_message(StatusMessage::warning(
+                "⚠ Set ma start first, but created mA end anyway",
+            ));
+        }
+        self.scroll_to_match = true;
+    }
     pub fn clear_marks(&mut self) {
         self.file_anchors.clear();
         self.mark_pending = None;
