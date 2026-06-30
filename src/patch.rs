@@ -7,6 +7,12 @@ pub struct PatchHunk {
 
 pub fn parse_patches(content: &str) -> Vec<PatchHunk> {
     let trimmed = content.trim();
+
+    // Check for skeleton mode format first
+    if trimmed.contains("// === SKELETON MODE") || trimmed.contains("//--+ file:///") {
+        return parse_skeleton_patches(content);
+    }
+
     if trimmed.contains("<patch>") || trimmed.contains("<<<<<<< SEARCH") {
         return parse_aider_patches(content);
     }
@@ -17,6 +23,55 @@ pub fn parse_patches(content: &str) -> Vec<PatchHunk> {
         }
     }
     parse_raw_paste(content)
+}
+
+fn parse_skeleton_patches(content: &str) -> Vec<PatchHunk> {
+    let mut hunks = Vec::new();
+    let mut current_filename = String::new();
+    let mut current_lines: Vec<String> = Vec::new();
+
+    for line in content.lines() {
+        // Check for skeleton file header: //--+ file:///src/main.rs [27 LOC | 1 bodies]
+        if line.starts_with("//--+ file:///") {
+            // Save previous hunk if exists
+            if !current_filename.is_empty() {
+                hunks.push(PatchHunk {
+                    filename: current_filename.clone(),
+                    search: current_lines.clone(),
+                    replace: Vec::new(),
+                });
+                current_lines.clear();
+            }
+
+            // Extract filename from file:/// URL
+            if let Some(rest) = line.strip_prefix("//--+ file:///") {
+                // Remove metadata like [27 LOC | 1 bodies]
+                let filename = if let Some(bracket_pos) = rest.find('[') {
+                    rest[..bracket_pos].trim()
+                } else {
+                    rest.trim()
+                };
+                current_filename = filename.to_string();
+            }
+        } else if line.trim() == "// === SKELETON MODE (COMPRESSED) ===" {
+            // Skip skeleton mode marker
+            continue;
+        } else if !current_filename.is_empty() {
+            // Collect file content
+            current_lines.push(line.to_string());
+        }
+    }
+
+    // Don't forget the last file
+    if !current_filename.is_empty() {
+        hunks.push(PatchHunk {
+            filename: current_filename,
+            search: current_lines,
+            replace: Vec::new(),
+        });
+    }
+
+    hunks
 }
 
 fn parse_aider_patches(content: &str) -> Vec<PatchHunk> {
@@ -43,8 +98,6 @@ fn parse_aider_patches(content: &str) -> Vec<PatchHunk> {
             if state == 0 {
                 let trimmed = line.trim();
                 let mut found_fn = None;
-
-                // Extract filename enclosed in backticks if available
                 if let Some(start_idx) = trimmed.find('`') {
                     if let Some(end_idx) = trimmed[start_idx + 1..].find('`') {
                         let potential = trimmed[start_idx + 1..start_idx + 1 + end_idx].trim();
@@ -57,7 +110,6 @@ fn parse_aider_patches(content: &str) -> Vec<PatchHunk> {
                         }
                     }
                 }
-
                 if found_fn.is_none() {
                     if let Some(rest) = trimmed.strip_prefix("// ") {
                         if !rest.is_empty()
@@ -87,11 +139,9 @@ fn parse_aider_patches(content: &str) -> Vec<PatchHunk> {
                             || trimmed.ends_with(".toml")
                             || trimmed.ends_with(".md"))
                     {
-                        // Check if the standalone line looks like a valid path/filename
                         found_fn = Some(trimmed.trim_matches('`').to_string());
                     }
                 }
-
                 if let Some(fname) = found_fn {
                     current_filename = fname;
                 }
@@ -116,12 +166,12 @@ fn parse_aider_patches(content: &str) -> Vec<PatchHunk> {
     }
     hunks
 }
+
 fn parse_git_or_unified_patches(content: &str) -> Vec<PatchHunk> {
     let mut hunks = Vec::new();
     let mut current_hunk: Option<PatchHunk> = None;
     let mut current_filename = String::new();
-    let mut state = 0; // 0: outside, 1: search, 2: replace
-
+    let mut state = 0;
     for line in content.lines() {
         if line.starts_with("diff --git") {
             if let Some(h) = current_hunk.take() {
@@ -163,11 +213,9 @@ fn parse_git_or_unified_patches(content: &str) -> Vec<PatchHunk> {
             }
         }
     }
-
     if let Some(h) = current_hunk.take() {
         hunks.push(h);
     }
-
     hunks
 }
 
@@ -176,18 +224,14 @@ fn parse_raw_paste(content: &str) -> Vec<PatchHunk> {
     if lines.is_empty() {
         return Vec::new();
     }
-
     let mut filename = String::new();
     let mut search_start = 0;
-
-    // Look for the first non-empty line for a potential smart filename
     while search_start < lines.len() {
         let first_line = lines[search_start].trim();
         if first_line.is_empty() {
             search_start += 1;
             continue;
         }
-
         if let Some(rest) = first_line.strip_prefix("// ") {
             if !rest.is_empty() && (rest.contains('/') || rest.ends_with(".rs")) {
                 filename = rest.trim().to_string();
@@ -223,7 +267,6 @@ fn parse_raw_paste(content: &str) -> Vec<PatchHunk> {
         }
         break;
     }
-
     let search_lines: Vec<String> = lines[search_start..]
         .iter()
         .filter(|l| {
@@ -231,11 +274,9 @@ fn parse_raw_paste(content: &str) -> Vec<PatchHunk> {
         })
         .cloned()
         .collect();
-
     if search_lines.is_empty() && filename.is_empty() {
         return Vec::new();
     }
-
     vec![PatchHunk {
         filename,
         search: search_lines,
