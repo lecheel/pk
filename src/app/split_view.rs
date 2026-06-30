@@ -569,7 +569,35 @@ fn render_search_panel(
                 // Only render the replace lines if they exist
                 for (line_idx, line) in hunk.replace.iter().enumerate() {
                     let desired = Vec2::new(ui.available_width(), row_h);
-                    let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                    let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+                    if resp.double_clicked() {
+                        let q = line.trim().to_string();
+                        app.file_search_query = q.clone();
+                        let q_lower = q.to_lowercase();
+                        if q_lower.is_empty() {
+                            app.search_matches.clear();
+                        } else {
+                            app.search_matches = app
+                                .file_lines
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, l)| l.to_lowercase().contains(&q_lower))
+                                .map(|(i, _)| i)
+                                .collect();
+                            if !app.search_matches.is_empty() {
+                                app.search_match_idx = 0;
+                                app.cursor_line = Some(app.search_matches[0]);
+                                app.scroll_to_match = true;
+                                app.set_message(StatusMessage::info(format!("🔍 Searched REPLACE line in file. Press n/N to cycle.")));
+                            } else {
+                                app.search_matches.clear();
+                                app.set_message(StatusMessage::warning(format!(
+                                    "No matches found for '{}'",
+                                    q
+                                )));
+                            }
+                        }
+                    }
                     ui.painter().rect_filled(rect, 0.0, pal::BG_INSERT);
                     let bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
                     ui.painter().rect_filled(bar, 0.0, pal::BAR_MATCH);
@@ -1503,30 +1531,6 @@ fn render_file_panel(
                         glyph_color,
                     );
                 }
-                if is_anchor_start {
-                    let anchor = anchor_here.unwrap();
-                    let text = if anchor.id == 'a' {
-                        "ma".to_string()
-                    } else {
-                        format!("m{}", anchor.id)
-                    };
-                    ui.painter().text(
-                        Pos2::new(rect.left() + 44.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        format!("⚓{}", text),
-                        FontId::monospace(10.5),
-                        pal::TEXT_ANCHOR,
-                    );
-                } else if is_anchor_end {
-                    ui.painter().text(
-                        Pos2::new(rect.left() + 44.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        "⚓mA",
-                        FontId::monospace(10.5),
-                        pal::TEXT_ANCHOR,
-                    );
-                }
-
                 // Draw git hover diff for non-anchor rows
                 if !is_anchor_row && git_status != GitStatus::Unchanged {
                     if let Some(hunk) = app
@@ -1622,17 +1626,17 @@ fn render_file_panel(
                         Color32::from_rgba_premultiplied(45, 38, 15, 230),
                     );
                     if is_range_anchor {
-                        let mut next_x = right_box_rect.left() + 115.0;
+                        let mut next_x = right_box_rect.left() + 8.0;
                         let btn_w = 18.0;
                         let btn_h = row_h - 6.0;
                         ui.painter().text(
                             Pos2::new(next_x, rect.center().y),
                             Align2::LEFT_CENTER,
-                            "S:",
+                            "⚓ma S:",
                             FontId::monospace(10.0),
                             pal::TEXT_ANCHOR,
                         );
-                        next_x += 14.0;
+                        next_x += 55.0;
                         let dec_s_rect = Rect::from_min_size(
                             Pos2::new(next_x, rect.center().y - btn_h / 2.0),
                             Vec2::new(btn_w, btn_h),
@@ -1727,7 +1731,7 @@ fn render_file_panel(
                     ui.painter().text(
                         Pos2::new(next_x, rect.center().y),
                         Align2::LEFT_CENTER,
-                        "End block:",
+                        "⚓mA End:",
                         FontId::monospace(10.0),
                         pal::TEXT_ANCHOR,
                     );
