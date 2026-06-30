@@ -125,14 +125,6 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                     app.save_all_files();
                 }
                 ui.add(Separator::default().vertical().spacing(12.0));
-                if ui
-                    .button("📋 Copy Prompt")
-                    .on_hover_text("Copy patch prompt template to clipboard")
-                    .clicked()
-                {
-                    ctx.copy_text(super::constants::PROMPT_TEMPLATE.to_string());
-                    app.set_message(StatusMessage::success("Prompt copied to clipboard!"));
-                }
                 if ui.button("⚙").on_hover_text("Settings").clicked() {
                     app.show_settings = !app.show_settings;
                 }

@@ -1,4 +1,3 @@
-use super::constants::{DEFAULT_FILE, DEFAULT_PATCH};
 use super::daemon::{self, RepoInfo};
 use super::git_ops::GitStatus;
 use super::matching::MergeMatching;
@@ -215,12 +214,10 @@ impl MergeApp {
         }
 
         if !loaded_patch {
-            app.patch_text = DEFAULT_PATCH.to_string();
             app.set_message(StatusMessage::info(
-                "No patch file provided — using embedded demo patch. Press ? for help.",
+                "Welcome! Open a .md file or paste a patch to begin.",
             ));
         }
-
         app.reparse();
         app
     }
@@ -504,17 +501,7 @@ impl MergeApp {
                         self.set_message(StatusMessage::success(format!("Loaded: {}", path)));
                     }
                     Err(e) => {
-                        if hunk.filename.ends_with("mod.rs") {
-                            self.file_text = DEFAULT_FILE.to_string();
-                            self.file_lines = self.file_text.lines().map(String::from).collect();
-                            self.applied_hunks.clear();
-                            self.merged_range = None;
-                            self.history.clear();
-                            self.set_message(StatusMessage::warning(format!(
-                                "File not found — using embedded sample ({})",
-                                e
-                            )));
-                        } else if hunk.search.is_empty() {
+                        if hunk.search.is_empty() {
                             self.file_text = String::new();
                             self.file_lines = Vec::new();
                             self.applied_hunks.clear();
@@ -877,13 +864,24 @@ impl eframe::App for MergeApp {
         CentralPanel::default().show(ctx, |ui| {
             if self.hunks.is_empty() {
                 ui.vertical_centered(|ui| {
-                    ui.add_space(80.0);
-                    ui.heading("No patches found");
-                    ui.label("Open a .md file containing <patch> blocks.");
+                    ui.add_space(60.0);
+                    ui.heading("Welcome to PCode Merge");
+                    ui.add_space(20.0);
+                    ui.label(
+                        RichText::new("Workflow Guide")
+                            .color(pal::TEXT_NORMAL)
+                            .strong(),
+                    );
                     ui.add_space(8.0);
+                    ui.label("1. Click '📋 Paste Patch' or '📝 Paste Manually' on the left");
+                    ui.label("2. Enter the target file path in the 'Target File' box");
+                    ui.label("3. Use 'L' / 'Shift+L' to navigate between hunks");
+                    ui.label("4. Press 'A' or click ⚡ Apply to merge the hunk");
+                    ui.label("5. Press 'Alt+W' to save the file to disk");
+                    ui.add_space(20.0);
                     ui.label(
                         RichText::new("Press ? for keyboard shortcuts")
-                            .color(super::palette::pal::TEXT_DIM)
+                            .color(pal::TEXT_DIM)
                             .small(),
                     );
                 });
