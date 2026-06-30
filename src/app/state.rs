@@ -82,6 +82,8 @@ pub struct MergeApp {
     pub pending_line_actions: Vec<LineAction>,
     pub del_start: Option<usize>,
     pub del_end: Option<usize>,
+    pub is_visual_mode: bool,
+    pub visual_start: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -154,6 +156,8 @@ impl MergeApp {
             pending_line_actions: Vec::new(),
             del_start: None,
             del_end: None,
+            is_visual_mode: false,
+            visual_start: None,
         };
 
         let mut loaded_patch = false;
@@ -502,6 +506,8 @@ impl MergeApp {
         self.pending_line_actions.clear();
         self.del_start = None;
         self.del_end = None;
+        self.is_visual_mode = false;
+        self.visual_start = None;
         self.update_git_statuses();
         self.recompute_match();
     }
@@ -553,6 +559,8 @@ impl MergeApp {
         self.pending_line_actions.clear();
         self.del_start = None;
         self.del_end = None;
+        self.is_visual_mode = false;
+        self.visual_start = None;
     }
 }
 

@@ -588,7 +588,9 @@ fn render_search_panel(
                                 app.search_match_idx = 0;
                                 app.cursor_line = Some(app.search_matches[0]);
                                 app.scroll_to_match = true;
-                                app.set_message(StatusMessage::info(format!("🔍 Searched REPLACE line in file. Press n/N to cycle.")));
+                                app.set_message(StatusMessage::info(format!(
+                                    "🔍 Searched REPLACE line in file. Press n/N to cycle."
+                                )));
                             } else {
                                 app.search_matches.clear();
                                 app.set_message(StatusMessage::warning(format!(
@@ -670,6 +672,7 @@ fn render_file_panel(
     let mut go_prev_hunk = false;
     let mut go_next_file = false;
     let mut go_prev_file = false;
+    let mut visual_delete = false;
     let current_hunk_idx = app.current_hunk;
     let total_hunks = app.hunks.len();
     let file_anchors = app.file_anchors.clone();
@@ -945,13 +948,23 @@ fn render_file_panel(
                     cursor_changed = true;
                 }
                 if i.key_pressed(Key::Escape) {
-                    if app.d_pending {
+                    if app.is_visual_mode {
+                        app.is_visual_mode = false;
+                        app.visual_start = None;
+                    } else if app.d_pending {
                         app.d_pending = false;
                         app.vim_buffer.clear();
                     }
                 }
                 if i.key_pressed(Key::D) {
-                    app.d_pending = true;
+                    if app.is_visual_mode {
+                        visual_delete = true;
+                    } else {
+                        app.d_pending = true;
+                    }
+                }
+                if i.key_pressed(Key::X) && app.is_visual_mode {
+                    visual_delete = true;
                 }
                 if i.key_pressed(Key::L) && !app.d_pending && app.vim_buffer.is_empty() {
                     if i.modifiers.shift {
@@ -995,7 +1008,16 @@ fn render_file_panel(
                 }
                 for event in i.events.clone() {
                     if let Event::Text(txt) = event {
-                        if txt == "m" {
+                        if txt == "v" || txt == "V" {
+                            if app.is_visual_mode {
+                                app.is_visual_mode = false;
+                                app.visual_start = None;
+                            } else if app.cursor_line.is_some() {
+                                app.is_visual_mode = true;
+                                app.visual_start = app.cursor_line;
+                            }
+                            ui.ctx().request_repaint();
+                        } else if txt == "m" {
                             app.mark_pending = Some(MarkPending::WaitingKey);
                         } else if app.mark_pending == Some(MarkPending::WaitingKey) {
                             if txt.len() == 1 {
@@ -1043,6 +1065,10 @@ fn render_file_panel(
                     }
                 }
             });
+            if app.is_visual_mode {
+                app.vim_buffer.clear();
+                app.d_pending = false;
+            }
             if !new_text.is_empty() {
                 app.vim_buffer.push_str(&new_text);
                 let buf = app.vim_buffer.trim().to_string();
@@ -1158,6 +1184,7 @@ fn render_file_panel(
 
             if cursor_changed {
                 app.scroll_to_match = true;
+                ui.ctx().request_repaint();
             }
         }
     }
@@ -1352,6 +1379,16 @@ fn render_file_panel(
     let scroll_to_match = app.scroll_to_match;
     let cursor_line = app.cursor_line;
     let git_statuses = app.git_statuses.clone();
+    let visual_range = if app.is_visual_mode {
+        if let Some(start) = app.visual_start {
+            let cur = cursor_line.unwrap_or(start);
+            Some((start.min(cur), start.max(cur)))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let mut did_scroll = false;
     let mut set_cursor: Option<usize> = None;
     let mut set_del_start: Option<usize> = None;
@@ -1395,6 +1432,8 @@ fn render_file_panel(
                     (None, Some(e)) => i == e,
                     (None, None) => false,
                 };
+                let in_visual_selection =
+                    visual_range.map_or(false, |(min, max)| i >= min && i <= max);
                 let is_search_hit = !search_query.is_empty()
                     && line.to_lowercase().contains(&search_query.to_lowercase());
                 let is_current_search = is_search_hit && current_search_line == Some(i);
@@ -1421,9 +1460,10 @@ fn render_file_panel(
                 let is_anchor_start = anchor_here.is_some();
                 let is_anchor_end = anchor_end_here.is_some();
                 let is_anchor_row = is_anchor_start || is_anchor_end;
-
-                let base_bg = if is_anchor_row {
-                    Color32::from_rgba_premultiplied(45, 38, 15, 200)
+                let base_bg = if in_visual_selection {
+                    Color32::from_rgb(20, 50, 25) // Dark green background
+                } else if is_anchor_row {
+                    Color32::TRANSPARENT // Fully transparent to show file content
                 } else if in_block_delete {
                     pal::BG_DELETE
                 } else if in_merged {
@@ -1466,7 +1506,9 @@ fn render_file_panel(
                     Pos2::new(rect.left() + 2.0, rect.top()),
                     Vec2::new(3.0, rect.height()),
                 );
-                let bar_color = if is_anchor_row {
+                let bar_color = if in_visual_selection {
+                    Color32::from_rgb(60, 120, 70) // Matching green bar
+                } else if is_anchor_row {
                     pal::BAR_ANCHOR
                 } else if in_block_delete {
                     pal::TEXT_DELETE
@@ -2422,6 +2464,16 @@ fn render_file_panel(
     }
     if let Some(val) = set_anchor_a_start {
         app.set_mark_a(val);
+    }
+    if visual_delete {
+        if let Some(start) = app.visual_start {
+            let cur = app.cursor_line.unwrap_or(start);
+            let min = start.min(cur);
+            let max = start.max(cur);
+            app.delete_block_range(min, max);
+            app.is_visual_mode = false;
+            app.visual_start = None;
+        }
     }
     if let Some(val) = set_anchor_a_end {
         app.set_mark_a_end(val);
