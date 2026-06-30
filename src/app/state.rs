@@ -872,36 +872,9 @@ impl eframe::App for MergeApp {
 
         super::toolbar::render_toolbar(self, ctx);
         super::status_bar::render_status_bar(self, ctx);
-
         CentralPanel::default().show(ctx, |ui| {
-            if self.hunks.is_empty() {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(60.0);
-                    ui.heading("Welcome to PCode Merge");
-                    ui.add_space(20.0);
-                    ui.label(
-                        RichText::new("Workflow Guide")
-                            .color(pal::TEXT_NORMAL)
-                            .strong(),
-                    );
-                    ui.add_space(8.0);
-                    ui.label("1. Click '📋 Paste Patch' or '📝 Paste Manually' on the left");
-                    ui.label("2. Enter the target file path in the 'Target File' box");
-                    ui.label("3. Use 'L' / 'Shift+L' to navigate between hunks");
-                    ui.label("4. Press 'A' or click ⚡ Apply to merge the hunk");
-                    ui.label("5. Press 'Alt+W' to save the file to disk");
-                    ui.add_space(20.0);
-                    ui.label(
-                        RichText::new("Press ? for keyboard shortcuts")
-                            .color(pal::TEXT_DIM)
-                            .small(),
-                    );
-                });
-                return;
-            }
             super::split_view::render_split_view(self, ui);
         });
-
         if self.show_help {
             super::help::render_help_overlay(self, ctx);
         }

@@ -1,4 +1,5 @@
 //--+ file:///src/app/toolbar.rs
+use super::clipboard_utils::get_clipboard_text;
 use super::matching::MergeMatching;
 use super::palette::pal;
 use super::state::MergeApp;
@@ -51,6 +52,26 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                     }
                 }
                 ui.add(Separator::default().vertical().spacing(12.0));
+
+                if app.patch_text.is_empty() {
+                    if ui
+                        .button("📋 Paste Patch")
+                        .on_hover_text("Parse patch directly from clipboard")
+                        .clicked()
+                    {
+                        if let Some(text) = get_clipboard_text() {
+                            app.patch_text = text;
+                            app.reparse();
+                        } else {
+                            app.show_manual_paste = true;
+                            app.set_message(StatusMessage::warning(
+                                "Clipboard is empty or inaccessible. Use manual paste window.",
+                            ));
+                        }
+                    }
+                    ui.add(Separator::default().vertical().spacing(12.0));
+                }
+
                 if let Some(ref mr) = app.match_result {
                     let (bg, fg, icon) = MergeApp::score_appearance(mr.score);
                     let frame = Frame::none()

@@ -122,17 +122,22 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         app.file_anchors.values().map(|f| f.label()).collect();
                     format!("  ·  {}", labels.join("  "))
                 };
-                ui.label(
-                    RichText::new(format!(
+                let file_header_text = if app.file_lines.is_empty() {
+                    "FILE  ·  no file loaded".to_string()
+                } else {
+                    format!(
                         "FILE  ·  {} lines  ·  match @ {}–{}{}",
                         app.file_lines.len(),
                         mr.file_start + 1,
                         mr.file_end,
                         mark_label,
-                    ))
-                    .color(Color32::from_rgb(120, 220, 160))
-                    .strong()
-                    .monospace(),
+                    )
+                };
+                ui.label(
+                    RichText::new(file_header_text)
+                        .color(Color32::from_rgb(120, 220, 160))
+                        .strong()
+                        .monospace(),
                 );
             });
     });
@@ -163,7 +168,32 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
         render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
     }
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
-    render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
+    if app.hunks.is_empty() && app.file_lines.is_empty() {
+        right_ui.vertical_centered(|ui| {
+            ui.add_space(60.0);
+            ui.heading("Welcome to PCode Merge");
+            ui.add_space(20.0);
+            ui.label(
+                RichText::new("Workflow Guide")
+                    .color(pal::TEXT_NORMAL)
+                    .strong(),
+            );
+            ui.add_space(8.0);
+            ui.label("1. Click '📋 Paste Patch' or '📝 Paste Manually' on the left");
+            ui.label("2. Enter the target file path in the 'Target File' box");
+            ui.label("3. Use 'L' / 'Shift+L' to navigate between hunks");
+            ui.label("4. Press 'A' or click ⚡ Apply to merge the hunk");
+            ui.label("5. Press 'Alt+W' to save the file to disk");
+            ui.add_space(20.0);
+            ui.label(
+                RichText::new("Press ? for keyboard shortcuts")
+                    .color(pal::TEXT_DIM)
+                    .small(),
+            );
+        });
+    } else {
+        render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
+    }
 }
 
 fn render_fmt_error_panel(app: &mut MergeApp, ui: &mut Ui) {
