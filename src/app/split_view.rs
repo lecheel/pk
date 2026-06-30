@@ -1,3 +1,4 @@
+//--+ src/app/split_view.rs
 use super::clipboard_utils::{get_clipboard_text, parse_clipboard_patch};
 use super::git_ops::GitStatus;
 use super::git_panels::{render_git_diff_panel, render_git_status_panel};
@@ -8,7 +9,6 @@ use super::types::{Action, FileAnchor, SearchRow, StatusMessage};
 use crate::diff::RowKind;
 use eframe::egui::*;
 use std::collections::HashSet;
-
 pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mr = match app.match_result.clone() {
         Some(m) => m,
@@ -27,7 +27,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mono_h = ui.text_style_height(&TextStyle::Monospace);
     let row_h = mono_h + 4.0;
     let char_w = mono_h * 0.60;
-
     // Draw Headers
     ui.horizontal(|ui| {
         let hunk = app.current_hunk().unwrap();
@@ -93,7 +92,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
             });
     });
     ui.add(Separator::default());
-
     // Body Layout using absolute side-by-side child UIs
     let body_rect = ui.available_rect_before_wrap();
     let mut left_rect = body_rect;
@@ -101,7 +99,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let mut right_rect = body_rect;
     right_rect.min.x = body_rect.min.x + left_w + 2.0;
     right_rect.set_width(right_w);
-
     let mut left_ui = ui.child_ui(left_rect, Layout::top_down(Align::LEFT), None);
     if app.show_git_status_window {
         render_git_status_panel(app, &mut left_ui, row_h, char_w, left_w);
@@ -110,11 +107,9 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     } else {
         render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
     }
-
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
     render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
 }
-
 fn render_search_panel(
     app: &mut MergeApp,
     ui: &mut Ui,
@@ -128,7 +123,6 @@ fn render_search_panel(
     let mut apply_clicked_id: Option<char> = None;
     let mut apply_clicked = false;
     let mut apply_clicked_line: Option<usize> = None;
-
     // Clipboard and Filename Adjustments Header
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
@@ -162,7 +156,6 @@ fn render_search_panel(
                 app.set_message(StatusMessage::error("Could not read text from clipboard"));
             }
         }
-
         if ui
             .button("📝 Paste Manually")
             .on_hover_text("Open a manual input area to paste using Ctrl+V or Shift+Insert")
@@ -189,7 +182,6 @@ fn render_search_panel(
             } else {
                 "🔄 Reload Original"
             };
-
             if ui
                 .button(label)
                 .on_hover_text(format!(
@@ -215,9 +207,7 @@ fn render_search_panel(
         }
     });
     ui.add_space(4.0);
-
     // In render_search_panel, replace the manual paste block with:
-
     if app.show_manual_paste {
         ui.group(|ui| {
             ui.label(
@@ -225,7 +215,6 @@ fn render_search_panel(
                     .small()
                     .color(pal::TEXT_DIM),
             );
-
             // Use ScrollArea with max_height instead of add_sized
             ScrollArea::vertical()
                 .id_source("manual_paste_scroll")
@@ -239,7 +228,6 @@ fn render_search_panel(
                             .desired_rows(5),
                     );
                 });
-
             ui.horizontal(|ui| {
                 if ui.button("⚡ Save to temp.md & Load").clicked() {
                     let content = app.manual_paste_text.clone();
@@ -285,7 +273,6 @@ fn render_search_panel(
         });
         ui.add_space(4.0);
     }
-
     let mut filename_changed = false;
     if let Some(hunk) = app.hunks.get_mut(app.current_hunk) {
         ui.horizontal(|ui| {
@@ -310,11 +297,9 @@ fn render_search_panel(
     }
     ui.separator();
     ui.add_space(2.0);
-
     if filename_changed {
         app.load_hunk();
     }
-
     ScrollArea::vertical()
         .id_source("search_scroll")
         .auto_shrink([false, false])
@@ -398,7 +383,6 @@ fn render_search_panel(
                         }
                     }
                 }
-
                 // Double-click handler to search for the line text in the right-side file panel
                 if resp.double_clicked() {
                     let q = line.trim().to_string();
@@ -427,7 +411,6 @@ fn render_search_panel(
                         }
                     }
                 }
-
                 ui.painter().rect_filled(rect, 0.0, bg);
                 let bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
                 ui.painter().rect_filled(
@@ -483,13 +466,11 @@ fn render_search_panel(
             ui.add_space(2.0);
             let (hdr_rect, _) =
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::hover());
-
             let (hdr_bg, hdr_text, hdr_color) = if hunk.replace.is_empty() {
                 (Color32::from_rgb(45, 20, 20), "DELETE →", pal::TEXT_DELETE)
             } else {
                 (Color32::from_rgb(22, 44, 28), "REPLACE →", pal::TEXT_INSERT)
             };
-
             ui.painter().rect_filled(hdr_rect, 0.0, hdr_bg);
             ui.painter().text(
                 Pos2::new(hdr_rect.left() + 8.0, hdr_rect.center().y),
@@ -561,11 +542,9 @@ fn render_search_panel(
                 )
                 .fill(Color32::from_rgb(40, 90, 55))
                 .min_size(btn_line_size);
-
                 if ui.put(btn_line_rect, btn_line).clicked() {
                     apply_clicked_line = Some(cur_ln);
                 }
-
                 // Only render the replace lines if they exist
                 for (line_idx, line) in hunk.replace.iter().enumerate() {
                     let desired = Vec2::new(ui.available_width(), row_h);
@@ -617,7 +596,6 @@ fn render_search_panel(
                         FontId::monospace(11.0),
                         pal::TEXT_INSERT,
                     );
-
                     let display = MergeApp::truncate_owned(line, max_chars);
                     ui.painter().text(
                         Pos2::new(rect.left() + 54.0, rect.center().y),
@@ -633,7 +611,6 @@ fn render_search_panel(
                 } // end of for loop over hunk.replace
             } // end of else (render replace lines)
         });
-
     if let Some(sel) = set_selection {
         app.left_selection = Some(sel);
     }
@@ -647,7 +624,6 @@ fn render_search_panel(
         app.apply_merge(Some(ln), None);
     }
 }
-
 fn render_file_panel(
     app: &mut MergeApp,
     ui: &mut Ui,
@@ -854,7 +830,6 @@ fn render_file_panel(
                         }
                     });
                 }
-
                 ui.add(Separator::default().vertical());
                 if ui
                     .selectable_label(app.show_git_status_window, "📝 Git Status (F1)")
@@ -900,7 +875,6 @@ fn render_file_panel(
                     }
                 }
             });
-
         // In src/app/split_view.rs (inside render_file_panel)
         } else if !ui.ctx().wants_keyboard_input() {
             let mut cursor_changed = false;
@@ -922,7 +896,6 @@ fn render_file_panel(
                 if i.key_pressed(Key::Q) && i.modifiers.alt {
                     app.quit_requested = true;
                 }
-
                 if i.key_pressed(Key::ArrowDown) {
                     app.cursor_line = Some((cur + 1).min(len - 1));
                     cursor_changed = true;
@@ -1190,7 +1163,6 @@ fn render_file_panel(
                     }
                 }
             }
-
             if cursor_changed {
                 app.scroll_to_match = true;
                 ui.ctx().request_repaint();
@@ -1465,14 +1437,14 @@ fn render_file_panel(
                     ui.scroll_to_rect(rect, Some(Align::Center));
                     did_scroll = true;
                 }
-
                 let is_anchor_start = anchor_here.is_some();
                 let is_anchor_end = anchor_end_here.is_some();
                 let is_anchor_row = is_anchor_start || is_anchor_end;
+                // Unified rendering logic for all rows
                 let base_bg = if in_visual_selection {
                     Color32::from_rgb(20, 50, 25) // Dark green background
                 } else if is_anchor_row {
-                    Color32::TRANSPARENT // Fully transparent to show file content
+                    Color32::from_rgba_premultiplied(45, 38, 15, 60) // Transparent yellow tint
                 } else if in_block_delete {
                     pal::BG_DELETE
                 } else if in_merged {
@@ -1488,17 +1460,12 @@ fn render_file_panel(
                 } else {
                     pal::BG_ROW_ODD
                 };
-                let final_bg = if is_auto_start_line {
-                    Color32::TRANSPARENT
-                } else {
-                    base_bg
-                };
                 let row_bg = if is_current_search {
                     Color32::from_rgb(70, 60, 15)
                 } else if is_search_hit {
                     pal::BG_SEARCH_HIT
                 } else {
-                    final_bg
+                    base_bg
                 };
                 ui.painter().rect_filled(rect, 0.0, row_bg);
                 let git_color = match git_status {
@@ -1627,7 +1594,6 @@ fn render_file_panel(
                         });
                     }
                 }
-
                 let text_color = if is_anchor_row {
                     pal::TEXT_ANCHOR
                 } else if in_block_delete {
@@ -1663,6 +1629,7 @@ fn render_file_panel(
                     FontId::monospace(11.0),
                     text_color,
                 );
+                // Right-aligned control boxes
                 if is_anchor_start {
                     let anchor = anchor_here.unwrap();
                     let is_range_anchor = anchor.id == 'a' && anchor.end_line.is_some();
@@ -1951,450 +1918,11 @@ fn render_file_panel(
                         adjust_end_by = 1;
                     }
                 }
-
-                // Unified rendering logic for all rows
-                let base_bg = if is_anchor_row {
-                    Color32::from_rgba_premultiplied(45, 38, 15, 60) // Transparent yellow tint
-                } else if in_block_delete {
-                    pal::BG_DELETE
-                } else if in_merged {
-                    pal::BG_MERGED
-                } else if is_delete {
-                    pal::BG_DELETE
-                } else if is_cursor {
-                    pal::BG_CURSOR
-                } else if in_auto_match && file_anchors.is_empty() && !is_auto_start_line {
-                    pal::BG_MATCH
-                } else if i % 2 == 0 {
-                    pal::BG_ROW_EVEN
-                } else {
-                    pal::BG_ROW_ODD
-                };
-                let row_bg = if is_current_search {
-                    Color32::from_rgb(70, 60, 15)
-                } else if is_search_hit {
-                    pal::BG_SEARCH_HIT
-                } else {
-                    base_bg
-                };
-                ui.painter().rect_filled(rect, 0.0, row_bg);
-
-                let git_color = match git_status {
-                    GitStatus::Added => Color32::from_rgb(40, 130, 60),
-                    GitStatus::Modified => Color32::from_rgb(200, 160, 40),
-                    GitStatus::Deleted => Color32::from_rgb(180, 40, 40),
-                    _ => Color32::TRANSPARENT,
-                };
-                if git_color != Color32::TRANSPARENT {
-                    let git_bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
-                    ui.painter().rect_filled(git_bar, 0.0, git_color);
-                }
-
-                let bar = Rect::from_min_size(
-                    Pos2::new(rect.left() + 2.0, rect.top()),
-                    Vec2::new(3.0, rect.height()),
-                );
-                let bar_color = if is_anchor_row {
-                    pal::BAR_ANCHOR
-                } else if in_block_delete {
-                    pal::TEXT_DELETE
-                } else if in_merged {
-                    pal::BAR_MERGED
-                } else if is_delete {
-                    pal::TEXT_DELETE
-                } else if is_cursor {
-                    pal::BAR_CURSOR
-                } else if in_auto_match && file_anchors.is_empty() {
-                    pal::BAR_MATCH
-                } else if is_current_search {
-                    pal::ACCENT_WARN
-                } else if is_search_hit {
-                    pal::BAR_SEARCH
-                } else {
-                    Color32::TRANSPARENT
-                };
-                ui.painter().rect_filled(bar, 0.0, bar_color);
-
-                if row_resp.clicked() {
-                    set_cursor = Some(i);
-                }
-
-                let num_color = if is_anchor_row {
-                    pal::TEXT_ANCHOR
-                } else if in_block_delete {
-                    pal::TEXT_DELETE
-                } else if in_merged {
-                    pal::TEXT_LNUM_ACTIVE
-                } else if is_delete {
-                    pal::TEXT_DELETE
-                } else if in_auto_match && file_anchors.is_empty() {
-                    pal::TEXT_LNUM_ACTIVE
-                } else if is_search_hit {
-                    Color32::from_rgb(180, 160, 60)
-                } else {
-                    pal::TEXT_LNUM
-                };
-                ui.painter().text(
-                    Pos2::new(rect.left() + 6.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    format!("{:>4} │", i + 1),
-                    FontId::monospace(11.0),
-                    num_color,
-                );
-
-                let diff_prefix = if in_auto_match && file_anchors.is_empty() {
-                    if is_delete {
-                        Some(("-", pal::TEXT_DELETE))
-                    } else if is_equal {
-                        Some(("=", Color32::from_gray(60)))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                if let Some((glyph, glyph_color)) = diff_prefix {
-                    ui.painter().text(
-                        Pos2::new(rect.left() + 48.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        glyph,
-                        FontId::monospace(11.0),
-                        glyph_color,
-                    );
-                }
-
-                let text_color = if is_anchor_row {
-                    pal::TEXT_ANCHOR
-                } else if in_block_delete {
-                    pal::TEXT_DELETE
-                } else if in_merged {
-                    pal::TEXT_MERGED
-                } else if is_delete {
-                    pal::TEXT_DELETE
-                } else if in_auto_match && file_anchors.is_empty() {
-                    pal::TEXT_MATCH
-                } else if is_search_hit {
-                    pal::TEXT_SEARCH
-                } else {
-                    pal::TEXT_NORMAL
-                };
-                let display_max_chars = if is_auto_start_line || is_anchor_start {
-                    ((panel_w - 68.0 - 250.0) / char_w).floor() as usize
-                } else if is_auto_end_line || is_anchor_end {
-                    ((panel_w - 68.0 - 120.0) / char_w).floor() as usize
-                } else {
-                    max_chars
-                };
-                let text_x = if is_anchor_row {
-                    rect.left() + 84.0
-                } else {
-                    rect.left() + 58.0
-                };
-                let display = MergeApp::truncate_owned(line, display_max_chars);
-                ui.painter().text(
-                    Pos2::new(text_x, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    &display,
-                    FontId::monospace(11.0),
-                    text_color,
-                );
-
-                // Right-aligned control boxes
-                if is_anchor_start {
-                    let anchor = anchor_here.unwrap();
-                    let is_range_anchor = anchor.id == 'a' && anchor.end_line.is_some();
-                    let right_box_width = if is_range_anchor { 250.0 } else { 106.0 };
-                    let right_box_rect = Rect::from_min_size(
-                        Pos2::new(rect.right() - right_box_width, rect.top()),
-                        Vec2::new(right_box_width, rect.height()),
-                    );
-                    ui.painter().rect_filled(
-                        right_box_rect,
-                        2.0,
-                        Color32::from_rgba_premultiplied(45, 38, 15, 230),
-                    );
-                    if is_range_anchor {
-                        let mut next_x = right_box_rect.left() + 115.0;
-                        let btn_w = 18.0;
-                        let btn_h = row_h - 6.0;
-                        ui.painter().text(
-                            Pos2::new(next_x, rect.center().y),
-                            Align2::LEFT_CENTER,
-                            "S:",
-                            FontId::monospace(10.0),
-                            pal::TEXT_ANCHOR,
-                        );
-                        next_x += 14.0;
-                        let dec_s_rect = Rect::from_min_size(
-                            Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                            Vec2::new(btn_w, btn_h),
-                        );
-                        if ui
-                            .put(
-                                dec_s_rect,
-                                Button::new(RichText::new("▲").small().monospace())
-                                    .fill(Color32::from_rgb(65, 50, 10)),
-                            )
-                            .clicked()
-                        {
-                            adjust_start_by = -1;
-                        }
-                        next_x += btn_w + 2.0;
-                        let inc_s_rect = Rect::from_min_size(
-                            Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                            Vec2::new(btn_w, btn_h),
-                        );
-                        if ui
-                            .put(
-                                inc_s_rect,
-                                Button::new(RichText::new("▼").small().monospace())
-                                    .fill(Color32::from_rgb(65, 50, 10)),
-                            )
-                            .clicked()
-                        {
-                            adjust_start_by = 1;
-                        }
-                        let btn_size = Vec2::new(65.0, row_h - 4.0);
-                        let btn_rect = Rect::from_min_size(
-                            Pos2::new(
-                                right_box_rect.right() - btn_size.x - 4.0,
-                                rect.center().y - btn_size.y / 2.0,
-                            ),
-                            btn_size,
-                        );
-                        if ui
-                            .put(
-                                btn_rect,
-                                Button::new(
-                                    RichText::new("⚡ Apply")
-                                        .color(Color32::WHITE)
-                                        .strong()
-                                        .small()
-                                        .monospace(),
-                                )
-                                .fill(Color32::from_rgb(90, 70, 15))
-                                .stroke(Stroke::new(1.0, pal::BAR_ANCHOR)),
-                            )
-                            .clicked()
-                        {
-                            apply_clicked_id = Some(anchor.id);
-                        }
-                    } else {
-                        let btn_size = Vec2::new(100.0, row_h);
-                        let btn_rect = Rect::from_min_size(
-                            Pos2::new(rect.right() - 106.0, rect.center().y - row_h / 2.0),
-                            btn_size,
-                        );
-                        if ui
-                            .put(
-                                btn_rect,
-                                Button::new(
-                                    RichText::new(format!("⚡ >{}", anchor.id))
-                                        .color(Color32::WHITE)
-                                        .strong()
-                                        .monospace(),
-                                )
-                                .fill(Color32::from_rgb(90, 70, 15))
-                                .stroke(Stroke::new(1.0, pal::BAR_ANCHOR)),
-                            )
-                            .clicked()
-                        {
-                            apply_clicked_id = Some(anchor.id);
-                        }
-                    }
-                } else if is_anchor_end {
-                    let right_box_width = 120.0;
-                    let right_box_rect = Rect::from_min_size(
-                        Pos2::new(rect.right() - right_box_width, rect.top()),
-                        Vec2::new(right_box_width, rect.height()),
-                    );
-                    ui.painter().rect_filled(
-                        right_box_rect,
-                        2.0,
-                        Color32::from_rgba_premultiplied(45, 38, 15, 230),
-                    );
-                    let mut next_x = right_box_rect.left() + 6.0;
-                    let btn_w = 18.0;
-                    let btn_h = row_h - 6.0;
-                    ui.painter().text(
-                        Pos2::new(next_x, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        "End block:",
-                        FontId::monospace(10.0),
-                        pal::TEXT_ANCHOR,
-                    );
-                    next_x += 62.0;
-                    let dec_e_rect = Rect::from_min_size(
-                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                        Vec2::new(btn_w, btn_h),
-                    );
-                    if ui
-                        .put(
-                            dec_e_rect,
-                            Button::new(RichText::new("▲").small().monospace())
-                                .fill(Color32::from_rgb(65, 50, 10)),
-                        )
-                        .clicked()
-                    {
-                        adjust_end_by = -1;
-                    }
-                    next_x += btn_w + 2.0;
-                    let inc_e_rect = Rect::from_min_size(
-                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                        Vec2::new(btn_w, btn_h),
-                    );
-                    if ui
-                        .put(
-                            inc_e_rect,
-                            Button::new(RichText::new("▼").small().monospace())
-                                .fill(Color32::from_rgb(65, 50, 10)),
-                        )
-                        .clicked()
-                    {
-                        adjust_end_by = 1;
-                    }
-                } else if is_auto_start_line && mr.score > 0.0 {
-                    let right_box_width = 250.0;
-                    let right_box_rect = Rect::from_min_size(
-                        Pos2::new(rect.right() - right_box_width, rect.top()),
-                        Vec2::new(right_box_width, rect.height()),
-                    );
-                    ui.painter().rect_filled(
-                        right_box_rect,
-                        2.0,
-                        Color32::from_rgba_premultiplied(28, 60, 40, 230),
-                    );
-                    ui.painter().text(
-                        Pos2::new(right_box_rect.left() + 6.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        format!("▼ {}–{} ({:.0}%)", auto_start + 1, auto_end, auto_score),
-                        FontId::monospace(10.0),
-                        Color32::from_rgb(120, 230, 160),
-                    );
-                    let mut next_x = right_box_rect.left() + 115.0;
-                    let btn_w = 18.0;
-                    let btn_h = row_h - 6.0;
-                    ui.painter().text(
-                        Pos2::new(next_x, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        "S:",
-                        FontId::monospace(10.0),
-                        Color32::from_rgb(180, 220, 190),
-                    );
-                    next_x += 14.0;
-                    let dec_s_rect = Rect::from_min_size(
-                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                        Vec2::new(btn_w, btn_h),
-                    );
-                    if ui
-                        .put(
-                            dec_s_rect,
-                            Button::new(RichText::new("▲").small().monospace())
-                                .fill(Color32::from_rgb(40, 55, 45)),
-                        )
-                        .clicked()
-                    {
-                        adjust_start_by = -1;
-                    }
-                    next_x += btn_w + 2.0;
-                    let inc_s_rect = Rect::from_min_size(
-                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                        Vec2::new(btn_w, btn_h),
-                    );
-                    if ui
-                        .put(
-                            inc_s_rect,
-                            Button::new(RichText::new("▼").small().monospace())
-                                .fill(Color32::from_rgb(40, 55, 45)),
-                        )
-                        .clicked()
-                    {
-                        adjust_start_by = 1;
-                    }
-                    let btn_size = Vec2::new(65.0, row_h - 4.0);
-                    let btn_rect = Rect::from_min_size(
-                        Pos2::new(
-                            right_box_rect.right() - btn_size.x - 4.0,
-                            rect.center().y - btn_size.y / 2.0,
-                        ),
-                        btn_size,
-                    );
-                    if ui
-                        .put(
-                            btn_rect,
-                            Button::new(
-                                RichText::new("⚡ Apply")
-                                    .color(Color32::WHITE)
-                                    .strong()
-                                    .small()
-                                    .monospace(),
-                            )
-                            .fill(Color32::from_rgb(35, 85, 50))
-                            .stroke(Stroke::new(1.0, pal::BAR_MATCH)),
-                        )
-                        .clicked()
-                    {
-                        apply_clicked = true;
-                    }
-                } else if is_auto_end_line && mr.score > 0.0 {
-                    let right_box_width = 120.0;
-                    let right_box_rect = Rect::from_min_size(
-                        Pos2::new(rect.right() - right_box_width, rect.top()),
-                        Vec2::new(right_box_width, rect.height()),
-                    );
-                    ui.painter().rect_filled(
-                        right_box_rect,
-                        2.0,
-                        Color32::from_rgba_premultiplied(28, 60, 40, 230),
-                    );
-                    let mut next_x = right_box_rect.left() + 6.0;
-                    let btn_w = 18.0;
-                    let btn_h = row_h - 6.0;
-                    ui.painter().text(
-                        Pos2::new(next_x, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        "End block:",
-                        FontId::monospace(10.0),
-                        Color32::from_rgb(120, 230, 160),
-                    );
-                    next_x += 62.0;
-                    let dec_e_rect = Rect::from_min_size(
-                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                        Vec2::new(btn_w, btn_h),
-                    );
-                    if ui
-                        .put(
-                            dec_e_rect,
-                            Button::new(RichText::new("▲").small().monospace())
-                                .fill(Color32::from_rgb(40, 55, 45)),
-                        )
-                        .clicked()
-                    {
-                        adjust_end_by = -1;
-                    }
-                    next_x += btn_w + 2.0;
-                    let inc_e_rect = Rect::from_min_size(
-                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                        Vec2::new(btn_w, btn_h),
-                    );
-                    if ui
-                        .put(
-                            inc_e_rect,
-                            Button::new(RichText::new("▼").small().monospace())
-                                .fill(Color32::from_rgb(40, 55, 45)),
-                        )
-                        .clicked()
-                    {
-                        adjust_end_by = 1;
-                    }
-                }
-
                 if in_auto_match && i == auto_end.saturating_sub(1) && file_anchors.is_empty() {
                     let (sep_rect, _) = ui
                         .allocate_exact_size(Vec2::new(ui.available_width(), 2.0), Sense::hover());
                     ui.painter().rect_filled(sep_rect, 0.0, pal::BAR_MATCH);
                 }
-
                 row_resp.context_menu(|ui| {
                     ui.label(RichText::new(format!("Line {}", i + 1)).strong());
                     ui.separator();
@@ -2498,7 +2026,6 @@ fn render_file_panel(
                 },
             );
         }
-
         // Use a block to limit the mutable borrow and return the message
         let msg = {
             if let Some(anchor) = app.file_anchors.get_mut(&'a') {
@@ -2526,7 +2053,6 @@ fn render_file_panel(
                 None
             }
         };
-
         if let Some(msg) = msg {
             app.set_message(msg);
         }
