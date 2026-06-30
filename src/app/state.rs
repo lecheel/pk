@@ -74,6 +74,7 @@ pub struct MergeApp {
     pub git_hunks: Vec<super::git_ops::GitDiffHunk>,
     pub show_git_diff_window: bool,
     pub show_git_status_window: bool,
+    pub show_repos_window: bool,
     pub filter_low_matches: bool,
     pub sync_anchors: Vec<SyncAnchor>,
     pub pending_sync: Option<PendingSync>,
@@ -145,6 +146,7 @@ impl MergeApp {
             git_hunks: Vec::new(),
             show_git_diff_window: false,
             show_git_status_window: false,
+            show_repos_window: false,
             filter_low_matches: false,
             sync_anchors: Vec::new(),
             pending_sync: None,
@@ -586,7 +588,9 @@ impl eframe::App for MergeApp {
         if !ctx.wants_keyboard_input() || self.is_searching {
             ctx.input(|i| {
                 if i.key_pressed(Key::Escape) {
-                    if self.show_help {
+                    if self.show_repos_window {
+                        self.show_repos_window = false;
+                    } else if self.show_help {
                         self.show_help = false;
                     } else if self.show_debug {
                         self.show_debug = false;
@@ -798,6 +802,98 @@ impl eframe::App for MergeApp {
         });
         if self.show_help {
             super::help::render_help_overlay(self, ctx);
+        }
+        if self.show_repos_window {
+            let mut show_repos = self.show_repos_window;
+            Window::new("📂 Active Repository")
+                .open(&mut show_repos)
+                .collapsible(false)
+                .resizable(false)
+                .default_size(Vec2::new(400.0, 200.0))
+                .show(ctx, |ui| {
+                    ui.label(
+                        RichText::new("Select the repository where file paths should resolve:")
+                            .color(pal::TEXT_NORMAL),
+                    );
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    let repos = [
+                        ("pk", "/opt/ai/gh/pk", "master", "22 files, synced 1h ago"),
+                        ("amp", "/opt/ai/gh/amp", "main", "191 files, synced 7d ago"),
+                    ];
+
+                    for (name, path, branch, status) in repos.iter() {
+                        let is_active = self.base_dir == *path || self.start_pwd == *path;
+                        let bg = if is_active {
+                            Color32::from_rgb(30, 45, 30)
+                        } else {
+                            pal::BG_PANEL
+                        };
+
+                        Frame::none()
+                            .fill(bg)
+                            .stroke(Stroke::new(
+                                1.0,
+                                if is_active { pal::ACCENT_GOOD } else { pal::SEPARATOR },
+                            ))
+                            .rounding(4.0)
+                            .inner_margin(Margin::symmetric(8.0, 6.0))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new(if is_active { "→ " } else { "  " })
+                                            .color(pal::ACCENT_GOOD)
+                                            .monospace(),
+                                    );
+                                    ui.vertical(|ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                RichText::new(*name)
+                                                    .color(pal::TEXT_NORMAL)
+                                                    .strong()
+                                                    .monospace(),
+                                            );
+                                            ui.label(
+                                                RichText::new(format!("[{}]", branch))
+                                                    .color(pal::TEXT_DIM)
+                                                    .small(),
+                                            );
+                                            if is_active {
+                                                ui.label(
+                                                    RichText::new("↑ active")
+                                                        .color(pal::ACCENT_GOOD)
+                                                        .small(),
+                                                );
+                                            }
+                                        });
+                                        ui.label(
+                                            RichText::new(format!("{}  ({})", path, status))
+                                                .color(pal::TEXT_DIM)
+                                                .small(),
+                                        );
+                                    });
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        if !is_active {
+                                            if ui.button("Use").clicked() {
+                                                self.base_dir = path.to_string();
+                                                self.start_pwd = path.to_string();
+                                                self.start_pwd_is_repo = true;
+                                                self.set_message(StatusMessage::success(format!(
+                                                    "✅ Active repo: {}. Files will be looked up in repo '{}'",
+                                                    name, name
+                                                )));
+                                                self.show_repos_window = false;
+                                            }
+                                        }
+                                    });
+                                });
+                            });
+                        ui.add_space(4.0);
+                    }
+                });
+            self.show_repos_window = show_repos;
         }
         if self.show_debug {
             let mut show_debug = self.show_debug;

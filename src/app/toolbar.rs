@@ -133,6 +133,9 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                     ctx.copy_text(super::constants::PROMPT_TEMPLATE.to_string());
                     app.set_message(StatusMessage::success("Prompt copied to clipboard!"));
                 }
+                if ui.button("📂 Repos").on_hover_text("List and switch active repository").clicked() {
+                    app.show_repos_window = !app.show_repos_window;
+                }
                 if ui.button("?").on_hover_text("Keyboard shortcuts").clicked() {
                     app.show_help = !app.show_help;
                 }
