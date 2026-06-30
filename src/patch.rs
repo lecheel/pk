@@ -6,143 +6,206 @@ pub struct PatchHunk {
 }
 
 pub fn parse_patches(content: &str) -> Vec<PatchHunk> {
-    // Prioritize Aider format if it contains SEARCH/REPLACE markers or <patch> tags
-    if content.contains("<<<<<<< SEARCH") || content.contains("<patch>") {
+    let trimmed = content.trim();
+    if trimmed.contains("<patch>") || trimmed.contains("<<<<<<< SEARCH") {
         return parse_aider_patches(content);
     }
-
-    if content.contains("*** Begin Patch")
-        || content.contains("diff --git")
-        || content.contains("--- a/")
-        || content.contains("+++ b/")
-    {
-        return parse_git_or_unified_patches(content);
+    if trimmed.contains("diff --git") || trimmed.contains("--- ") || trimmed.contains("+++ ") {
+        let hunks = parse_git_or_unified_patches(content);
+        if !hunks.is_empty() {
+            return hunks;
+        }
     }
-
-    parse_aider_patches(content)
+    parse_raw_paste(content)
 }
 
 fn parse_aider_patches(content: &str) -> Vec<PatchHunk> {
     let mut hunks = Vec::new();
-    let lines: Vec<&str> = content.lines().collect();
-    let mut i = 0;
+    let mut current_hunk: Option<PatchHunk> = None;
+    let mut state = 0; // 0: outside, 1: search, 2: replace
     let mut current_filename = String::new();
-    while i < lines.len() {
-        let trimmed = lines[i].trim();
-        if trimmed.starts_with("filename ") {
-            current_filename = trimmed["filename ".len()..].trim().to_string();
-            i += 1;
-        } else if trimmed.contains("<<<<<<< SEARCH") {
-            i += 1;
-            let mut search = Vec::new();
-            while i < lines.len() {
-                let lt = lines[i].trim();
-                if lt == "======="
-                    || lt == ">>>>>>> REPLACE"
-                    || lt == "<<<<<<< SEARCH"
-                    || lt.starts_with("filename ")
-                {
-                    break;
-                }
-                search.push(lines[i].to_string());
-                i += 1;
-            }
 
-            if i >= lines.len() {
-                break;
+    for line in content.lines() {
+        if line.starts_with("<<<<<<< SEARCH") {
+            current_hunk = Some(PatchHunk {
+                filename: current_filename.clone(),
+                search: Vec::new(),
+                replace: Vec::new(),
+            });
+            state = 1;
+            current_filename.clear();
+        } else if line.starts_with("=======") {
+            state = 2;
+        } else if line.starts_with(">>>>>>> REPLACE") {
+            if let Some(h) = current_hunk.take() {
+                hunks.push(h);
             }
-            if lines[i].trim() == "=======" {
-                i += 1;
-            }
-
-            let mut replace = Vec::new();
-            while i < lines.len() {
-                let lt = lines[i].trim();
-                if lt == ">>>>>>> REPLACE"
-                    || lt == "======="
-                    || lt == "<<<<<<< SEARCH"
-                    || lt.starts_with("filename ")
-                {
-                    break;
-                }
-                replace.push(lines[i].to_string());
-                i += 1;
-            }
-
-            if i < lines.len() && lines[i].trim() == ">>>>>>> REPLACE" {
-                i += 1;
-            }
-
-            if !search.is_empty() || !replace.is_empty() {
-                hunks.push(PatchHunk {
-                    filename: current_filename.clone(),
-                    search,
-                    replace,
-                });
-            }
+            state = 0;
         } else {
-            i += 1;
+            if state == 0 {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("// ") {
+                    if !rest.is_empty() && (rest.contains('/') || rest.ends_with(".rs")) {
+                        current_filename = rest.trim().to_string();
+                    }
+                } else if let Some(rest) = trimmed.strip_prefix("# ") {
+                    if !rest.is_empty() && (rest.contains('/') || rest.ends_with(".rs")) {
+                        current_filename = rest.trim().to_string();
+                    }
+                } else if let Some(rest) = trimmed.strip_prefix("filename ") {
+                    current_filename = rest.trim().to_string();
+                } else if let Some(rest) = trimmed.strip_prefix("+++ b/") {
+                    current_filename = rest.trim().to_string();
+                } else if let Some(rest) = trimmed.strip_prefix("+++ ") {
+                    current_filename = rest.trim().to_string();
+                }
+            } else if state == 1 {
+                if let Some(h) = current_hunk.as_mut() {
+                    h.search.push(line.to_string());
+                }
+            } else if state == 2 {
+                if let Some(h) = current_hunk.as_mut() {
+                    h.replace.push(line.to_string());
+                }
+            }
         }
     }
+
+    for h in &mut hunks {
+        while h.search.last().map(|l| l.is_empty()).unwrap_or(false) {
+            h.search.pop();
+        }
+        while h.replace.last().map(|l| l.is_empty()).unwrap_or(false) {
+            h.replace.pop();
+        }
+    }
+
     hunks
 }
 
 fn parse_git_or_unified_patches(content: &str) -> Vec<PatchHunk> {
     let mut hunks = Vec::new();
-    let lines: Vec<&str> = content.lines().collect();
-    let mut i = 0;
+    let mut current_hunk: Option<PatchHunk> = None;
     let mut current_filename = String::new();
-    while i < lines.len() {
-        let line = lines[i];
-        if line.starts_with("*** Update File: ") {
-            current_filename = line["*** Update File: ".len()..].trim().to_string();
-        } else if line.starts_with("*** Add File: ") {
-            current_filename = line["*** Add File: ".len()..].trim().to_string();
-        } else if line.starts_with("diff --git ") {
-            if let Some(b_part) = line.split(" b/").nth(1) {
-                current_filename = b_part.trim().to_string();
+    let mut state = 0; // 0: outside, 1: search, 2: replace
+
+    for line in content.lines() {
+        if line.starts_with("diff --git") {
+            if let Some(h) = current_hunk.take() {
+                hunks.push(h);
             }
+            state = 0;
         } else if line.starts_with("+++ b/") {
-            current_filename = line["+++ b/".len()..].trim().to_string();
-        } else if line.starts_with("@@ ") || line.trim() == "@@" {
-            i += 1;
-            let mut search = Vec::new();
-            let mut replace = Vec::new();
-            while i < lines.len() {
-                let l = lines[i];
-                if l.starts_with("diff --git ")
-                    || l.starts_with("*** ")
-                    || l.starts_with("@@ ")
-                    || l.trim() == "@@"
-                {
-                    break;
-                }
-                if let Some(stripped) = l.strip_prefix(' ') {
-                    search.push(stripped.to_string());
-                    replace.push(stripped.to_string());
-                } else if let Some(stripped) = l.strip_prefix('-') {
-                    search.push(stripped.to_string());
-                } else if let Some(stripped) = l.strip_prefix('+') {
-                    replace.push(stripped.to_string());
-                } else if l.is_empty() {
-                    search.push(String::new());
-                    replace.push(String::new());
-                }
-                i += 1;
+            current_filename = line.strip_prefix("+++ b/").unwrap().trim().to_string();
+        } else if line.starts_with("+++ ") {
+            current_filename = line.strip_prefix("+++ ").unwrap().trim().to_string();
+        } else if line.starts_with("@@") {
+            if let Some(h) = current_hunk.take() {
+                hunks.push(h);
             }
-            if !search.is_empty() || !replace.is_empty() {
-                if current_filename.is_empty() {
-                    current_filename = "unknown_file".to_string();
+            current_hunk = Some(PatchHunk {
+                filename: current_filename.clone(),
+                search: Vec::new(),
+                replace: Vec::new(),
+            });
+            state = 1;
+        } else if line.starts_with("-") && !line.starts_with("---") {
+            if state == 1 {
+                if let Some(h) = current_hunk.as_mut() {
+                    h.search.push(line[1..].to_string());
                 }
-                hunks.push(PatchHunk {
-                    filename: current_filename.clone(),
-                    search,
-                    replace,
-                });
             }
+        } else if line.starts_with("+") && !line.starts_with("+++") {
+            if state == 1 {
+                if let Some(h) = current_hunk.as_mut() {
+                    h.replace.push(line[1..].to_string());
+                }
+            }
+        } else if line.starts_with(" ") {
+            if state == 1 {
+                if let Some(h) = current_hunk.as_mut() {
+                    h.search.push(line[1..].to_string());
+                    h.replace.push(line[1..].to_string());
+                }
+            }
+        }
+    }
+
+    if let Some(h) = current_hunk.take() {
+        hunks.push(h);
+    }
+
+    hunks
+}
+
+fn parse_raw_paste(content: &str) -> Vec<PatchHunk> {
+    let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    if lines.is_empty() {
+        return Vec::new();
+    }
+
+    let mut filename = String::new();
+    let mut search_start = 0;
+
+    // Look for the first non-empty line for a potential smart filename
+    while search_start < lines.len() {
+        let first_line = lines[search_start].trim();
+        if first_line.is_empty() {
+            search_start += 1;
             continue;
         }
-        i += 1;
+
+        if let Some(rest) = first_line.strip_prefix("// ") {
+            if !rest.is_empty() && (rest.contains('/') || rest.ends_with(".rs")) {
+                filename = rest.trim().to_string();
+                search_start += 1;
+                break;
+            }
+        } else if let Some(rest) = first_line.strip_prefix("# ") {
+            if !rest.is_empty() && (rest.contains('/') || rest.ends_with(".rs")) {
+                filename = rest.trim().to_string();
+                search_start += 1;
+                break;
+            }
+        } else if first_line.starts_with("filename ") {
+            filename = first_line
+                .strip_prefix("filename ")
+                .unwrap()
+                .trim()
+                .to_string();
+            search_start += 1;
+            break;
+        } else if first_line.starts_with("+++ b/") {
+            filename = first_line
+                .strip_prefix("+++ b/")
+                .unwrap()
+                .trim()
+                .to_string();
+            search_start += 1;
+            break;
+        } else if first_line.starts_with("+++ ") {
+            filename = first_line.strip_prefix("+++ ").unwrap().trim().to_string();
+            search_start += 1;
+            break;
+        }
+        break;
     }
-    hunks
+
+    let search_lines: Vec<String> = lines[search_start..]
+        .iter()
+        .filter(|l| {
+            !l.starts_with("<<<<<<<") && !l.starts_with("=======") && !l.starts_with(">>>>>>>")
+        })
+        .cloned()
+        .collect();
+
+    if search_lines.is_empty() && filename.is_empty() {
+        return Vec::new();
+    }
+
+    vec![PatchHunk {
+        filename,
+        search: search_lines,
+        replace: Vec::new(),
+    }]
 }

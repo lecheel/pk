@@ -337,6 +337,21 @@ impl MergeApp {
                 return Some((self.file_lines.len(), self.file_lines.len()));
             }
         }
+        
+        // If 'a' and 'b' marks are set, use them as the explicit replace range
+        if let Some(a) = self.file_anchors.get(&'a') {
+            let start = a.line;
+            let end = if let Some(b) = self.file_anchors.get(&'b') {
+                let mut e = a.line.max(b.line);
+                if let Some(a_end) = a.end_line { e = e.max(a_end); }
+                if let Some(b_end) = b.end_line { e = e.max(b_end); }
+                e
+            } else {
+                a.end_line.unwrap_or(start)
+            };
+            return Some((start, end + 1)); // +1 because file_end is exclusive
+        }
+
         self.match_result
             .as_ref()
             .map(|mr| (mr.file_start, mr.file_end))
