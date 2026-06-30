@@ -192,22 +192,30 @@ pub fn render_git_diff_panel(
             ui.painter().text(
                 Pos2::new(rect.left() + 8.0, rect.center().y),
                 Align2::LEFT_CENTER,
-                "📝 GIT DIFF vs HEAD  ·  press ESC to close",
+                "📝 GIT DIFF for current hunk  ·  press ESC to close",
                 FontId::monospace(11.0),
                 Color32::from_rgb(230, 120, 120),
             );
             ui.add_space(4.0);
-            if app.git_diff_rows.is_empty() {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(20.0);
-                    ui.label(
-                        RichText::new("No git differences or not in a Git repository.")
-                            .color(pal::TEXT_DIM),
-                    );
-                });
-                return;
-            }
-            for row in &app.git_diff_rows {
+            let current_line = app.cursor_line.unwrap_or(0);
+            let active_hunk = match app
+                .git_hunks
+                .iter()
+                .find(|h| h.current_line_range.contains(&current_line))
+            {
+                Some(h) => h,
+                None => {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(20.0);
+                        ui.label(
+                            RichText::new("No git hunk found at the current cursor line.")
+                                .color(pal::TEXT_DIM),
+                        );
+                    });
+                    return;
+                }
+            };
+            for row in &active_hunk.rows {
                 let (base_bg, text_color, prefix) = match row.kind {
                     RowKind::Delete => (pal::BG_DELETE, pal::TEXT_DELETE, "- "),
                     RowKind::Insert => (pal::BG_INSERT, pal::TEXT_INSERT, "+ "),
