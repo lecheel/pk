@@ -89,6 +89,7 @@ pub struct MergeApp {
     pub format_on_save: bool,
     pub fmt_command: String,
     pub show_settings: bool,
+    pub fmt_error: Option<String>,
     pub available_repos: Vec<RepoInfo>,
     pub active_repo_id: Option<String>,
     pub daemon_error: Option<String>,
@@ -176,6 +177,7 @@ impl MergeApp {
             format_on_save: true,
             fmt_command: "rustfmt".to_string(),
             show_settings: false,
+            fmt_error: None,
             available_repos: Vec::new(),
             active_repo_id: active_repo_id.clone(),
             daemon_error: None,
@@ -882,6 +884,36 @@ impl eframe::App for MergeApp {
             }
             super::split_view::render_split_view(self, ui);
         });
+        if let Some(err) = &self.fmt_error {
+            let mut fmt_error_open = true;
+            Window::new("⚠ Format Error")
+                .open(&mut fmt_error_open)
+                .collapsible(false)
+                .resizable(true)
+                .default_size(Vec2::new(500.0, 300.0))
+                .show(ctx, |ui| {
+                    ui.label(
+                        RichText::new(
+                            "rustfmt failed to format the file. Please fix the syntax errors:",
+                        )
+                        .color(pal::ACCENT_BAD),
+                    );
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+                    ScrollArea::vertical().show(ui, |ui| {
+                        ui.label(
+                            RichText::new(err)
+                                .color(pal::TEXT_NORMAL)
+                                .monospace()
+                                .small(),
+                        );
+                    });
+                });
+            if !fmt_error_open {
+                self.fmt_error = None;
+            }
+        }
         if self.show_help {
             super::help::render_help_overlay(self, ctx);
         }

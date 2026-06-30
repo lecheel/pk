@@ -26,19 +26,30 @@ impl MergeApp {
                         self.match_result
                             .as_ref()
                             .map(|mr| mr.file_end.saturating_sub(1))
-                            .unwrap_or(start)
+                            .unwrap_or(start),
                     )
                 } else {
                     anchor.end_line.unwrap_or(start)
                 };
-                println!("[DEBUG apply_merge] Anchor {} found: start={}, end={}. Returning ({}, {})", id, start, end, start, end + 1);
+                println!(
+                    "[DEBUG apply_merge] Anchor {} found: start={}, end={}. Returning ({}, {})",
+                    id,
+                    start,
+                    end,
+                    start,
+                    end + 1
+                );
                 (start, end + 1)
             } else {
                 self.set_message(StatusMessage::error(format!("Marker {} not found", id)));
                 return;
             }
         } else if let Some(ln) = forced_line {
-            println!("[DEBUG apply_merge] Forced line found: ({}, {})", ln, ln + 1);
+            println!(
+                "[DEBUG apply_merge] Forced line found: ({}, {})",
+                ln,
+                ln + 1
+            );
             (ln, ln + 1)
         } else {
             match self.resolve_apply_range() {
@@ -49,9 +60,17 @@ impl MergeApp {
                 }
             }
         };
-        
-        println!("[DEBUG apply_merge] Final range to replace: file_start={}, file_end={}", file_start, file_end);
-        println!("[DEBUG apply_merge] File lines len={}, replacing {} lines with {} lines", self.file_lines.len(), file_end - file_start, hunk.replace.len());
+
+        println!(
+            "[DEBUG apply_merge] Final range to replace: file_start={}, file_end={}",
+            file_start, file_end
+        );
+        println!(
+            "[DEBUG apply_merge] File lines len={}, replacing {} lines with {} lines",
+            self.file_lines.len(),
+            file_end - file_start,
+            hunk.replace.len()
+        );
 
         if let Some((ms, me)) = self.merged_range {
             if file_start < me && file_end > ms {
@@ -177,21 +196,33 @@ impl MergeApp {
                         match command.output() {
                             Ok(output) => {
                                 if output.status.success() {
+                                    self.fmt_error = None;
                                     if let Ok(formatted_content) = std::fs::read_to_string(&path) {
                                         self.file_text = formatted_content.clone();
-                                        self.file_lines = self.file_text.lines().map(String::from).collect();
+                                        self.file_lines =
+                                            self.file_text.lines().map(String::from).collect();
                                         self.recompute_match();
                                         self.update_git_statuses();
                                     }
                                     self.save_file_state();
-                                    self.set_message(StatusMessage::success(format!("Saved & formatted → {}", path)));
+                                    self.set_message(StatusMessage::success(format!(
+                                        "Saved & formatted → {}",
+                                        path
+                                    )));
                                 } else {
-                                    let err = String::from_utf8_lossy(&output.stderr);
-                                    self.set_message(StatusMessage::error(format!("Save ok, but fmt failed: {}", err.trim())));
+                                    let err = String::from_utf8_lossy(&output.stderr).to_string();
+                                    self.fmt_error = Some(err);
+                                    self.set_message(StatusMessage::error(
+                                        "Format failed. See error window.",
+                                    ));
                                 }
                             }
                             Err(e) => {
-                                self.set_message(StatusMessage::error(format!("Save ok, but failed to run fmt: {}", e)));
+                                self.fmt_error = Some(format!("Failed to execute command: {}", e));
+                                self.set_message(StatusMessage::error(format!(
+                                    "Save ok, but failed to run fmt: {}",
+                                    e
+                                )));
                             }
                         }
                         return;
@@ -205,7 +236,6 @@ impl MergeApp {
             }
         }
     }
-
 
     pub fn save_all_files(&mut self) {
         self.save_file_state();
