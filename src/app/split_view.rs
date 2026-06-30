@@ -1460,12 +1460,56 @@ fn render_file_panel(
                                 app.update_git_statuses();
                                 app.set_message(StatusMessage::info("Opened new line above"));
                             }
+                        } else if txt == "+" || txt == "-" {
+                            let delta: i32 = if txt == "+" { 1 } else { -1 };
+                            if let Some(cur) = app.cursor_line {
+                                let on_end = app
+                                    .file_anchors
+                                    .values()
+                                    .find(|a| a.end_line == Some(cur))
+                                    .map(|a| a.id);
+                                let on_start = app
+                                    .file_anchors
+                                    .values()
+                                    .find(|a| a.line == cur)
+                                    .map(|a| a.id);
+                                if let Some(id) = on_end {
+                                    if let Some(anchor) = app.file_anchors.get_mut(&id) {
+                                        let current_end = anchor.end_line.unwrap_or(anchor.line);
+                                        let new_end = (current_end as i32 + delta).clamp(
+                                            anchor.line as i32,
+                                            app.file_lines.len().saturating_sub(1) as i32,
+                                        )
+                                            as usize;
+                                        anchor.end_line = Some(new_end);
+                                        app.cursor_line = Some(new_end);
+                                        cursor_changed = true;
+                                        app.scroll_to_match = true;
+                                    }
+                                } else if let Some(id) = on_start {
+                                    if let Some(anchor) = app.file_anchors.get_mut(&id) {
+                                        let max_bound = anchor
+                                            .end_line
+                                            .unwrap_or(app.file_lines.len().saturating_sub(1))
+                                            as i32;
+                                        let new_start = (anchor.line as i32 + delta)
+                                            .clamp(0, max_bound)
+                                            as usize;
+                                        anchor.line = new_start;
+                                        app.cursor_line = Some(new_start);
+                                        cursor_changed = true;
+                                        app.scroll_to_match = true;
+                                    }
+                                }
+                            }
                         } else if txt != "?"
                             && txt != "m"
                             && txt != "v"
                             && txt != "V"
                             && txt != "o"
                             && txt != "O"
+                            && txt != "+"
+                            && txt != "-"
                         {
                             new_text.push_str(&txt);
                         }
