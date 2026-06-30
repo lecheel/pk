@@ -30,64 +30,84 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let char_w = mono_h * 0.60;
 
     ui.horizontal(|ui| {
-        let hunk = app.current_hunk().unwrap();
-        let header_bg = if app.fmt_error.is_some() {
-            Color32::from_rgb(58, 28, 28)
-        } else if app.show_settings {
-            Color32::from_rgb(28, 38, 58)
-        } else if app.show_repos_window {
-            Color32::from_rgb(20, 45, 25)
-        } else if app.show_debug {
-            Color32::from_rgb(40, 30, 10)
-        } else if app.show_git_status_window {
-            Color32::from_rgb(20, 45, 25)
-        } else if app.show_git_diff_window {
-            Color32::from_rgb(58, 28, 28)
-        } else {
-            Color32::from_rgb(28, 38, 58)
-        };
         Frame::none()
-            .fill(header_bg)
-            .inner_margin(Margin::symmetric(8.0, 3.0))
+            .fill(pal::BG_PANEL)
+            .inner_margin(Margin::symmetric(4.0, 2.0))
             .show(ui, |ui| {
                 ui.set_min_width(left_w);
                 ui.set_max_width(left_w);
-                let header_text = if app.fmt_error.is_some() {
-                    format!("FORMAT ERROR")
-                } else if app.show_settings {
-                    format!("SETTINGS")
-                } else if app.show_repos_window {
-                    format!("ACTIVE REPOSITORY")
-                } else if app.show_debug {
-                    format!("DEBUG DIAGNOSTICS")
-                } else if app.show_git_status_window {
-                    format!("GIT STATUS  ·  Repository")
-                } else if app.show_git_diff_window {
-                    format!("GIT DIFF  ·  {}", hunk.filename)
-                } else {
-                    format!("SEARCH  ·  {}", hunk.filename)
-                };
-                let header_color = if app.fmt_error.is_some() {
-                    Color32::from_rgb(235, 120, 120)
-                } else if app.show_settings {
-                    Color32::from_rgb(120, 180, 255)
-                } else if app.show_repos_window {
-                    Color32::from_rgb(120, 230, 160)
-                } else if app.show_debug {
-                    Color32::from_rgb(220, 180, 50)
-                } else if app.show_git_status_window {
-                    Color32::from_rgb(120, 230, 160)
-                } else if app.show_git_diff_window {
-                    Color32::from_rgb(235, 120, 120)
-                } else {
-                    Color32::from_rgb(120, 180, 255)
-                };
-                ui.label(
-                    RichText::new(header_text)
-                        .color(header_color)
-                        .strong()
-                        .monospace(),
-                );
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    ui.spacing_mut().button_padding = Vec2::new(4.0, 2.0);
+
+                    let current_tab = if app.show_fmt_error && app.fmt_error.is_some() {
+                        "Error"
+                    } else if app.show_settings {
+                        "Settings"
+                    } else if app.show_repos_window {
+                        "Repos"
+                    } else if app.show_debug {
+                        "Debug"
+                    } else if app.show_git_status_window {
+                        "Git Status"
+                    } else if app.show_git_diff_window {
+                        "Git Diff"
+                    } else {
+                        "Search"
+                    };
+
+                    let tabs = [
+                        ("🔍 Search", "Search", Color32::from_rgb(120, 180, 255)),
+                        ("🌳 Status", "Git Status", Color32::from_rgb(120, 230, 160)),
+                        ("📝 Diff", "Git Diff", Color32::from_rgb(235, 120, 120)),
+                        ("📂 Repos", "Repos", Color32::from_rgb(120, 230, 160)),
+                        ("⚙ Config", "Settings", Color32::from_rgb(120, 180, 255)),
+                        ("🐞 Debug", "Debug", Color32::from_rgb(220, 180, 50)),
+                    ];
+
+                    if app.fmt_error.is_some() {
+                        let is_active = current_tab == "Error";
+                        let rich_text = RichText::new("⚠ Error")
+                            .color(if is_active {
+                                pal::ACCENT_BAD
+                            } else {
+                                pal::TEXT_DIM
+                            })
+                            .strong();
+                        if ui.selectable_label(is_active, rich_text).clicked() {
+                            app.show_fmt_error = true;
+                            app.show_settings = false;
+                            app.show_repos_window = false;
+                            app.show_debug = false;
+                            app.show_git_status_window = false;
+                            app.show_git_diff_window = false;
+                        }
+                    }
+
+                    for (label, tab_name, color) in tabs.iter() {
+                        let is_active = current_tab == *tab_name;
+                        let rich_text = RichText::new(*label)
+                            .color(if is_active { *color } else { pal::TEXT_DIM })
+                            .strong();
+                        if ui.selectable_label(is_active, rich_text).clicked() {
+                            app.show_fmt_error = false;
+                            app.show_settings = false;
+                            app.show_repos_window = false;
+                            app.show_debug = false;
+                            app.show_git_status_window = false;
+                            app.show_git_diff_window = false;
+
+                            match *tab_name {
+                                "Settings" => app.show_settings = true,
+                                "Repos" => app.show_repos_window = true,
+                                "Debug" => app.show_debug = true,
+                                "Git Status" => app.show_git_status_window = true,
+                                "Git Diff" => app.show_git_diff_window = true,
+                                _ => {}
+                            }
+                        }
+                    }
+                });
             });
         ui.add_space(2.0);
         Frame::none()
@@ -127,7 +147,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
 
     let mut left_ui = ui.child_ui(left_rect, Layout::top_down(Align::LEFT), None);
 
-    if app.fmt_error.is_some() {
+    if app.show_fmt_error && app.fmt_error.is_some() {
         render_fmt_error_panel(app, &mut left_ui);
     } else if app.show_settings {
         render_settings_panel(app, &mut left_ui);
@@ -142,24 +162,11 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     } else {
         render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
     }
-
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
     render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
 }
 
 fn render_fmt_error_panel(app: &mut MergeApp, ui: &mut Ui) {
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("⚠ Format Error")
-                .color(pal::ACCENT_BAD)
-                .strong()
-                .font(FontId::monospace(18.0)),
-        );
-        if ui.button("✕ Dismiss").clicked() {
-            app.fmt_error = None;
-        }
-    });
-    ui.separator();
     ui.add_space(12.0);
     ui.label(
         RichText::new("rustfmt failed to format the file. Please fix the syntax errors:")
@@ -179,21 +186,15 @@ fn render_fmt_error_panel(app: &mut MergeApp, ui: &mut Ui) {
                 );
             }
         });
-}
-
-fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
+    ui.add_space(10.0);
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("⚙ Settings")
-                .color(Color32::from_rgb(120, 180, 255))
-                .strong()
-                .monospace(),
-        );
-        if ui.button("✕ Close").clicked() {
-            app.show_settings = false;
+        if ui.button("✕ Dismiss Error").clicked() {
+            app.fmt_error = None;
+            app.show_fmt_error = false;
         }
     });
-    ui.separator();
+}
+fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
     ui.add_space(8.0);
     ui.heading("Formatter Settings");
     ui.add_space(8.0);
@@ -230,20 +231,7 @@ fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
             .monospace(),
     );
 }
-
 fn render_repos_panel(app: &mut MergeApp, ui: &mut Ui) {
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("📂 Active Repository")
-                .color(Color32::from_rgb(120, 230, 160))
-                .strong()
-                .monospace(),
-        );
-        if ui.button("✕ Close").clicked() {
-            app.show_repos_window = false;
-        }
-    });
-    ui.separator();
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.label("Select the repository where file paths should resolve:");
@@ -337,20 +325,7 @@ fn render_repos_panel(app: &mut MergeApp, ui: &mut Ui) {
             });
     }
 }
-
 fn render_debug_panel(app: &mut MergeApp, ui: &mut Ui) {
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("🐞 App diagnostics")
-                .color(Color32::from_rgb(220, 180, 50))
-                .strong()
-                .monospace(),
-        );
-        if ui.button("✕ Close").clicked() {
-            app.show_debug = false;
-        }
-    });
-    ui.separator();
     ui.add_space(8.0);
 
     ScrollArea::vertical()

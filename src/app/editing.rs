@@ -212,6 +212,7 @@ impl MergeApp {
                                 } else {
                                     let err = String::from_utf8_lossy(&output.stderr).to_string();
                                     self.fmt_error = Some(err);
+                                    self.show_fmt_error = true;
                                     self.set_message(StatusMessage::error(
                                         "Format failed. See error window.",
                                     ));
