@@ -1,3 +1,4 @@
+use super::config::AppConfig;
 use super::daemon::{self, RepoInfo};
 use super::git_ops::GitStatus;
 use super::matching::MergeMatching;
@@ -120,8 +121,11 @@ impl MergeApp {
             let _ = tx.send(res);
         });
 
-        let active_repo_id = daemon::get_active_repo();
-
+        let config = AppConfig::load();
+        let active_repo_id = config
+            .active_repo_id
+            .clone()
+            .or_else(daemon::get_active_repo);
         let mut app = Self {
             quit_requested: false,
             patch_text: String::new(),
@@ -174,8 +178,8 @@ impl MergeApp {
             del_end: None,
             is_visual_mode: false,
             visual_start: None,
-            format_on_save: true,
-            fmt_command: "rustfmt".to_string(),
+            format_on_save: config.format_on_save,
+            fmt_command: config.fmt_command.clone(),
             show_settings: false,
             fmt_error: None,
             show_fmt_error: false,
@@ -572,6 +576,14 @@ impl MergeApp {
         }
     }
 
+    pub fn save_config(&self) {
+        let config = AppConfig {
+            format_on_save: self.format_on_save,
+            fmt_command: self.fmt_command.clone(),
+            active_repo_id: self.active_repo_id.clone(),
+        };
+        config.save();
+    }
     pub fn reset_for_new_file(&mut self) {
         self.applied_hunks.clear();
         self.merged_range = None;

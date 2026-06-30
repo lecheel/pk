@@ -1,4 +1,5 @@
 mod clipboard_utils;
+mod config;
 mod constants;
 mod daemon;
 mod editing;
