@@ -19,19 +19,29 @@ impl MergeApp {
 
         let (file_start, file_end) = if let Some(id) = anchor_id {
             if let Some(anchor) = self.file_anchors.get(&id) {
-                (anchor.line, anchor.line)
+                let start = anchor.line;
+                let end = anchor.end_line.unwrap_or(start);
+                println!("[DEBUG apply_merge] Anchor {} found: start={}, end={}. Returning ({}, {})", id, start, end, start, end + 1);
+                (start, end + 1)
             } else {
                 self.set_message(StatusMessage::error(format!("Marker {} not found", id)));
                 return;
             }
         } else if let Some(ln) = forced_line {
-            (ln, ln)
+            println!("[DEBUG apply_merge] Forced line found: ({}, {})", ln, ln + 1);
+            (ln, ln + 1)
         } else {
             match self.resolve_apply_range() {
                 Some(r) => r,
-                None => return,
+                None => {
+                    println!("[DEBUG apply_merge] resolve_apply_range returned None. Aborting.");
+                    return;
+                }
             }
         };
+        
+        println!("[DEBUG apply_merge] Final range to replace: file_start={}, file_end={}", file_start, file_end);
+        println!("[DEBUG apply_merge] File lines len={}, replacing {} lines with {} lines", self.file_lines.len(), file_end - file_start, hunk.replace.len());
 
         if let Some((ms, me)) = self.merged_range {
             if file_start < me && file_end > ms {

@@ -334,6 +334,7 @@ impl MergeApp {
     pub fn resolve_apply_range(&self) -> Option<(usize, usize)> {
         if let Some(hunk) = self.current_hunk() {
             if hunk.search.is_empty() {
+                println!("[DEBUG resolve_apply_range] Hunk search empty. Returning end of file: ({}, {})", self.file_lines.len(), self.file_lines.len());
                 return Some((self.file_lines.len(), self.file_lines.len()));
             }
         }
@@ -349,12 +350,17 @@ impl MergeApp {
             } else {
                 a.end_line.unwrap_or(start)
             };
+            println!("[DEBUG resolve_apply_range] Anchor 'a' found: start={}, end={}. Returning ({}, {})", start, end, start, end + 1);
             return Some((start, end + 1)); // +1 because file_end is exclusive
         }
 
-        self.match_result
-            .as_ref()
-            .map(|mr| (mr.file_start, mr.file_end))
+        if let Some(mr) = self.match_result.as_ref() {
+            println!("[DEBUG resolve_apply_range] No anchors. Using match_result: ({}, {})", mr.file_start, mr.file_end);
+            return Some((mr.file_start, mr.file_end));
+        }
+        
+        println!("[DEBUG resolve_apply_range] No match and no anchors. Returning None.");
+        None
     }
 
     pub fn toggle_line_removal(&mut self, line_idx: usize) {
