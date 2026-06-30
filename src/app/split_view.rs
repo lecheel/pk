@@ -1550,50 +1550,6 @@ fn render_file_panel(
                     );
                 }
                 // Draw git hover diff for non-anchor rows
-                if !is_anchor_row && git_status != GitStatus::Unchanged {
-                    if let Some(hunk) = app
-                        .git_hunks
-                        .iter()
-                        .find(|h| h.current_line_range.contains(&i))
-                    {
-                        row_resp.clone().on_hover_ui(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 2.0;
-                                ui.label(
-                                    RichText::new("Git Diff")
-                                        .color(Color32::from_rgb(100, 160, 230))
-                                        .strong(),
-                                );
-                            });
-                            ui.separator();
-                            for row in &hunk.rows {
-                                match row.kind {
-                                    RowKind::Delete => {
-                                        if let Some(ref text) = row.left {
-                                            ui.colored_label(
-                                                pal::TEXT_DELETE,
-                                                format!("- {}", text),
-                                            );
-                                        }
-                                    }
-                                    RowKind::Insert => {
-                                        if let Some(ref text) = row.right {
-                                            ui.colored_label(
-                                                pal::TEXT_INSERT,
-                                                format!("+ {}", text),
-                                            );
-                                        }
-                                    }
-                                    RowKind::Equal => {
-                                        if let Some(ref text) = row.right {
-                                            ui.colored_label(pal::TEXT_DIM, format!("  {}", text));
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    }
-                }
                 let text_color = if is_anchor_row {
                     pal::TEXT_ANCHOR
                 } else if in_block_delete {
