@@ -1,5 +1,6 @@
 mod clipboard_utils;
 mod constants;
+mod daemon;
 mod editing;
 mod git_ops;
 mod git_panels;

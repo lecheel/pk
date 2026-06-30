@@ -1,4 +1,5 @@
 use super::constants::{DEFAULT_FILE, DEFAULT_PATCH};
+use super::daemon::{self, RepoInfo};
 use super::git_ops::GitStatus;
 use super::matching::MergeMatching;
 use super::types::{Action, FileAnchor, FileState, StatusMessage};
@@ -7,6 +8,7 @@ use crate::diff::MatchResult;
 use crate::patch::PatchHunk;
 use eframe::egui::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::mpsc;
 
 #[derive(Clone, Debug)]
 pub struct SyncAnchor {
@@ -84,6 +86,10 @@ pub struct MergeApp {
     pub del_end: Option<usize>,
     pub is_visual_mode: bool,
     pub visual_start: Option<usize>,
+    pub available_repos: Vec<RepoInfo>,
+    pub active_repo_id: Option<String>,
+    pub daemon_error: Option<String>,
+    pub repo_receiver: mpsc::Receiver<Result<Vec<RepoInfo>, String>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -94,17 +100,23 @@ pub enum MarkPending {
 impl MergeApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_patch: Option<String>) -> Self {
         cc.egui_ctx.set_visuals(Visuals::dark());
-
         let current_pwd = std::env::current_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
-
         let start_repo = git2::Repository::discover(&current_pwd).ok();
         let start_pwd_is_repo = start_repo.is_some();
         let start_pwd = start_repo
             .as_ref()
             .and_then(|r| r.workdir().map(|w| w.display().to_string()))
             .unwrap_or_else(|| current_pwd.clone());
+
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let res = daemon::fetch_repos();
+            let _ = tx.send(res);
+        });
+
+        let active_repo_id = daemon::get_active_repo();
 
         let mut app = Self {
             quit_requested: false,
@@ -158,6 +170,10 @@ impl MergeApp {
             del_end: None,
             is_visual_mode: false,
             visual_start: None,
+            available_repos: Vec::new(),
+            active_repo_id: active_repo_id.clone(),
+            daemon_error: None,
+            repo_receiver: rx,
         };
 
         let mut loaded_patch = false;
@@ -168,7 +184,6 @@ impl MergeApp {
                 if let Some(parent) = path.parent() {
                     let parent_str = parent.display().to_string();
                     if !parent_str.is_empty() {
-                        // Use the git toplevel repo home dir if discoverable from the patch's location
                         let patch_repo = git2::Repository::discover(&parent_str).ok();
                         app.base_dir = patch_repo
                             .as_ref()
@@ -188,14 +203,12 @@ impl MergeApp {
                 )));
             }
         }
-
         if !loaded_patch {
             app.patch_text = DEFAULT_PATCH.to_string();
             app.set_message(StatusMessage::info(
                 "No patch file provided — using embedded demo patch. Press ? for help.",
             ));
         }
-
         app.reparse();
         app
     }
@@ -311,6 +324,7 @@ impl MergeApp {
         }
         self.scroll_to_match = true;
     }
+
     pub fn clear_marks(&mut self) {
         self.file_anchors.clear();
         self.mark_pending = None;
@@ -320,7 +334,6 @@ impl MergeApp {
     pub fn resolve_apply_range(&self) -> Option<(usize, usize)> {
         if let Some(hunk) = self.current_hunk() {
             if hunk.search.is_empty() {
-                // If search is empty, treat as a new file or append operation
                 return Some((self.file_lines.len(), self.file_lines.len()));
             }
         }
@@ -573,6 +586,26 @@ impl eframe::App for MergeApp {
             ctx.send_viewport_cmd(ViewportCommand::Close);
             self.quit_requested = false;
         }
+
+        if let Ok(res) = self.repo_receiver.try_recv() {
+            match res {
+                Ok(repos) => {
+                    if let Some(id) = &self.active_repo_id {
+                        if let Some(repo) = repos.iter().find(|r| &r.id == id) {
+                            self.base_dir = repo.source_path.clone();
+                            self.start_pwd = repo.source_path.clone();
+                            self.start_pwd_is_repo = true;
+                        }
+                    }
+                    self.available_repos = repos;
+                    self.daemon_error = None;
+                }
+                Err(e) => {
+                    self.daemon_error = Some(e);
+                }
+            }
+        }
+
         if self.message.is_some() {
             if self.message_until.is_none() {
                 self.message_until = Some(ctx.input(|i| i.time) + 6.0);
@@ -817,88 +850,129 @@ impl eframe::App for MergeApp {
                 .open(&mut show_repos)
                 .collapsible(false)
                 .resizable(false)
-                .default_size(Vec2::new(400.0, 200.0))
+                .default_size(Vec2::new(450.0, 300.0))
                 .show(ctx, |ui| {
-                    ui.label(
-                        RichText::new("Select the repository where file paths should resolve:")
-                            .color(pal::TEXT_NORMAL),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("Select the repository where file paths should resolve:")
+                                .color(pal::TEXT_NORMAL),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.button("🔄 Refresh").clicked() {
+                                let (tx, rx) = mpsc::channel();
+                                self.repo_receiver = rx;
+                                std::thread::spawn(move || {
+                                    let res = daemon::fetch_repos();
+                                    let _ = tx.send(res);
+                                });
+                            }
+                        });
+                    });
                     ui.add_space(8.0);
                     ui.separator();
                     ui.add_space(4.0);
 
-                    let repos = [
-                        ("pk", "/opt/ai/gh/pk", "master", "22 files, synced 1h ago"),
-                        ("amp", "/opt/ai/gh/amp", "main", "191 files, synced 7d ago"),
-                    ];
-
-                    for (name, path, branch, status) in repos.iter() {
-                        let is_active = self.base_dir == *path || self.start_pwd == *path;
-                        let bg = if is_active {
-                            Color32::from_rgb(30, 45, 30)
+                    if self.available_repos.is_empty() {
+                        ui.label(RichText::new(if self.daemon_error.is_some() {
+                            format!("⚠️ Daemon error: {}", self.daemon_error.as_ref().unwrap())
                         } else {
-                            pal::BG_PANEL
-                        };
-
-                        Frame::none()
-                            .fill(bg)
-                            .stroke(Stroke::new(
-                                1.0,
-                                if is_active { pal::ACCENT_GOOD } else { pal::SEPARATOR },
-                            ))
-                            .rounding(4.0)
-                            .inner_margin(Margin::symmetric(8.0, 6.0))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(if is_active { "→ " } else { "  " })
-                                            .color(pal::ACCENT_GOOD)
-                                            .monospace(),
-                                    );
-                                    ui.vertical(|ui| {
+                            "No repos registered. Use 'cli add-repo' to register one.".to_string()
+                        }).color(pal::TEXT_DIM));
+                    } else {
+                        ScrollArea::vertical().show(ui, |ui| {
+                            let repos_clone = self.available_repos.clone();
+                            for repo in repos_clone.iter() {
+                                let is_active = self.active_repo_id.as_deref() == Some(repo.id.as_str());
+                                let bg = if is_active {
+                                    Color32::from_rgb(30, 45, 30)
+                                } else {
+                                    pal::BG_PANEL
+                                };
+                                Frame::none()
+                                    .fill(bg)
+                                    .stroke(Stroke::new(
+                                        1.0,
+                                        if is_active { pal::ACCENT_GOOD } else { pal::SEPARATOR },
+                                    ))
+                                    .rounding(4.0)
+                                    .inner_margin(Margin::symmetric(8.0, 6.0))
+                                    .show(ui, |ui| {
                                         ui.horizontal(|ui| {
                                             ui.label(
-                                                RichText::new(*name)
-                                                    .color(pal::TEXT_NORMAL)
-                                                    .strong()
+                                                RichText::new(if is_active { "→ " } else { "  " })
+                                                    .color(pal::ACCENT_GOOD)
                                                     .monospace(),
                                             );
-                                            ui.label(
-                                                RichText::new(format!("[{}]", branch))
-                                                    .color(pal::TEXT_DIM)
-                                                    .small(),
-                                            );
-                                            if is_active {
+                                            ui.vertical(|ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        RichText::new(&repo.id)
+                                                            .color(pal::TEXT_NORMAL)
+                                                            .strong()
+                                                            .monospace(),
+                                                    );
+                                                    if let Some(branch) = &repo.git_branch {
+                                                        ui.label(
+                                                            RichText::new(format!("[{}]", branch))
+                                                                .color(pal::TEXT_DIM)
+                                                                .small(),
+                                                        );
+                                                    }
+                                                    if is_active {
+                                                        ui.label(
+                                                            RichText::new("↑ active")
+                                                                .color(pal::ACCENT_GOOD)
+                                                                .small(),
+                                                        );
+                                                    }
+                                                });
+                                                let files = repo.file_count.unwrap_or(0);
                                                 ui.label(
-                                                    RichText::new("↑ active")
-                                                        .color(pal::ACCENT_GOOD)
+                                                    RichText::new(format!("{}  ({} files)", repo.source_path, files))
+                                                        .color(pal::TEXT_DIM)
                                                         .small(),
                                                 );
-                                            }
+                                            });
+                                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                                if is_active {
+                                                    if ui.button("✕ Clear").clicked() {
+                                                        self.active_repo_id = None;
+                                                        daemon::clear_active_repo();
+                                                        self.set_message(StatusMessage::info("Cleared active repo. Paths must be fully qualified."));
+                                                    }
+                                                } else {
+                                                    if ui.button("Use").clicked() {
+                                                        self.active_repo_id = Some(repo.id.clone());
+                                                        self.base_dir = repo.source_path.clone();
+                                                        self.start_pwd = repo.source_path.clone();
+                                                        self.start_pwd_is_repo = true;
+                                                        daemon::set_active_repo(&repo.id);
+                                                        self.set_message(StatusMessage::success(format!(
+                                                            "✅ Active repo: {}. Files will be looked up in repo '{}'",
+                                                            repo.id, repo.id
+                                                        )));
+                                                        self.show_repos_window = false;
+                                                        self.reparse();
+                                                    }
+                                                }
+                                                if ui.button("🔄 Sync").clicked() {
+                                                    let id = repo.id.clone();
+                                                    let ctx_clone = ctx.clone();
+                                                    self.set_message(StatusMessage::info(format!("Syncing {}...", id)));
+                                                    std::thread::spawn(move || {
+                                                        match daemon::sync_repo(&id) {
+                                                            Ok(_) => {},
+                                                            Err(_) => {},
+                                                        }
+                                                        ctx_clone.request_repaint();
+                                                    });
+                                                }
+                                            });
                                         });
-                                        ui.label(
-                                            RichText::new(format!("{}  ({})", path, status))
-                                                .color(pal::TEXT_DIM)
-                                                .small(),
-                                        );
                                     });
-                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        if !is_active {
-                                            if ui.button("Use").clicked() {
-                                                self.base_dir = path.to_string();
-                                                self.start_pwd = path.to_string();
-                                                self.start_pwd_is_repo = true;
-                                                self.set_message(StatusMessage::success(format!(
-                                                    "✅ Active repo: {}. Files will be looked up in repo '{}'",
-                                                    name, name
-                                                )));
-                                                self.show_repos_window = false;
-                                            }
-                                        }
-                                    });
-                                });
-                            });
-                        ui.add_space(4.0);
+                                ui.add_space(4.0);
+                            }
+                        });
                     }
                 });
             self.show_repos_window = show_repos;
