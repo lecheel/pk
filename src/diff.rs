@@ -138,8 +138,13 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
         .filter(|l| !l.trim().is_empty())
         .take(2)
         .collect();
-    let first_non_empty = search.iter().find(|l| !l.trim().is_empty());
-    let last_non_empty = search.iter().rev().find(|l| !l.trim().is_empty());
+
+    const BOUNDARY_ANCHOR: usize = 3; // bump to 4-5 if you still see collisions
+    let s_head = first_n_nonempty(search, BOUNDARY_ANCHOR);
+    let s_tail = last_n_nonempty(search, BOUNDARY_ANCHOR);
+    let k_head = s_head.len();
+    let k_tail = s_tail.len();
+
     for window_size in min_window..=max_window {
         for start in 0..=file.len().saturating_sub(window_size) {
             let window = &file[start..start + window_size];
@@ -153,14 +158,12 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
             if !all_present {
                 continue;
             }
-            let win_first = window.iter().find(|l| !l.trim().is_empty());
-            let win_last = window.iter().rev().find(|l| !l.trim().is_empty());
-            let boundary_match = match (first_non_empty, win_first, last_non_empty, win_last) {
-                (Some(s_first), Some(w_first), Some(s_last), Some(w_last)) => {
-                    s_first.trim() == w_first.trim() && s_last.trim() == w_last.trim()
-                }
-                _ => false,
-            };
+
+            let w_head = first_n_nonempty(window, k_head);
+            let w_tail = last_n_nonempty(window, k_tail);
+            let boundary_match =
+                !s_head.is_empty() && !s_tail.is_empty() && w_head == s_head && w_tail == s_tail;
+
             if !boundary_match {
                 continue;
             }
@@ -306,4 +309,25 @@ pub fn build_rows(
         });
     }
     rows
+}
+
+fn first_n_nonempty(lines: &[String], n: usize) -> Vec<String> {
+    lines
+        .iter()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .take(n)
+        .collect()
+}
+
+fn last_n_nonempty(lines: &[String], n: usize) -> Vec<String> {
+    let mut v: Vec<String> = lines
+        .iter()
+        .rev()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .take(n)
+        .collect();
+    v.reverse();
+    v
 }
