@@ -1611,6 +1611,45 @@ fn render_file_panel(
                         app.cursor_line = Some(app.file_lines.len().saturating_sub(1));
                         app.scroll_to_match = true;
                         clear_buffer = true;
+                    } else if buf == "yy" {
+                        if let Some(cur) = app.cursor_line {
+                            if let Some(line) = app.file_lines.get(cur) {
+                                app.yanked_line = Some(line.clone());
+                                app.set_message(StatusMessage::info(format!(
+                                    "Yanked line {}",
+                                    cur + 1
+                                )));
+                            }
+                        }
+                        clear_buffer = true;
+                    } else if lower_buf == "p" {
+                        if let Some(line) = app.yanked_line.clone() {
+                            if let Some(cur) = app.cursor_line {
+                                app.save_history();
+                                if cur + 1 <= app.file_lines.len() {
+                                    app.file_lines.insert(cur + 1, line);
+                                    app.cursor_line = Some(cur + 1);
+                                    app.scroll_to_match = true;
+                                    app.recompute_match();
+                                    app.update_git_statuses();
+                                    app.set_message(StatusMessage::info("Pasted below"));
+                                }
+                            }
+                        }
+                        clear_buffer = true;
+                    } else if buf == "P" {
+                        if let Some(line) = app.yanked_line.clone() {
+                            if let Some(cur) = app.cursor_line {
+                                app.save_history();
+                                app.file_lines.insert(cur, line);
+                                app.cursor_line = Some(cur);
+                                app.scroll_to_match = true;
+                                app.recompute_match();
+                                app.update_git_statuses();
+                                app.set_message(StatusMessage::info("Pasted above"));
+                            }
+                        }
+                        clear_buffer = true;
                     } else if lower_buf == "daf" {
                         app.delete_function_around_cursor();
                         app.last_action = Some(Action::DeleteFunction);
@@ -1639,6 +1678,9 @@ fn render_file_panel(
                                 || c == '['
                                 || c == ']'
                                 || c == 'h'
+                                || c == 'y'
+                                || c == 'p'
+                                || c == 'P'
                         }) || lower_buf == "da"
                             || lower_buf == "daf";
                         let d_count = buf.matches('d').count() + buf.matches('D').count();
