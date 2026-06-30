@@ -22,9 +22,8 @@ pub fn parse_patches(content: &str) -> Vec<PatchHunk> {
 fn parse_aider_patches(content: &str) -> Vec<PatchHunk> {
     let mut hunks = Vec::new();
     let mut current_hunk: Option<PatchHunk> = None;
-    let mut state = 0; // 0: outside, 1: search, 2: replace
+    let mut state = 0;
     let mut current_filename = String::new();
-
     for line in content.lines() {
         if line.starts_with("<<<<<<< SEARCH") {
             current_hunk = Some(PatchHunk {
@@ -33,7 +32,6 @@ fn parse_aider_patches(content: &str) -> Vec<PatchHunk> {
                 replace: Vec::new(),
             });
             state = 1;
-            current_filename.clear();
         } else if line.starts_with("=======") {
             state = 2;
         } else if line.starts_with(">>>>>>> REPLACE") {
@@ -44,20 +42,58 @@ fn parse_aider_patches(content: &str) -> Vec<PatchHunk> {
         } else {
             if state == 0 {
                 let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("// ") {
-                    if !rest.is_empty() && (rest.contains('/') || rest.ends_with(".rs")) {
-                        current_filename = rest.trim().to_string();
+                let mut found_fn = None;
+
+                // Extract filename enclosed in backticks if available
+                if let Some(start_idx) = trimmed.find('`') {
+                    if let Some(end_idx) = trimmed[start_idx + 1..].find('`') {
+                        let potential = trimmed[start_idx + 1..start_idx + 1 + end_idx].trim();
+                        if !potential.is_empty()
+                            && (potential.contains('/')
+                                || potential.contains('.')
+                                || potential.ends_with(".rs"))
+                        {
+                            found_fn = Some(potential.to_string());
+                        }
                     }
-                } else if let Some(rest) = trimmed.strip_prefix("# ") {
-                    if !rest.is_empty() && (rest.contains('/') || rest.ends_with(".rs")) {
-                        current_filename = rest.trim().to_string();
+                }
+
+                if found_fn.is_none() {
+                    if let Some(rest) = trimmed.strip_prefix("// ") {
+                        if !rest.is_empty()
+                            && (rest.contains('/') || rest.contains('.') || rest.ends_with(".rs"))
+                        {
+                            found_fn = Some(rest.trim().trim_matches('`').to_string());
+                        }
+                    } else if let Some(rest) = trimmed.strip_prefix("# ") {
+                        if !rest.is_empty()
+                            && (rest.contains('/') || rest.contains('.') || rest.ends_with(".rs"))
+                        {
+                            found_fn = Some(rest.trim().trim_matches('`').to_string());
+                        }
+                    } else if let Some(rest) = trimmed.strip_prefix("filename ") {
+                        found_fn = Some(rest.trim().trim_matches('`').to_string());
+                    } else if let Some(rest) = trimmed.strip_prefix("filename:") {
+                        found_fn = Some(rest.trim().trim_matches('`').to_string());
+                    } else if let Some(rest) = trimmed.strip_prefix("file:") {
+                        found_fn = Some(rest.trim().trim_matches('`').to_string());
+                    } else if let Some(rest) = trimmed.strip_prefix("+++ b/") {
+                        found_fn = Some(rest.trim().trim_matches('`').to_string());
+                    } else if let Some(rest) = trimmed.strip_prefix("+++ ") {
+                        found_fn = Some(rest.trim().trim_matches('`').to_string());
+                    } else if !trimmed.is_empty()
+                        && (trimmed.contains('/')
+                            || trimmed.ends_with(".rs")
+                            || trimmed.ends_with(".toml")
+                            || trimmed.ends_with(".md"))
+                    {
+                        // Check if the standalone line looks like a valid path/filename
+                        found_fn = Some(trimmed.trim_matches('`').to_string());
                     }
-                } else if let Some(rest) = trimmed.strip_prefix("filename ") {
-                    current_filename = rest.trim().to_string();
-                } else if let Some(rest) = trimmed.strip_prefix("+++ b/") {
-                    current_filename = rest.trim().to_string();
-                } else if let Some(rest) = trimmed.strip_prefix("+++ ") {
-                    current_filename = rest.trim().to_string();
+                }
+
+                if let Some(fname) = found_fn {
+                    current_filename = fname;
                 }
             } else if state == 1 {
                 if let Some(h) = current_hunk.as_mut() {
@@ -70,7 +106,6 @@ fn parse_aider_patches(content: &str) -> Vec<PatchHunk> {
             }
         }
     }
-
     for h in &mut hunks {
         while h.search.last().map(|l| l.is_empty()).unwrap_or(false) {
             h.search.pop();
@@ -79,10 +114,8 @@ fn parse_aider_patches(content: &str) -> Vec<PatchHunk> {
             h.replace.pop();
         }
     }
-
     hunks
 }
-
 fn parse_git_or_unified_patches(content: &str) -> Vec<PatchHunk> {
     let mut hunks = Vec::new();
     let mut current_hunk: Option<PatchHunk> = None;
