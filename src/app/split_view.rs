@@ -994,15 +994,12 @@ fn render_file_panel(
                         } else if app.mark_pending == Some(MarkPending::WaitingKey) {
                             if txt.len() == 1 {
                                 let c = txt.chars().next().unwrap();
-                                if c.is_ascii_alphabetic() {
+                                if c == 'a' || c == 'A' {
+                                    // Silently ignore ma and mA, just clear the pending state
+                                    app.mark_pending = None;
+                                } else if c.is_ascii_alphabetic() {
                                     if let Some(cur) = app.cursor_line {
-                                        if c == 'a' {
-                                            app.set_mark_a(cur);
-                                        } else if c == 'b' || c == 'A' {
-                                            app.set_mark_b(cur);
-                                        } else {
-                                            app.set_mark(c, cur);
-                                        }
+                                        app.set_mark(c, cur);
                                     }
                                     app.mark_pending = None;
                                 } else {

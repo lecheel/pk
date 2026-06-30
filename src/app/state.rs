@@ -286,6 +286,7 @@ impl MergeApp {
                 end_line: None,
             },
         );
+        self.scroll_to_match = true;
         self.set_message(StatusMessage::info(format!(
             "⚓ m{} set at line {} — press >{} to apply",
             id,
@@ -330,29 +331,34 @@ impl MergeApp {
         self.mark_pending = None;
         self.scroll_to_match = true;
     }
-
     pub fn resolve_apply_range(&self) -> Option<(usize, usize)> {
         if let Some(hunk) = self.current_hunk() {
             if hunk.search.is_empty() {
-                println!("[DEBUG resolve_apply_range] Hunk search empty. Returning end of file: ({}, {})", self.file_lines.len(), self.file_lines.len());
                 return Some((self.file_lines.len(), self.file_lines.len()));
             }
         }
         
-        // If 'a' and 'b' marks are set, use them as the explicit replace range
+        // If 'a' mark is set, use it as the explicit start
         if let Some(a) = self.file_anchors.get(&'a') {
             let start = a.line;
             let end = if let Some(b) = self.file_anchors.get(&'b') {
+                // If 'b' is also set, use the max of a, b, and their ends
                 let mut e = a.line.max(b.line);
                 if let Some(a_end) = a.end_line { e = e.max(a_end); }
                 if let Some(b_end) = b.end_line { e = e.max(b_end); }
                 e
             } else {
-                a.end_line.unwrap_or(start)
+                // If only 'a' is set, use its end_line, or default to the auto-match end
+                a.end_line.unwrap_or(
+                    self.match_result
+                        .as_ref()
+                        .map(|mr| mr.file_end.saturating_sub(1))
+                        .unwrap_or(start)
+                )
             };
-            println!("[DEBUG resolve_apply_range] Anchor 'a' found: start={}, end={}. Returning ({}, {})", start, end, start, end + 1);
             return Some((start, end + 1)); // +1 because file_end is exclusive
-        }
+
+    }
 
         if let Some(mr) = self.match_result.as_ref() {
             println!("[DEBUG resolve_apply_range] No anchors. Using match_result: ({}, {})", mr.file_start, mr.file_end);
