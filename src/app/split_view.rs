@@ -1016,7 +1016,6 @@ fn render_file_panel(
                                 app.is_visual_mode = true;
                                 app.visual_start = app.cursor_line;
                             }
-                            ui.ctx().request_repaint();
                         } else if txt == "m" {
                             app.mark_pending = Some(MarkPending::WaitingKey);
                         } else if app.mark_pending == Some(MarkPending::WaitingKey) {
@@ -1059,7 +1058,13 @@ fn render_file_panel(
                                 app.update_git_statuses();
                                 app.set_message(StatusMessage::info("Opened new line above"));
                             }
-                        } else if txt != "?" && txt != "m" {
+                        } else if txt != "?"
+                            && txt != "m"
+                            && txt != "v"
+                            && txt != "V"
+                            && txt != "o"
+                            && txt != "O"
+                        {
                             new_text.push_str(&txt);
                         }
                     }
@@ -1070,115 +1075,119 @@ fn render_file_panel(
                 app.d_pending = false;
             }
             if !new_text.is_empty() {
-                app.vim_buffer.push_str(&new_text);
-                let buf = app.vim_buffer.trim().to_string();
-                let lower_buf = buf.to_lowercase();
-                let mut clear_buffer = false;
-                if buf == "n" {
-                    next_search_match = true;
-                    clear_buffer = true;
-                } else if buf == "N" {
-                    prev_search_match = true;
-                    clear_buffer = true;
-                } else if buf == "]h" {
-                    let cur = app.cursor_line.unwrap_or(0);
-                    let mut hunk_starts: Vec<usize> = app
-                        .git_hunks
-                        .iter()
-                        .map(|h| h.current_line_range.start)
-                        .collect();
-                    hunk_starts.sort();
-                    if !hunk_starts.is_empty() {
-                        let mut next_line = None;
-                        for &start in &hunk_starts {
-                            if start > cur {
-                                next_line = Some(start);
-                                break;
-                            }
-                        }
-                        let target = next_line.unwrap_or(hunk_starts[0]);
-                        app.cursor_line = Some(target);
-                        app.scroll_to_match = true;
-                    }
-                    clear_buffer = true;
-                } else if buf == "[h" {
-                    let cur = app.cursor_line.unwrap_or(0);
-                    let mut hunk_starts: Vec<usize> = app
-                        .git_hunks
-                        .iter()
-                        .map(|h| h.current_line_range.start)
-                        .collect();
-                    hunk_starts.sort();
-                    if !hunk_starts.is_empty() {
-                        let mut prev_line = None;
-                        for &start in hunk_starts.iter().rev() {
-                            if start < cur {
-                                prev_line = Some(start);
-                                break;
-                            }
-                        }
-                        let target = prev_line.unwrap_or(*hunk_starts.last().unwrap());
-                        app.cursor_line = Some(target);
-                        app.scroll_to_match = true;
-                    }
-                    clear_buffer = true;
-                } else if lower_buf == "u" {
-                    app.undo();
-                    clear_buffer = true;
-                } else if lower_buf == "." {
-                    if let Some(action) = app.last_action.clone() {
-                        match action {
-                            Action::DeleteLines(count) => app.delete_lines(count),
-                            Action::DeleteFunction => app.delete_function_around_cursor(),
-                        }
-                    }
-                    clear_buffer = true;
-                } else if buf == "gg" {
-                    app.cursor_line = Some(0);
-                    app.scroll_to_match = true;
-                    clear_buffer = true;
-                } else if buf == "G" {
-                    app.cursor_line = Some(app.file_lines.len().saturating_sub(1));
-                    app.scroll_to_match = true;
-                    clear_buffer = true;
-                } else if lower_buf == "daf" {
-                    app.delete_function_around_cursor();
-                    app.last_action = Some(Action::DeleteFunction);
-                    clear_buffer = true;
-                } else if lower_buf.ends_with("dd") {
-                    let num_part = &lower_buf[..lower_buf.len() - 2];
-                    let count = if num_part.is_empty() {
-                        1
-                    } else {
-                        num_part.parse::<usize>().unwrap_or(0)
-                    };
-                    if count > 0 {
-                        app.delete_lines(count);
-                        app.last_action = Some(Action::DeleteLines(count));
-                    }
-                    clear_buffer = true;
-                } else if buf.len() > 5 {
-                    clear_buffer = true;
-                } else {
-                    let allowed = buf.chars().all(|c| {
-                        c.is_ascii_digit()
-                            || c == 'd'
-                            || c == 'D'
-                            || c == 'g'
-                            || c == 'G'
-                            || c == '['
-                            || c == ']'
-                            || c == 'h'
-                    }) || lower_buf == "da"
-                        || lower_buf == "daf";
-                    let d_count = buf.matches('d').count() + buf.matches('D').count();
-                    if !allowed || d_count > 2 {
-                        clear_buffer = true;
-                    }
-                }
-                if clear_buffer {
+                if app.is_visual_mode {
                     app.vim_buffer.clear();
-                    app.d_pending = false; // Reset pending state
+                } else {
+                    app.vim_buffer.push_str(&new_text);
+                    let buf = app.vim_buffer.trim().to_string();
+                    let lower_buf = buf.to_lowercase();
+                    let mut clear_buffer = false;
+                    if buf == "n" {
+                        next_search_match = true;
+                        clear_buffer = true;
+                    } else if buf == "N" {
+                        prev_search_match = true;
+                        clear_buffer = true;
+                    } else if buf == "]h" {
+                        let cur = app.cursor_line.unwrap_or(0);
+                        let mut hunk_starts: Vec<usize> = app
+                            .git_hunks
+                            .iter()
+                            .map(|h| h.current_line_range.start)
+                            .collect();
+                        hunk_starts.sort();
+                        if !hunk_starts.is_empty() {
+                            let mut next_line = None;
+                            for &start in &hunk_starts {
+                                if start > cur {
+                                    next_line = Some(start);
+                                    break;
+                                }
+                            }
+                            let target = next_line.unwrap_or(hunk_starts[0]);
+                            app.cursor_line = Some(target);
+                            app.scroll_to_match = true;
+                        }
+                        clear_buffer = true;
+                    } else if buf == "[h" {
+                        let cur = app.cursor_line.unwrap_or(0);
+                        let mut hunk_starts: Vec<usize> = app
+                            .git_hunks
+                            .iter()
+                            .map(|h| h.current_line_range.start)
+                            .collect();
+                        hunk_starts.sort();
+                        if !hunk_starts.is_empty() {
+                            let mut prev_line = None;
+                            for &start in hunk_starts.iter().rev() {
+                                if start < cur {
+                                    prev_line = Some(start);
+                                    break;
+                                }
+                            }
+                            let target = prev_line.unwrap_or(*hunk_starts.last().unwrap());
+                            app.cursor_line = Some(target);
+                            app.scroll_to_match = true;
+                        }
+                        clear_buffer = true;
+                    } else if lower_buf == "u" {
+                        app.undo();
+                        clear_buffer = true;
+                    } else if lower_buf == "." {
+                        if let Some(action) = app.last_action.clone() {
+                            match action {
+                                Action::DeleteLines(count) => app.delete_lines(count),
+                                Action::DeleteFunction => app.delete_function_around_cursor(),
+                            }
+                        }
+                        clear_buffer = true;
+                    } else if buf == "gg" {
+                        app.cursor_line = Some(0);
+                        app.scroll_to_match = true;
+                        clear_buffer = true;
+                    } else if buf == "G" {
+                        app.cursor_line = Some(app.file_lines.len().saturating_sub(1));
+                        app.scroll_to_match = true;
+                        clear_buffer = true;
+                    } else if lower_buf == "daf" {
+                        app.delete_function_around_cursor();
+                        app.last_action = Some(Action::DeleteFunction);
+                        clear_buffer = true;
+                    } else if lower_buf.ends_with("dd") {
+                        let num_part = &lower_buf[..lower_buf.len() - 2];
+                        let count = if num_part.is_empty() {
+                            1
+                        } else {
+                            num_part.parse::<usize>().unwrap_or(0)
+                        };
+                        if count > 0 {
+                            app.delete_lines(count);
+                            app.last_action = Some(Action::DeleteLines(count));
+                        }
+                        clear_buffer = true;
+                    } else if buf.len() > 5 {
+                        clear_buffer = true;
+                    } else {
+                        let allowed = buf.chars().all(|c| {
+                            c.is_ascii_digit()
+                                || c == 'd'
+                                || c == 'D'
+                                || c == 'g'
+                                || c == 'G'
+                                || c == '['
+                                || c == ']'
+                                || c == 'h'
+                        }) || lower_buf == "da"
+                            || lower_buf == "daf";
+                        let d_count = buf.matches('d').count() + buf.matches('D').count();
+                        if !allowed || d_count > 2 {
+                            clear_buffer = true;
+                        }
+                    }
+                    if clear_buffer {
+                        app.vim_buffer.clear();
+                        app.d_pending = false; // Reset pending state
+                    }
                 }
             }
 
