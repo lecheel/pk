@@ -204,6 +204,7 @@ impl MergeApp {
                                         self.recompute_match();
                                         self.update_git_statuses();
                                     }
+                                    self.history.clear(); // Clear history on successful save
                                     self.save_file_state();
                                     self.set_message(StatusMessage::success(format!(
                                         "Saved & formatted → {}",
@@ -229,6 +230,7 @@ impl MergeApp {
                         return;
                     }
                 }
+                self.history.clear(); // Clear history on successful save
                 self.save_file_state();
                 self.set_message(StatusMessage::success(format!("Saved → {}", path)));
             }
@@ -242,14 +244,25 @@ impl MergeApp {
         self.save_file_state();
         let mut saved = 0usize;
         let mut failed = 0usize;
-        for (path, state) in &self.file_states {
-            if path.is_empty() || state.applied_hunks.is_empty() {
+        for (path, state) in &mut self.file_states {
+            if path.is_empty() || state.history.is_empty() {
                 continue;
             }
             let content = state.lines.join("\n");
             match std::fs::write(path, &content) {
-                Ok(_) => saved += 1,
+                Ok(_) => {
+                    saved += 1;
+                    state.history.clear(); // Clear file state history
+                }
                 Err(_) => failed += 1,
+            }
+        }
+        // Synchronize the current buffer's history if it was saved
+        if !self.file_path.is_empty() {
+            if let Some(state) = self.file_states.get_mut(&self.file_path) {
+                if state.history.is_empty() {
+                    self.history.clear();
+                }
             }
         }
         if failed == 0 {

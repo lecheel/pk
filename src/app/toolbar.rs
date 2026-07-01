@@ -124,7 +124,7 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                     }
                 }
                 ui.add(Separator::default().vertical().spacing(12.0));
-                let has_unsaved = !app.applied_hunks.is_empty();
+                let has_unsaved = !app.history.is_empty();
                 ui.add_enabled_ui(has_unsaved, |ui| {
                     if ui
                         .button(RichText::new("💾 Save").color(if has_unsaved {

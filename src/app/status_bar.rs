@@ -11,6 +11,16 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
         )
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
+                // --- MODIFIED / SAVED LED INDICATOR ---
+                let is_modified = !app.history.is_empty();
+                let (led_color, led_text) = if is_modified {
+                    (pal::ACCENT_WARN, "● Modified")
+                } else {
+                    (pal::ACCENT_GOOD, "● Saved")
+                };
+                ui.label(RichText::new(led_text).color(led_color).strong().monospace().small());
+                ui.add(Separator::default().vertical());
+
                 if let Some(hunk) = app.current_hunk() {
                     ui.label(
                         RichText::new(format!("📄 {}", hunk.filename))
