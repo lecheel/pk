@@ -27,7 +27,9 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let right_w = available.x - left_w - 2.0;
     let mono_h = ui.text_style_height(&TextStyle::Monospace);
     let row_h = mono_h + 4.0;
-    let char_w = mono_h * 0.60;
+    let row_font = FontId::monospace(11.0);
+    let char_w = ui
+        .fonts(|f| f.glyph_width(&row_font, '0'));
 
     ui.horizontal(|ui| {
         Frame::none()
@@ -2177,22 +2179,6 @@ fn render_file_panel(
                 let is_anchor_start = anchor_here.is_some();
                 let is_anchor_end = anchor_end_here.is_some();
                 let is_anchor_row = is_anchor_start || is_anchor_end;
-
-                if is_cursor && app.is_insert_mode {
-                    let text_x = if is_anchor_row {
-                        rect.left() + 84.0
-                    } else {
-                        rect.left() + 58.0
-                    };
-                    let char_x = text_x + (app.insert_cursor as f32 * char_w);
-                    ui.painter().line_segment(
-                        [
-                            Pos2::new(char_x, rect.top() + 2.0),
-                            Pos2::new(char_x, rect.bottom() - 2.0),
-                        ],
-                        Stroke::new(2.0, pal::BAR_CURSOR),
-                    );
-                }
                 let base_bg = if in_visual_selection {
                     Color32::from_rgb(20, 50, 25)
                 } else if is_anchor_row {
@@ -2338,6 +2324,35 @@ fn render_file_panel(
                     FontId::monospace(11.0),
                     text_color,
                 );
+                if is_cursor {
+                    let cursor_x = if is_anchor_row {
+                        rect.left() + 84.0
+                    } else {
+                        rect.left() + 58.0
+                    };
+                    if app.is_insert_mode {
+                        let col = app.insert_cursor.min(line.chars().count());
+                        let char_x = cursor_x + (col as f32 * char_w);
+                        ui.painter().line_segment(
+                            [
+                                Pos2::new(char_x, rect.top() + 2.0),
+                                Pos2::new(char_x, rect.bottom() - 2.0),
+                            ],
+                            Stroke::new(2.0, Color32::from_rgb(255, 80, 80)),
+                        );
+                    } else {
+                        let col = app.cursor_col.min(line.chars().count().saturating_sub(1));
+                        let char_x = cursor_x + (col as f32 * char_w);
+                        ui.painter().rect_filled(
+                            Rect::from_min_size(
+                                Pos2::new(char_x, rect.top() + 2.0),
+                                Vec2::new(char_w, rect.height() - 4.0),
+                            ),
+                            0.0,
+                            Color32::from_rgba_premultiplied(220, 40, 40, 200),
+                        );
+                    }
+                }
                 if is_anchor_start {
                     let anchor = anchor_here.unwrap();
                     let is_range_anchor = anchor.id == 'a' && anchor.end_line.is_some();

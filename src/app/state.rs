@@ -765,6 +765,7 @@ impl eframe::App for MergeApp {
                 )
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
                         ui.label(
                             RichText::new("/")
                                 .color(pal::ACCENT_WARN)
@@ -777,12 +778,13 @@ impl eframe::App for MergeApp {
                                 .monospace(),
                         );
                         let blink = (ctx.input(|i| i.time) * 2.0).floor() as i64 % 2 == 0;
-                        if blink {
-                            ui.label(RichText::new("█").color(pal::TEXT_NORMAL).monospace());
-                        } else {
-                            ui.label(RichText::new(" ").monospace());
-                        }
+                        ui.label(
+                            RichText::new(if blink { "█" } else { " " })
+                                .color(pal::TEXT_NORMAL)
+                                .monospace(),
+                        );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
                             ui.label(
                                 RichText::new("ENTER search · ESC cancel")
                                     .color(pal::TEXT_DIM)
