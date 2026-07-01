@@ -44,7 +44,7 @@ pub fn render_git_log_panel(
                 let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
                 let is_hovered = resp.hovered();
                 let is_selected = app.selected_git_log_entry == Some(idx);
-                
+
                 let bg = if is_selected {
                     Color32::from_rgba_premultiplied(70, 50, 100, 180)
                 } else if is_hovered {
@@ -53,10 +53,18 @@ pub fn render_git_log_panel(
                     pal::BG_ROW_EVEN
                 };
                 ui.painter().rect_filled(rect, 0.0, bg);
-                
+
                 let status_bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
-                ui.painter().rect_filled(status_bar, 0.0, if is_selected { pal::BAR_CURSOR } else { Color32::from_rgb(150, 100, 200) });
-                
+                ui.painter().rect_filled(
+                    status_bar,
+                    0.0,
+                    if is_selected {
+                        pal::BAR_CURSOR
+                    } else {
+                        Color32::from_rgb(150, 100, 200)
+                    },
+                );
+
                 if resp.clicked() {
                     app.selected_git_log_entry = Some(idx);
                 }
@@ -80,7 +88,8 @@ pub fn render_git_log_panel(
                 );
 
                 let msg_x = rect.left() + 160.0;
-                let display_msg = MergeApp::truncate_owned(&entry.message, max_chars.saturating_sub(20));
+                let display_msg =
+                    MergeApp::truncate_owned(&entry.message, max_chars.saturating_sub(20));
                 ui.painter().text(
                     Pos2::new(msg_x, rect.center().y),
                     Align2::LEFT_CENTER,
@@ -91,10 +100,7 @@ pub fn render_git_log_panel(
             }
         });
 }
-pub fn render_git_commit_detail_panel(
-    app: &mut MergeApp,
-    ui: &mut Ui,
-) {
+pub fn render_git_commit_detail_panel(app: &mut MergeApp, ui: &mut Ui) {
     let entry = match app.selected_git_log_entry {
         Some(idx) => match app.git_log_entries.get(idx) {
             Some(e) => e.clone(),
@@ -159,7 +165,7 @@ pub fn render_git_commit_detail_panel(
                 );
             });
             ui.add_space(10.0);
-            
+
             ui.label(
                 RichText::new("Message:")
                     .color(pal::TEXT_DIM)
@@ -177,7 +183,7 @@ pub fn render_git_commit_detail_panel(
                             .monospace(),
                     );
                 });
-                
+
             ui.add_space(10.0);
             ui.label(
                 RichText::new(format!("Files changed ({}):", entry.files_changed.len()))
@@ -186,19 +192,11 @@ pub fn render_git_commit_detail_panel(
                     .monospace(),
             );
             ui.add_space(2.0);
-            
+
             for file in &entry.files_changed {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("•")
-                            .color(pal::TEXT_DIM)
-                            .monospace(),
-                    );
-                    ui.label(
-                        RichText::new(file)
-                            .color(pal::TEXT_NORMAL)
-                            .monospace(),
-                    );
+                    ui.label(RichText::new("•").color(pal::TEXT_DIM).monospace());
+                    ui.label(RichText::new(file).color(pal::TEXT_NORMAL).monospace());
                 });
             }
         });
@@ -427,88 +425,71 @@ pub fn render_git_diff_panel(
             } else {
                 "📝 GIT DIFF for current hunk  ·  press ESC to close".to_string()
             };
-            ui.painter().text(
-                Pos2::new(rect.left() + 8.0, rect.center().y),
-                Align2::LEFT_CENTER,
-                &header_text,
-                FontId::monospace(11.0),
-                Color32::from_rgb(230, 120, 120),
-            );
-            let mut x_offset = 8.0;
-            if active_hunk.is_some() {
-                let btn_size = Vec2::new(90.0, row_h);
-                let btn_rect = Rect::from_min_size(
-                    Pos2::new(
-                        rect.right() - btn_size.x - x_offset,
-                        rect.center().y - btn_size.y / 2.0,
-                    ),
-                    btn_size,
-                );
-                let btn = Button::new(
-                    RichText::new("⎌ Revert")
-                        .color(Color32::WHITE)
-                        .strong()
-                        .small()
-                        .monospace(),
-                )
-                .fill(Color32::from_rgb(120, 40, 40));
-                if ui
-                    .put(btn_rect, btn)
-                    .on_hover_text("Revert this hunk back to the HEAD version")
-                    .clicked()
-                {
-                    revert_clicked = true;
-                }
-                x_offset += btn_size.x + 6.0;
-            }
-            if hunk_count > 0 {
-                let nav_btn_size = Vec2::new(30.0, row_h);
-                let next_rect = Rect::from_min_size(
-                    Pos2::new(
-                        rect.right() - nav_btn_size.x - x_offset,
-                        rect.center().y - nav_btn_size.y / 2.0,
-                    ),
-                    nav_btn_size,
-                );
-                let next_btn = Button::new(
-                    RichText::new("▼")
-                        .color(Color32::WHITE)
+
+            ui.allocate_ui_with_layout(rect.size(), Layout::left_to_right(Align::Center), |ui| {
+                ui.set_min_size(rect.size());
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(&header_text)
+                        .color(Color32::from_rgb(230, 120, 120))
                         .strong()
                         .monospace(),
-                )
-                .fill(Color32::from_rgb(60, 30, 30));
-                if ui
-                    .put(next_rect, next_btn)
-                    .on_hover_text("Next git hunk (]h)")
-                    .clicked()
-                {
-                    next_hunk_clicked = true;
-                }
-                x_offset += nav_btn_size.x + 4.0;
-                let prev_rect = Rect::from_min_size(
-                    Pos2::new(
-                        rect.right() - nav_btn_size.x - x_offset,
-                        rect.center().y - nav_btn_size.y / 2.0,
-                    ),
-                    nav_btn_size,
                 );
-                let prev_btn = Button::new(
-                    RichText::new("▲")
-                        .color(Color32::WHITE)
-                        .strong()
-                        .monospace(),
-                )
-                .fill(Color32::from_rgb(60, 30, 30));
-                if ui
-                    .put(prev_rect, prev_btn)
-                    .on_hover_text("Previous git hunk ([h)")
-                    .clicked()
-                {
-                    prev_hunk_clicked = true;
+
+                if active_hunk.is_some() {
+                    ui.add_space(4.0);
+                    let btn = Button::new(
+                        RichText::new("Revert")
+                            .font(FontId::monospace(11.0))
+                            .color(Color32::WHITE),
+                    )
+                    .fill(Color32::from_rgb(120, 40, 40));
+                    if ui
+                        .add(btn)
+                        .on_hover_text("Revert this hunk back to the HEAD version")
+                        .clicked()
+                    {
+                        revert_clicked = true;
+                    }
                 }
-                x_offset += nav_btn_size.x + 6.0;
-            }
-            let _ = x_offset;
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.add_space(4.0);
+                    if hunk_count > 0 {
+                        let next_btn = Button::new(
+                            RichText::new("▼")
+                                .color(Color32::WHITE)
+                                .strong()
+                                .monospace(),
+                        )
+                        .fill(Color32::from_rgb(60, 30, 30));
+                        if ui
+                            .add(next_btn)
+                            .on_hover_text("Next git hunk (]h)")
+                            .clicked()
+                        {
+                            next_hunk_clicked = true;
+                        }
+
+                        let prev_btn = Button::new(
+                            RichText::new("▲")
+                                .color(Color32::WHITE)
+                                .strong()
+                                .monospace(),
+                        )
+                        .fill(Color32::from_rgb(60, 30, 30));
+                        if ui
+                            .add(prev_btn)
+                            .on_hover_text("Previous git hunk ([h)")
+                            .clicked()
+                        {
+                            prev_hunk_clicked = true;
+                        }
+                    }
+                });
+            });
             ui.add_space(4.0);
             let active_hunk = match &active_hunk {
                 Some(h) => h,
