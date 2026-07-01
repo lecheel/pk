@@ -25,11 +25,25 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     let divider = 0.38_f32;
     let left_w = (available.x * divider).floor() - 1.0;
     let right_w = available.x - left_w - 2.0;
-    let mono_h = ui.text_style_height(&TextStyle::Monospace);
+    let row_font = ui
+        .style()
+        .text_styles
+        .get(&TextStyle::Monospace)
+        .cloned()
+        .unwrap_or(FontId::monospace(11.0));
+    let mono_h = ui.fonts(|f| f.row_height(&row_font));
     let row_h = mono_h + 4.0;
-    let row_font = FontId::monospace(11.0);
-    let char_w = ui
-        .fonts(|f| f.glyph_width(&row_font, '0'));
+    let char_w = ui.fonts(|f| {
+        let w1 = f
+            .layout_no_wrap("0".to_string(), row_font.clone(), Color32::WHITE)
+            .rect
+            .width();
+        let w2 = f
+            .layout_no_wrap("00".to_string(), row_font.clone(), Color32::WHITE)
+            .rect
+            .width();
+        w2 - w1
+    });
 
     ui.horizontal(|ui| {
         Frame::none()
@@ -167,7 +181,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     } else if app.show_git_diff_window {
         render_git_diff_panel(app, &mut left_ui, row_h, char_w, left_w);
     } else {
-        render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
+        render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w, &row_font);
     }
 
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
@@ -241,7 +255,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
             });
         });
     } else {
-        render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
+        render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w, &row_font);
     }
 }
 
@@ -583,8 +597,11 @@ fn render_search_panel(
     row_h: f32,
     char_w: f32,
     panel_w: f32,
+    row_font: &FontId,
 ) {
-    let max_chars = ((panel_w - 58.0) / char_w).floor() as usize;
+    let lnum_w = 4.0 * char_w;
+    let text_x_base = 4.0 + lnum_w + 6.0 + 2.0 * char_w;
+    let max_chars = ((panel_w - text_x_base - 10.0) / char_w).floor() as usize;
     let mut set_selection: Option<(usize, usize)> = None;
     let mut apply_clicked_id: Option<char> = None;
     let mut apply_clicked = false;
@@ -889,11 +906,15 @@ fn render_search_panel(
                 } else {
                     format!("{:>4}", line_idx + 1)
                 };
+                let lnum_x = rect.left() + 4.0;
+                let prefix_x = lnum_x + lnum_w + 6.0;
+                let text_x = prefix_x + 2.0 * char_w;
+
                 ui.painter().text(
-                    Pos2::new(rect.left() + 4.0, rect.center().y),
+                    Pos2::new(lnum_x, rect.center().y),
                     Align2::LEFT_CENTER,
                     &num_text,
-                    FontId::monospace(11.0),
+                    row_font.clone(),
                     if is_matched {
                         pal::TEXT_LNUM_ACTIVE
                     } else {
@@ -901,18 +922,18 @@ fn render_search_panel(
                     },
                 );
                 ui.painter().text(
-                    Pos2::new(rect.left() + 38.0, rect.center().y),
+                    Pos2::new(prefix_x, rect.center().y),
                     Align2::LEFT_CENTER,
                     prefix,
-                    FontId::monospace(11.0),
+                    row_font.clone(),
                     prefix_color,
                 );
                 let display = MergeApp::truncate_owned(line, max_chars);
                 ui.painter().text(
-                    Pos2::new(rect.left() + 54.0, rect.center().y),
+                    Pos2::new(text_x, rect.center().y),
                     Align2::LEFT_CENTER,
                     &display,
-                    FontId::monospace(11.0),
+                    row_font.clone(),
                     if is_applied {
                         pal::TEXT_DIM
                     } else {
@@ -1013,6 +1034,9 @@ fn render_search_panel(
                 for (line_idx, line) in hunk.replace.iter().enumerate() {
                     let desired = Vec2::new(ui.available_width(), row_h);
                     let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+                    let lnum_x = rect.left() + 4.0;
+                    let prefix_x = lnum_x + lnum_w + 6.0;
+                    let text_x = prefix_x + 2.0 * char_w;
                     if resp.double_clicked() {
                         let q = line.trim().to_string();
                         app.file_search_query = q.clone();
@@ -1047,25 +1071,25 @@ fn render_search_panel(
                     let bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
                     ui.painter().rect_filled(bar, 0.0, pal::BAR_MATCH);
                     ui.painter().text(
-                        Pos2::new(rect.left() + 4.0, rect.center().y),
+                        Pos2::new(lnum_x, rect.center().y),
                         Align2::LEFT_CENTER,
                         format!("{:>4}", line_idx + 1),
-                        FontId::monospace(11.0),
+                        row_font.clone(),
                         pal::TEXT_DIM,
                     );
                     ui.painter().text(
-                        Pos2::new(rect.left() + 38.0, rect.center().y),
+                        Pos2::new(prefix_x, rect.center().y),
                         Align2::LEFT_CENTER,
                         "+ ",
-                        FontId::monospace(11.0),
+                        row_font.clone(),
                         pal::TEXT_INSERT,
                     );
                     let display = MergeApp::truncate_owned(line, max_chars);
                     ui.painter().text(
-                        Pos2::new(rect.left() + 54.0, rect.center().y),
+                        Pos2::new(text_x, rect.center().y),
                         Align2::LEFT_CENTER,
                         &display,
-                        FontId::monospace(11.0),
+                        row_font.clone(),
                         if is_applied {
                             pal::TEXT_DIM
                         } else {
@@ -1097,8 +1121,11 @@ fn render_file_panel(
     row_h: f32,
     char_w: f32,
     panel_w: f32,
+    row_font: &FontId,
 ) {
-    let max_chars = ((panel_w - 68.0) / char_w).floor() as usize;
+    let lnum_w = 6.0 * char_w;
+    let text_x_base = 6.0 + lnum_w + 6.0 + char_w;
+    let max_chars = ((panel_w - text_x_base - 10.0) / char_w).floor() as usize;
     let mut prev_hunk = false;
     let mut next_hunk = false;
     let mut prev_candidate = false;
@@ -2267,11 +2294,15 @@ fn render_file_panel(
                 } else {
                     pal::TEXT_LNUM
                 };
+                let lnum_x = rect.left() + 6.0;
+                let diff_x = lnum_x + lnum_w + 6.0;
+                let text_x = diff_x + char_w;
+
                 ui.painter().text(
-                    Pos2::new(rect.left() + 6.0, rect.center().y),
+                    Pos2::new(lnum_x, rect.center().y),
                     Align2::LEFT_CENTER,
                     format!("{:>4} │", i + 1),
-                    FontId::monospace(11.0),
+                    row_font.clone(),
                     num_color,
                 );
                 let diff_prefix = if in_auto_match && file_anchors.is_empty() {
@@ -2287,10 +2318,10 @@ fn render_file_panel(
                 };
                 if let Some((glyph, glyph_color)) = diff_prefix {
                     ui.painter().text(
-                        Pos2::new(rect.left() + 48.0, rect.center().y),
+                        Pos2::new(diff_x, rect.center().y),
                         Align2::LEFT_CENTER,
                         glyph,
-                        FontId::monospace(11.0),
+                        row_font.clone(),
                         glyph_color,
                     );
                 }
@@ -2310,31 +2341,22 @@ fn render_file_panel(
                     pal::TEXT_NORMAL
                 };
                 let display_max_chars = if is_auto_start_line || is_anchor_start {
-                    ((panel_w - 68.0 - 250.0) / char_w).floor() as usize
+                    ((panel_w - text_x_base - 250.0) / char_w).floor() as usize
                 } else if is_auto_end_line || is_anchor_end {
-                    ((panel_w - 68.0 - 120.0) / char_w).floor() as usize
+                    ((panel_w - text_x_base - 120.0) / char_w).floor() as usize
                 } else {
                     max_chars
-                };
-                let text_x = if is_anchor_row {
-                    rect.left() + 84.0
-                } else {
-                    rect.left() + 58.0
                 };
                 let display = MergeApp::truncate_owned(line, display_max_chars);
                 ui.painter().text(
                     Pos2::new(text_x, rect.center().y),
                     Align2::LEFT_CENTER,
                     &display,
-                    FontId::monospace(11.0),
+                    row_font.clone(),
                     text_color,
                 );
                 if is_cursor {
-                    let cursor_x = if is_anchor_row {
-                        rect.left() + 84.0
-                    } else {
-                        rect.left() + 58.0
-                    };
+                    let cursor_x = text_x;
                     if app.is_insert_mode {
                         let col = app.insert_cursor.min(line.chars().count());
                         let char_x = cursor_x + (col as f32 * char_w);
