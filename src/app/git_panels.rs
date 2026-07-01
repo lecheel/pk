@@ -181,6 +181,30 @@ pub fn render_git_diff_panel(
     panel_w: f32,
 ) {
     let max_chars = ((panel_w - 68.0) / char_w).floor() as usize;
+    let current_line = app.cursor_line.unwrap_or(0);
+    let active_hunk = app
+        .git_hunks
+        .iter()
+        .find(|h| h.current_line_range.contains(&current_line))
+        .cloned();
+    let mut revert_clicked = false;
+    let mut prev_hunk_clicked = false;
+    let mut next_hunk_clicked = false;
+    let hunk_starts: Vec<usize> = {
+        let mut starts: Vec<usize> = app
+            .git_hunks
+            .iter()
+            .map(|h| h.current_line_range.start)
+            .collect();
+        starts.sort();
+        starts
+    };
+    let hunk_count = hunk_starts.len();
+    let hunk_pos = hunk_starts.iter().position(|&s| {
+        active_hunk
+            .as_ref()
+            .map_or(false, |h| h.current_line_range.start == s)
+    });
     ScrollArea::vertical()
         .id_source("git_diff_scroll")
         .auto_shrink([false, false])
@@ -189,20 +213,105 @@ pub fn render_git_diff_panel(
             let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
             ui.painter()
                 .rect_filled(rect, 2.0, Color32::from_rgb(45, 20, 20));
+            let header_text = if hunk_count > 0 {
+                match hunk_pos {
+                    Some(idx) => format!(
+                        "📝 GIT DIFF  ·  hunk {}/{}  ·  press ESC to close",
+                        idx + 1,
+                        hunk_count
+                    ),
+                    None => format!(
+                        "📝 GIT DIFF  ·  {} hunk(s) in file  ·  press ESC to close",
+                        hunk_count
+                    ),
+                }
+            } else {
+                "📝 GIT DIFF for current hunk  ·  press ESC to close".to_string()
+            };
             ui.painter().text(
                 Pos2::new(rect.left() + 8.0, rect.center().y),
                 Align2::LEFT_CENTER,
-                "📝 GIT DIFF for current hunk  ·  press ESC to close",
+                &header_text,
                 FontId::monospace(11.0),
                 Color32::from_rgb(230, 120, 120),
             );
+            let mut x_offset = 8.0;
+            if active_hunk.is_some() {
+                let btn_size = Vec2::new(90.0, row_h);
+                let btn_rect = Rect::from_min_size(
+                    Pos2::new(
+                        rect.right() - btn_size.x - x_offset,
+                        rect.center().y - btn_size.y / 2.0,
+                    ),
+                    btn_size,
+                );
+                let btn = Button::new(
+                    RichText::new("⎌ Revert")
+                        .color(Color32::WHITE)
+                        .strong()
+                        .small()
+                        .monospace(),
+                )
+                .fill(Color32::from_rgb(120, 40, 40));
+                if ui
+                    .put(btn_rect, btn)
+                    .on_hover_text("Revert this hunk back to the HEAD version")
+                    .clicked()
+                {
+                    revert_clicked = true;
+                }
+                x_offset += btn_size.x + 6.0;
+            }
+            if hunk_count > 0 {
+                let nav_btn_size = Vec2::new(30.0, row_h);
+                let next_rect = Rect::from_min_size(
+                    Pos2::new(
+                        rect.right() - nav_btn_size.x - x_offset,
+                        rect.center().y - nav_btn_size.y / 2.0,
+                    ),
+                    nav_btn_size,
+                );
+                let next_btn = Button::new(
+                    RichText::new("▼")
+                        .color(Color32::WHITE)
+                        .strong()
+                        .monospace(),
+                )
+                .fill(Color32::from_rgb(60, 30, 30));
+                if ui
+                    .put(next_rect, next_btn)
+                    .on_hover_text("Next git hunk (]h)")
+                    .clicked()
+                {
+                    next_hunk_clicked = true;
+                }
+                x_offset += nav_btn_size.x + 4.0;
+                let prev_rect = Rect::from_min_size(
+                    Pos2::new(
+                        rect.right() - nav_btn_size.x - x_offset,
+                        rect.center().y - nav_btn_size.y / 2.0,
+                    ),
+                    nav_btn_size,
+                );
+                let prev_btn = Button::new(
+                    RichText::new("▲")
+                        .color(Color32::WHITE)
+                        .strong()
+                        .monospace(),
+                )
+                .fill(Color32::from_rgb(60, 30, 30));
+                if ui
+                    .put(prev_rect, prev_btn)
+                    .on_hover_text("Previous git hunk ([h)")
+                    .clicked()
+                {
+                    prev_hunk_clicked = true;
+                }
+                x_offset += nav_btn_size.x + 6.0;
+            }
+            let _ = x_offset;
             ui.add_space(4.0);
-            let current_line = app.cursor_line.unwrap_or(0);
-            let active_hunk = match app
-                .git_hunks
-                .iter()
-                .find(|h| h.current_line_range.contains(&current_line))
-            {
+            let active_hunk = match &active_hunk {
                 Some(h) => h,
                 None => {
                     ui.vertical_centered(|ui| {
@@ -263,4 +372,30 @@ pub fn render_git_diff_panel(
                 );
             }
         });
+    if revert_clicked {
+        if let Some(hunk) = active_hunk {
+            app.revert_git_hunk(&hunk);
+        }
+    }
+    if next_hunk_clicked && !hunk_starts.is_empty() {
+        let cur = app.cursor_line.unwrap_or(0);
+        let target = hunk_starts
+            .iter()
+            .copied()
+            .find(|&s| s > cur)
+            .unwrap_or(hunk_starts[0]);
+        app.cursor_line = Some(target);
+        app.scroll_to_match = true;
+    }
+    if prev_hunk_clicked && !hunk_starts.is_empty() {
+        let cur = app.cursor_line.unwrap_or(0);
+        let target = hunk_starts
+            .iter()
+            .rev()
+            .copied()
+            .find(|&s| s < cur)
+            .unwrap_or(*hunk_starts.last().unwrap());
+        app.cursor_line = Some(target);
+        app.scroll_to_match = true;
+    }
 }

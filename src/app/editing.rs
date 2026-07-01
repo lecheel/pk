@@ -2,6 +2,7 @@
 use super::matching::MergeMatching;
 use super::state::MergeApp;
 use super::types::{Action, StatusMessage};
+use crate::diff::RowKind;
 
 impl MergeApp {
     pub fn apply_merge(&mut self, forced_line: Option<usize>, anchor_id: Option<char>) {
@@ -143,6 +144,41 @@ impl MergeApp {
         }
     }
 
+    pub fn revert_git_hunk(&mut self, hunk: &super::git_ops::GitDiffHunk) {
+        self.history
+            .push((self.file_lines.clone(), self.current_hunk));
+        let mut original_lines: Vec<String> = Vec::new();
+        for row in &hunk.rows {
+            match row.kind {
+                RowKind::Delete | RowKind::Equal => {
+                    if let Some(l) = &row.left {
+                        original_lines.push(l.clone());
+                    }
+                }
+                RowKind::Insert => {}
+            }
+        }
+        let start = hunk.current_line_range.start.min(self.file_lines.len());
+        let end = hunk.current_line_range.end.min(self.file_lines.len());
+        let mut output: Vec<String> = Vec::new();
+        output.extend_from_slice(&self.file_lines[..start]);
+        output.extend(original_lines);
+        output.extend_from_slice(&self.file_lines[end..]);
+        self.file_lines = output;
+        self.merged_range = None;
+        self.recompute_match();
+        self.update_git_statuses();
+        let new_len = self.file_lines.len();
+        self.cursor_line = if new_len == 0 {
+            None
+        } else {
+            Some(start.min(new_len - 1))
+        };
+        self.scroll_to_match = true;
+        self.set_message(StatusMessage::success(
+            "⎌ Reverted git hunk to HEAD version",
+        ));
+    }
     pub fn delete_lines(&mut self, count: usize) {
         if let Some(start) = self.cursor_line {
             if start < self.file_lines.len() {

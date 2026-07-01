@@ -1778,10 +1778,6 @@ fn render_file_panel(
                             && txt != "i"
                             && txt != "I"
                             && txt != "a"
-                            && txt != "h"
-                            && txt != "j"
-                            && txt != "k"
-                            && txt != "l"
                             && txt != "H"
                             && txt != "L"
                         {
