@@ -632,6 +632,13 @@ impl MergeApp {
     }
 }
 
+impl Drop for MergeApp {
+    fn drop(&mut self) {
+        println!("[App] Saving config on exit...");
+        self.save_config();
+    }
+}
+
 impl eframe::App for MergeApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         if ctx.input(|i| i.key_pressed(Key::Q) && i.modifiers.alt) {

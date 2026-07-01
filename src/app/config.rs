@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::fs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -24,17 +25,20 @@ impl AppConfig {
         {
             if let Ok(appdata) = std::env::var("APPDATA") {
                 let dir = PathBuf::from(appdata).join("pk");
-                std::fs::create_dir_all(&dir).ok()?;
+                if let Err(e) = fs::create_dir_all(&dir) {
+                    eprintln!("[Config] Failed to create config dir {:?}: {}", dir, e);
+                }
                 return Some(dir.join("config.json"));
             }
             None
         }
-
         #[cfg(not(target_os = "windows"))]
         {
             if let Ok(home) = std::env::var("HOME") {
                 let dir = PathBuf::from(home).join(".config/pk");
-                std::fs::create_dir_all(&dir).ok()?;
+                if let Err(e) = fs::create_dir_all(&dir) {
+                    eprintln!("[Config] Failed to create config dir {:?}: {}", dir, e);
+                }
                 return Some(dir.join("config.json"));
             }
             None
