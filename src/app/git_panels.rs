@@ -39,11 +39,15 @@ pub fn render_git_log_panel(
                 return;
             }
 
-            for entry in &app.git_log_entries {
+            for (idx, entry) in app.git_log_entries.iter().enumerate() {
                 let desired = Vec2::new(ui.available_width(), row_h);
                 let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
                 let is_hovered = resp.hovered();
-                let bg = if is_hovered {
+                let is_selected = app.selected_git_log_entry == Some(idx);
+                
+                let bg = if is_selected {
+                    Color32::from_rgba_premultiplied(70, 50, 100, 180)
+                } else if is_hovered {
                     Color32::from_rgba_premultiplied(50, 50, 60, 150)
                 } else {
                     pal::BG_ROW_EVEN
@@ -51,7 +55,11 @@ pub fn render_git_log_panel(
                 ui.painter().rect_filled(rect, 0.0, bg);
                 
                 let status_bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
-                ui.painter().rect_filled(status_bar, 0.0, Color32::from_rgb(150, 100, 200));
+                ui.painter().rect_filled(status_bar, 0.0, if is_selected { pal::BAR_CURSOR } else { Color32::from_rgb(150, 100, 200) });
+                
+                if resp.clicked() {
+                    app.selected_git_log_entry = Some(idx);
+                }
 
                 ui.painter().text(
                     Pos2::new(rect.left() + 8.0, rect.center().y),
@@ -80,6 +88,118 @@ pub fn render_git_log_panel(
                     FontId::monospace(11.0),
                     pal::TEXT_NORMAL,
                 );
+            }
+        });
+}
+pub fn render_git_commit_detail_panel(
+    app: &mut MergeApp,
+    ui: &mut Ui,
+) {
+    let entry = match app.selected_git_log_entry {
+        Some(idx) => match app.git_log_entries.get(idx) {
+            Some(e) => e.clone(),
+            None => return,
+        },
+        None => {
+            ui.vertical_centered(|ui| {
+                ui.add_space(40.0);
+                ui.label(
+                    RichText::new("Select a commit from the left to see details")
+                        .color(pal::TEXT_DIM),
+                );
+            });
+            return;
+        }
+    };
+
+    ScrollArea::vertical()
+        .id_source("git_commit_detail_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Commit: ")
+                        .color(pal::TEXT_DIM)
+                        .strong()
+                        .monospace(),
+                );
+                ui.label(
+                    RichText::new(&entry.full_hash)
+                        .color(Color32::from_rgb(200, 150, 250))
+                        .monospace(),
+                );
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Author: ")
+                        .color(pal::TEXT_DIM)
+                        .strong()
+                        .monospace(),
+                );
+                ui.label(
+                    RichText::new(format!("{} <{}>", entry.author, entry.email))
+                        .color(pal::TEXT_NORMAL)
+                        .monospace(),
+                );
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Date:   ")
+                        .color(pal::TEXT_DIM)
+                        .strong()
+                        .monospace(),
+                );
+                ui.label(
+                    RichText::new(&entry.time)
+                        .color(pal::TEXT_NORMAL)
+                        .monospace(),
+                );
+            });
+            ui.add_space(10.0);
+            
+            ui.label(
+                RichText::new("Message:")
+                    .color(pal::TEXT_DIM)
+                    .strong()
+                    .monospace(),
+            );
+            ui.add_space(2.0);
+            Frame::none()
+                .fill(pal::BG_PANEL)
+                .inner_margin(Margin::symmetric(8.0, 4.0))
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new(&entry.body)
+                            .color(pal::TEXT_NORMAL)
+                            .monospace(),
+                    );
+                });
+                
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new(format!("Files changed ({}):", entry.files_changed.len()))
+                    .color(pal::TEXT_DIM)
+                    .strong()
+                    .monospace(),
+            );
+            ui.add_space(2.0);
+            
+            for file in &entry.files_changed {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("•")
+                            .color(pal::TEXT_DIM)
+                            .monospace(),
+                    );
+                    ui.label(
+                        RichText::new(file)
+                            .color(pal::TEXT_NORMAL)
+                            .monospace(),
+                    );
+                });
             }
         });
 }

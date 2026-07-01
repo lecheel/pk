@@ -1,6 +1,6 @@
 use super::clipboard_utils::{get_clipboard_text, parse_clipboard_patch};
 use super::git_ops::GitStatus;
-use super::git_panels::{render_git_diff_panel, render_git_log_panel, render_git_status_panel};
+use super::git_panels::{render_git_commit_detail_panel, render_git_diff_panel, render_git_log_panel, render_git_status_panel};
 use super::matching::MergeMatching;
 use super::palette::pal;
 use super::state::{MarkPending, MergeApp};
@@ -194,7 +194,9 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     }
 
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
-    if app.hunks.is_empty() && app.file_lines.is_empty() {
+    if app.show_git_log_window {
+        render_git_commit_detail_panel(app, &mut right_ui);
+    } else if app.hunks.is_empty() && app.file_lines.is_empty() {
         right_ui.horizontal(|ui| {
             ui.add_space(40.0); // Left indentation
             ui.vertical(|ui| {

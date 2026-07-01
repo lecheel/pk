@@ -19,8 +19,13 @@ pub struct GitDiffHunk {
 #[derive(Clone, Debug)]
 pub struct GitLogEntry {
     pub hash: String,
+    pub full_hash: String,
     pub author: String,
+    pub email: String,
+    pub time: String,
     pub message: String,
+    pub body: String,
+    pub files_changed: Vec<String>,
 }
 
 pub fn get_git_log(base_dir: &std::path::Path) -> Vec<GitLogEntry> {
@@ -40,11 +45,30 @@ pub fn get_git_log(base_dir: &std::path::Path) -> Vec<GitLogEntry> {
     for oid in walk {
         if let Ok(oid) = oid {
             if let Ok(commit) = repo.find_commit(oid) {
-                let hash = commit.id().to_string()[0..7].to_string();
+                let full_hash = commit.id().to_string();
+                let hash = full_hash[0..7].to_string();
                 let author = commit.author();
                 let name = author.name().unwrap_or("Unknown").to_string();
-                let message = commit.message().unwrap_or("").lines().next().unwrap_or("").to_string();
-                log.push(GitLogEntry { hash, author: name, message });
+                let email = author.email().unwrap_or("").to_string();
+                let time = author.when().seconds().to_string();
+                let message = commit.summary().unwrap_or("").to_string();
+                let body = commit.message().unwrap_or("").to_string();
+                
+                let mut files_changed = Vec::new();
+                if let Ok(tree) = commit.tree() {
+                    let parent_tree = commit.parents().next().and_then(|p| p.tree().ok());
+                    if let Ok(diff) = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None) {
+                        let _ = diff.foreach(&mut |d, _| {
+                            let path = d.new_file().path().or_else(|| d.old_file().path());
+                            if let Some(p) = path {
+                                files_changed.push(p.display().to_string());
+                            }
+                            true
+                        }, None, None, None);
+                    }
+                }
+
+                log.push(GitLogEntry { hash, full_hash, author: name, email, time, message, body, files_changed });
             }
         }
     }
