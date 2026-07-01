@@ -40,7 +40,7 @@ pub fn render_help_overlay(app: &mut MergeApp, ctx: &Context) {
                 ("Navigation", ""),
                 ("↑ / ↓", "Move cursor one line"),
                 ("PgUp / PgDn", "Move cursor 10 lines"),
-                ("Home / End", "Jump to first / last line"),
+                ("Home / End", "Move to start / end of current line"),
                 ("gg / G", "Jump to top / bottom (vim)"),
                 ("]h / [h", "Jump to next / previous git hunk"),
                 ("Alt+= / Alt+-", "Jump to next / previous file"),

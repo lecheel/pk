@@ -1543,11 +1543,16 @@ fn render_file_panel(
                     cursor_changed = true;
                 }
                 if i.key_pressed(Key::Home) {
-                    app.cursor_line = Some(0);
+                    app.cursor_col = 0;
                     cursor_changed = true;
                 }
                 if i.key_pressed(Key::End) {
-                    app.cursor_line = Some(len - 1);
+                    let max_col = app
+                        .file_lines
+                        .get(cur)
+                        .map(|l| l.chars().count().saturating_sub(1))
+                        .unwrap_or(0);
+                    app.cursor_col = max_col;
                     cursor_changed = true;
                 }
                 if i.key_pressed(Key::Escape) {
