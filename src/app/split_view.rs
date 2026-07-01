@@ -1306,112 +1306,128 @@ fn render_file_panel(
                     }
                 }
             });
-            } else if app.is_insert_mode {
-                ui.ctx().set_cursor_icon(CursorIcon::Text);
-                ui.input(|i| {
-                    if i.key_pressed(Key::Escape) {
-                        app.is_insert_mode = false;
+        } else if app.is_insert_mode {
+            ui.ctx().set_cursor_icon(CursorIcon::Text);
+            ui.input(|i| {
+                if i.key_pressed(Key::Escape) {
+                    app.is_insert_mode = false;
+                }
+                if i.key_pressed(Key::ArrowLeft) {
+                    app.insert_cursor = app.insert_cursor.saturating_sub(1);
+                }
+                if i.key_pressed(Key::ArrowRight) {
+                    let max_len = app
+                        .file_lines
+                        .get(app.cursor_line.unwrap_or(0))
+                        .map(|l| l.chars().count())
+                        .unwrap_or(0);
+                    app.insert_cursor = (app.insert_cursor + 1).min(max_len);
+                }
+                if i.key_pressed(Key::ArrowUp) {
+                    let cur = app.cursor_line.unwrap_or(0);
+                    if cur > 0 {
+                        app.cursor_line = Some(cur - 1);
+                        let max_len = app
+                            .file_lines
+                            .get(cur - 1)
+                            .map(|l| l.chars().count())
+                            .unwrap_or(0);
+                        app.insert_cursor = app.insert_cursor.min(max_len);
                     }
-                    if i.key_pressed(Key::ArrowLeft) {
-                        app.insert_cursor = app.insert_cursor.saturating_sub(1);
+                }
+                if i.key_pressed(Key::ArrowDown) {
+                    let cur = app.cursor_line.unwrap_or(0);
+                    if cur < app.file_lines.len() - 1 {
+                        app.cursor_line = Some(cur + 1);
+                        let max_len = app
+                            .file_lines
+                            .get(cur + 1)
+                            .map(|l| l.chars().count())
+                            .unwrap_or(0);
+                        app.insert_cursor = app.insert_cursor.min(max_len);
                     }
-                    if i.key_pressed(Key::ArrowRight) {
-                        let max_len = app.file_lines.get(app.cursor_line.unwrap_or(0)).map(|l| l.chars().count()).unwrap_or(0);
-                        app.insert_cursor = (app.insert_cursor + 1).min(max_len);
-                    }
-                    if i.key_pressed(Key::ArrowUp) {
-                        let cur = app.cursor_line.unwrap_or(0);
-                        if cur > 0 {
-                            app.cursor_line = Some(cur - 1);
-                            let max_len = app.file_lines.get(cur - 1).map(|l| l.chars().count()).unwrap_or(0);
-                            app.insert_cursor = app.insert_cursor.min(max_len);
-                        }
-                    }
-                    if i.key_pressed(Key::ArrowDown) {
-                        let cur = app.cursor_line.unwrap_or(0);
-                        if cur < app.file_lines.len() - 1 {
-                            app.cursor_line = Some(cur + 1);
-                            let max_len = app.file_lines.get(cur + 1).map(|l| l.chars().count()).unwrap_or(0);
-                            app.insert_cursor = app.insert_cursor.min(max_len);
-                        }
-                    }
-                    if i.key_pressed(Key::Home) {
+                }
+                if i.key_pressed(Key::Home) {
+                    app.insert_cursor = 0;
+                }
+                if i.key_pressed(Key::End) {
+                    let max_len = app
+                        .file_lines
+                        .get(app.cursor_line.unwrap_or(0))
+                        .map(|l| l.chars().count())
+                        .unwrap_or(0);
+                    app.insert_cursor = max_len;
+                }
+                if i.key_pressed(Key::Enter) {
+                    if let Some(cur) = app.cursor_line {
+                        app.save_history();
+                        let line = app.file_lines[cur].clone();
+                        let left: String = line.chars().take(app.insert_cursor).collect();
+                        let right: String = line.chars().skip(app.insert_cursor).collect();
+                        app.file_lines[cur] = left;
+                        app.file_lines.insert(cur + 1, right);
+                        app.cursor_line = Some(cur + 1);
                         app.insert_cursor = 0;
+                        app.scroll_to_match = true;
+                        app.recompute_match();
+                        app.update_git_statuses();
                     }
-                    if i.key_pressed(Key::End) {
-                        let max_len = app.file_lines.get(app.cursor_line.unwrap_or(0)).map(|l| l.chars().count()).unwrap_or(0);
-                        app.insert_cursor = max_len;
-                    }
-                    if i.key_pressed(Key::Enter) {
+                }
+                if i.key_pressed(Key::Backspace) {
+                    if app.insert_cursor > 0 {
                         if let Some(cur) = app.cursor_line {
                             app.save_history();
                             let line = app.file_lines[cur].clone();
-                            let left: String = line.chars().take(app.insert_cursor).collect();
-                            let right: String = line.chars().skip(app.insert_cursor).collect();
-                            app.file_lines[cur] = left;
-                            app.file_lines.insert(cur + 1, right);
-                            app.cursor_line = Some(cur + 1);
-                            app.insert_cursor = 0;
+                            let mut chars: Vec<char> = line.chars().collect();
+                            chars.remove(app.insert_cursor - 1);
+                            app.file_lines[cur] = chars.iter().collect();
+                            app.insert_cursor -= 1;
+                            app.recompute_match();
+                            app.update_git_statuses();
+                        }
+                    } else if let Some(cur) = app.cursor_line {
+                        if cur > 0 {
+                            app.save_history();
+                            let line = app.file_lines[cur].clone();
+                            let prev_len = app.file_lines[cur - 1].chars().count();
+                            app.file_lines[cur - 1].push_str(&line);
+                            app.file_lines.remove(cur);
+                            app.cursor_line = Some(cur - 1);
+                            app.insert_cursor = prev_len;
                             app.scroll_to_match = true;
                             app.recompute_match();
                             app.update_git_statuses();
                         }
                     }
-                    if i.key_pressed(Key::Backspace) {
-                        if app.insert_cursor > 0 {
+                }
+                for event in i.events.clone() {
+                    if let Event::Text(txt) = event {
+                        if txt != "\n" && txt != "\r" {
                             if let Some(cur) = app.cursor_line {
                                 app.save_history();
                                 let line = app.file_lines[cur].clone();
-                                let mut chars: Vec<char> = line.chars().collect();
-                                chars.remove(app.insert_cursor - 1);
-                                app.file_lines[cur] = chars.iter().collect();
-                                app.insert_cursor -= 1;
-                                app.recompute_match();
-                                app.update_git_statuses();
-                            }
-                        } else if let Some(cur) = app.cursor_line {
-                            if cur > 0 {
-                                app.save_history();
-                                let line = app.file_lines[cur].clone();
-                                let prev_len = app.file_lines[cur - 1].chars().count();
-                                app.file_lines[cur - 1].push_str(&line);
-                                app.file_lines.remove(cur);
-                                app.cursor_line = Some(cur - 1);
-                                app.insert_cursor = prev_len;
-                                app.scroll_to_match = true;
-                                app.recompute_match();
-                                app.update_git_statuses();
-                            }
-                        }
-                    }
-                    for event in i.events.clone() {
-                        if let Event::Text(txt) = event {
-                            if txt != "\n" && txt != "\r" {
-                                if let Some(cur) = app.cursor_line {
-                                    app.save_history();
-                                    let line = app.file_lines[cur].clone();
-                                    let mut new_line = String::new();
-                                    let mut count = 0;
-                                    for c in line.chars() {
-                                        if count == app.insert_cursor {
-                                            new_line.push_str(&txt);
-                                        }
-                                        new_line.push(c);
-                                        count += 1;
-                                    }
+                                let mut new_line = String::new();
+                                let mut count = 0;
+                                for c in line.chars() {
                                     if count == app.insert_cursor {
                                         new_line.push_str(&txt);
                                     }
-                                    app.file_lines[cur] = new_line;
-                                    app.insert_cursor += txt.chars().count();
-                                    app.recompute_match();
-                                    app.update_git_statuses();
+                                    new_line.push(c);
+                                    count += 1;
                                 }
+                                if count == app.insert_cursor {
+                                    new_line.push_str(&txt);
+                                }
+                                app.file_lines[cur] = new_line;
+                                app.insert_cursor += txt.chars().count();
+                                app.recompute_match();
+                                app.update_git_statuses();
                             }
                         }
                     }
-                });
-            } else if !ui.ctx().wants_keyboard_input() {
+                }
+            });
+        } else if !ui.ctx().wants_keyboard_input() {
             let mut cursor_changed = false;
             let mut new_text = String::new();
             ui.input(|i| {
@@ -1565,21 +1581,15 @@ fn render_file_panel(
                                 app.scroll_to_match = true;
                                 app.recompute_match();
                                 app.update_git_statuses();
-                                    app.is_insert_mode = true;
-                                    app.insert_cursor = 0;
-                                    app.set_message(StatusMessage::info("Opened new line above"));
+                                app.is_insert_mode = true;
+                                app.insert_cursor = 0;
+                                app.set_message(StatusMessage::info("Opened new line above"));
                             }
                         } else if txt == "i" {
                             app.is_insert_mode = true;
                         } else if txt == "I" {
                             app.is_insert_mode = true;
                             app.insert_cursor = 0;
-                        } else if txt == "a" {
-                            app.is_insert_mode = true;
-                            if let Some(cur) = app.cursor_line {
-                                let len = app.file_lines.get(cur).map(|l| l.chars().count()).unwrap_or(0);
-                                app.insert_cursor = (app.insert_cursor + 1).min(len);
-                            }
                         } else if txt != "?"
                             && txt != "m"
                             && txt != "v"
@@ -1978,6 +1988,9 @@ fn render_file_panel(
     let mut set_anchor_a_end: Option<usize> = None;
     let mut adjust_start_by: i32 = 0;
     let mut adjust_end_by: i32 = 0;
+    let mut did_scroll = false;
+    let mut drag_start_to: Option<usize> = None;
+    let mut drag_end_to: Option<usize> = None;
 
     let delete_file_indices: HashSet<usize> = app
         .search_rows
@@ -2040,7 +2053,7 @@ fn render_file_panel(
                 let is_anchor_start = anchor_here.is_some();
                 let is_anchor_end = anchor_end_here.is_some();
                 let is_anchor_row = is_anchor_start || is_anchor_end;
-                
+
                 if is_cursor && app.is_insert_mode {
                     let text_x = if is_anchor_row {
                         rect.left() + 84.0
@@ -2353,69 +2366,29 @@ fn render_file_panel(
                         adjust_end_by = 1;
                     }
                 } else if is_auto_start_line && mr.score > 0.0 {
-                    let right_box_width = 250.0;
-                    let right_box_rect = Rect::from_min_size(
-                        Pos2::new(rect.right() - right_box_width, rect.top()),
-                        Vec2::new(right_box_width, rect.height()),
+                    // Thick drag handle at top of row
+                    let handle_rect = Rect::from_min_size(
+                        Pos2::new(rect.left(), rect.top()),
+                        Vec2::new(rect.width(), 4.0),
                     );
-                    ui.painter().rect_filled(
-                        right_box_rect,
-                        2.0,
-                        Color32::from_rgba_premultiplied(28, 60, 40, 230),
-                    );
+                    ui.painter().rect_filled(handle_rect, 0.0, pal::BAR_MATCH);
+                    // Badge text
                     ui.painter().text(
-                        Pos2::new(right_box_rect.left() + 6.0, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        format!("▼ {}–{} ({:.0}%)", auto_start + 1, auto_end, auto_score),
+                        Pos2::new(rect.right() - 8.0, rect.center().y),
+                        Align2::RIGHT_CENTER,
+                        format!(
+                            "▼ {}–{} ({:.0}%)  ↕ drag",
+                            auto_start + 1,
+                            auto_end,
+                            auto_score
+                        ),
                         FontId::monospace(10.0),
                         Color32::from_rgb(120, 230, 160),
                     );
-                    let mut next_x = right_box_rect.left() + 115.0;
-                    let btn_w = 18.0;
-                    let btn_h = row_h - 6.0;
-                    ui.painter().text(
-                        Pos2::new(next_x, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        "S:",
-                        FontId::monospace(10.0),
-                        Color32::from_rgb(180, 220, 190),
-                    );
-                    next_x += 14.0;
-                    let dec_s_rect = Rect::from_min_size(
-                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                        Vec2::new(btn_w, btn_h),
-                    );
-                    if ui
-                        .put(
-                            dec_s_rect,
-                            Button::new(RichText::new("▲").small().monospace())
-                                .fill(Color32::from_rgb(40, 55, 45)),
-                        )
-                        .clicked()
-                    {
-                        adjust_start_by = -1;
-                    }
-                    next_x += btn_w + 2.0;
-                    let inc_s_rect = Rect::from_min_size(
-                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                        Vec2::new(btn_w, btn_h),
-                    );
-                    if ui
-                        .put(
-                            inc_s_rect,
-                            Button::new(RichText::new("▼").small().monospace())
-                                .fill(Color32::from_rgb(40, 55, 45)),
-                        )
-                        .clicked()
-                    {
-                        adjust_start_by = 1;
-                    }
+                    // Apply button kept on left side of badge
                     let btn_size = Vec2::new(65.0, row_h - 4.0);
                     let btn_rect = Rect::from_min_size(
-                        Pos2::new(
-                            right_box_rect.right() - btn_size.x - 4.0,
-                            rect.center().y - btn_size.y / 2.0,
-                        ),
+                        Pos2::new(rect.left() + 58.0, rect.center().y - btn_size.y / 2.0),
                         btn_size,
                     );
                     if ui
@@ -2435,56 +2408,58 @@ fn render_file_panel(
                     {
                         apply_clicked = true;
                     }
+                    // Full-row drag zone
+                    let drag_resp = ui.interact(rect, Id::new("drag_start_handle"), Sense::drag());
+                    if drag_resp.hovered() || app.drag_start_active {
+                        ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
+                    }
+                    if drag_resp.drag_started() {
+                        app.drag_start_active = true;
+                    }
+                    if app.drag_start_active {
+                        if let Some(pos) = ui.ctx().input(|i| i.pointer.interact_pos()) {
+                            let line_delta = ((pos.y - rect.center().y) / row_h).round() as i32;
+                            let new_start = (auto_start as i32 + line_delta)
+                                .clamp(0, (auto_end as i32) - 1)
+                                as usize;
+                            drag_start_to = Some(new_start);
+                        }
+                    }
+                    if drag_resp.drag_stopped() {
+                        app.drag_start_active = false;
+                    }
                 } else if is_auto_end_line && mr.score > 0.0 {
-                    let right_box_width = 120.0;
-                    let right_box_rect = Rect::from_min_size(
-                        Pos2::new(rect.right() - right_box_width, rect.top()),
-                        Vec2::new(right_box_width, rect.height()),
+                    // Thick drag handle at bottom of row
+                    let handle_rect = Rect::from_min_size(
+                        Pos2::new(rect.left(), rect.bottom() - 4.0),
+                        Vec2::new(rect.width(), 4.0),
                     );
-                    ui.painter().rect_filled(
-                        right_box_rect,
-                        2.0,
-                        Color32::from_rgba_premultiplied(28, 60, 40, 230),
-                    );
-                    let mut next_x = right_box_rect.left() + 6.0;
-                    let btn_w = 18.0;
-                    let btn_h = row_h - 6.0;
+                    ui.painter().rect_filled(handle_rect, 0.0, pal::BAR_MATCH);
                     ui.painter().text(
-                        Pos2::new(next_x, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        "End block:",
+                        Pos2::new(rect.right() - 8.0, rect.center().y),
+                        Align2::RIGHT_CENTER,
+                        "▲ end  ↕ drag",
                         FontId::monospace(10.0),
                         Color32::from_rgb(120, 230, 160),
                     );
-                    next_x += 62.0;
-                    let dec_e_rect = Rect::from_min_size(
-                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                        Vec2::new(btn_w, btn_h),
-                    );
-                    if ui
-                        .put(
-                            dec_e_rect,
-                            Button::new(RichText::new("▲").small().monospace())
-                                .fill(Color32::from_rgb(40, 55, 45)),
-                        )
-                        .clicked()
-                    {
-                        adjust_end_by = -1;
+                    let drag_resp = ui.interact(rect, Id::new("drag_end_handle"), Sense::drag());
+                    if drag_resp.hovered() || app.drag_end_active {
+                        ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
                     }
-                    next_x += btn_w + 2.0;
-                    let inc_e_rect = Rect::from_min_size(
-                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
-                        Vec2::new(btn_w, btn_h),
-                    );
-                    if ui
-                        .put(
-                            inc_e_rect,
-                            Button::new(RichText::new("▼").small().monospace())
-                                .fill(Color32::from_rgb(40, 55, 45)),
-                        )
-                        .clicked()
-                    {
-                        adjust_end_by = 1;
+                    if drag_resp.drag_started() {
+                        app.drag_end_active = true;
+                    }
+                    if app.drag_end_active {
+                        if let Some(pos) = ui.ctx().input(|i| i.pointer.interact_pos()) {
+                            let line_delta = ((pos.y - rect.center().y) / row_h).round() as i32;
+                            let new_end = (auto_end as i32 - 1 + line_delta)
+                                .clamp(auto_start as i32, app.file_lines.len() as i32 - 1)
+                                as usize;
+                            drag_end_to = Some(new_end);
+                        }
+                    }
+                    if drag_resp.drag_stopped() {
+                        app.drag_end_active = false;
                     }
                 }
                 if in_auto_match && i == auto_end.saturating_sub(1) && file_anchors.is_empty() {
@@ -2585,45 +2560,38 @@ fn render_file_panel(
     if let Some(val) = set_anchor_a_end {
         app.set_mark_a_end(val);
     }
-    if adjust_start_by != 0 || adjust_end_by != 0 {
+    if let Some(new_start) = drag_start_to {
+        if !app.file_anchors.contains_key(&'a') {
+            app.file_anchors.insert(
+                'a',
+                FileAnchor {
+                    id: 'a',
+                    line: new_start,
+                    end_line: Some(auto_end.saturating_sub(1)),
+                },
+            );
+        } else if let Some(anchor) = app.file_anchors.get_mut(&'a') {
+            let end = anchor.end_line.unwrap_or(anchor.line);
+            anchor.line = new_start.min(end);
+        }
+        app.recompute_match();
+        app.scroll_to_match = false;
+    }
+
+    if let Some(new_end) = drag_end_to {
         if !app.file_anchors.contains_key(&'a') {
             app.file_anchors.insert(
                 'a',
                 FileAnchor {
                     id: 'a',
                     line: auto_start,
-                    end_line: Some(auto_end.saturating_sub(1)),
+                    end_line: Some(new_end),
                 },
             );
+        } else if let Some(anchor) = app.file_anchors.get_mut(&'a') {
+            anchor.end_line = Some(new_end.max(anchor.line));
         }
-        let msg = {
-            if let Some(anchor) = app.file_anchors.get_mut(&'a') {
-                if adjust_start_by != 0 {
-                    let current_start = anchor.line;
-                    let new_start = (current_start as i32 + adjust_start_by)
-                        .clamp(0, app.file_lines.len().saturating_sub(1) as i32)
-                        as usize;
-                    anchor.line = new_start;
-                }
-                if adjust_end_by != 0 {
-                    let current_end = anchor.end_line.unwrap_or(anchor.line);
-                    let new_end = (current_end as i32 + adjust_end_by).clamp(
-                        anchor.line as i32,
-                        app.file_lines.len().saturating_sub(1) as i32,
-                    ) as usize;
-                    anchor.end_line = Some(new_end);
-                }
-                Some(StatusMessage::info(format!(
-                    "⚓ Adjusted ma range: lines {}-{}",
-                    anchor.file_start() + 1,
-                    anchor.file_end() + 1
-                )))
-            } else {
-                None
-            }
-        };
-        if let Some(msg) = msg {
-            app.set_message(msg);
-        }
+        app.recompute_match();
+        app.scroll_to_match = false;
     }
 }

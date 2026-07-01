@@ -94,6 +94,8 @@ pub struct MergeApp {
     pub show_settings: bool,
     pub fmt_error: Option<String>,
     pub show_fmt_error: bool,
+    pub drag_start_active: bool,
+    pub drag_end_active: bool,
     pub available_repos: Vec<RepoInfo>,
     pub active_repo_id: Option<String>,
     pub daemon_error: Option<String>,
@@ -189,6 +191,8 @@ impl MergeApp {
             show_settings: false,
             fmt_error: None,
             show_fmt_error: false,
+            drag_start_active: false,
+            drag_end_active: false,
             available_repos: Vec::new(),
             active_repo_id: active_repo_id.clone(),
             daemon_error: None,
@@ -614,6 +618,8 @@ impl MergeApp {
         self.git_diff_rows.clear();
         self.git_hunks.clear();
         self.show_git_status_window = false;
+        self.drag_start_active = false;
+        self.drag_end_active = false;
         self.sync_anchors.clear();
         self.pending_sync = None;
         self.pending_line_actions.clear();
