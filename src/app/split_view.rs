@@ -1498,11 +1498,38 @@ fn render_file_panel(
                     app.quit_requested = true;
                 }
                 if i.key_pressed(Key::ArrowDown) {
-                    app.cursor_line = Some((cur + 1).min(len - 1));
+                    let new_cur = (cur + 1).min(len - 1);
+                    app.cursor_line = Some(new_cur);
+                    let max_col = app
+                        .file_lines
+                        .get(new_cur)
+                        .map(|l| l.chars().count().saturating_sub(1))
+                        .unwrap_or(0);
+                    app.cursor_col = app.cursor_col.min(max_col);
                     cursor_changed = true;
                 }
                 if i.key_pressed(Key::ArrowUp) {
-                    app.cursor_line = Some(cur.saturating_sub(1));
+                    let new_cur = cur.saturating_sub(1);
+                    app.cursor_line = Some(new_cur);
+                    let max_col = app
+                        .file_lines
+                        .get(new_cur)
+                        .map(|l| l.chars().count().saturating_sub(1))
+                        .unwrap_or(0);
+                    app.cursor_col = app.cursor_col.min(max_col);
+                    cursor_changed = true;
+                }
+                if i.key_pressed(Key::ArrowLeft) {
+                    app.cursor_col = app.cursor_col.saturating_sub(1);
+                    cursor_changed = true;
+                }
+                if i.key_pressed(Key::ArrowRight) {
+                    let max_col = app
+                        .file_lines
+                        .get(cur)
+                        .map(|l| l.chars().count().saturating_sub(1))
+                        .unwrap_or(0);
+                    app.cursor_col = (app.cursor_col + 1).min(max_col);
                     cursor_changed = true;
                 }
                 if i.key_pressed(Key::PageDown) {
@@ -1695,6 +1722,12 @@ fn render_file_panel(
                             && txt != "i"
                             && txt != "I"
                             && txt != "a"
+                            && txt != "h"
+                            && txt != "j"
+                            && txt != "k"
+                            && txt != "l"
+                            && txt != "H"
+                            && txt != "L"
                         {
                             new_text.push_str(&txt);
                         }
@@ -2225,6 +2258,8 @@ fn render_file_panel(
                 ui.painter().rect_filled(bar, 0.0, bar_color);
                 if row_resp.clicked() {
                     set_cursor = Some(i);
+                    let max_col = line.chars().count().saturating_sub(1);
+                    app.cursor_col = app.cursor_col.min(max_col);
                 }
                 let num_color = if is_anchor_row {
                     pal::TEXT_ANCHOR
