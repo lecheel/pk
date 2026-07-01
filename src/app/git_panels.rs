@@ -3,7 +3,86 @@ use super::palette::pal;
 use super::state::MergeApp;
 use crate::diff::RowKind;
 use eframe::egui::*;
+pub fn render_git_log_panel(
+    app: &mut MergeApp,
+    ui: &mut Ui,
+    row_h: f32,
+    char_w: f32,
+    panel_w: f32,
+) {
+    let max_chars = ((panel_w - 90.0) / char_w).floor() as usize;
+    ScrollArea::vertical()
+        .id_source("git_log_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let desired = Vec2::new(ui.available_width(), row_h + 2.0);
+            let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+            ui.painter()
+                .rect_filled(rect, 2.0, Color32::from_rgb(30, 20, 45));
+            ui.painter().text(
+                Pos2::new(rect.left() + 8.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                "📜 GIT LOG  ·  press ESC to close",
+                FontId::monospace(11.0),
+                Color32::from_rgb(180, 130, 230),
+            );
+            ui.add_space(4.0);
 
+            if app.git_log_entries.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(20.0);
+                    ui.label(
+                        RichText::new("No commits found or not a git repository.")
+                            .color(pal::TEXT_DIM),
+                    );
+                });
+                return;
+            }
+
+            for entry in &app.git_log_entries {
+                let desired = Vec2::new(ui.available_width(), row_h);
+                let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+                let is_hovered = resp.hovered();
+                let bg = if is_hovered {
+                    Color32::from_rgba_premultiplied(50, 50, 60, 150)
+                } else {
+                    pal::BG_ROW_EVEN
+                };
+                ui.painter().rect_filled(rect, 0.0, bg);
+                
+                let status_bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
+                ui.painter().rect_filled(status_bar, 0.0, Color32::from_rgb(150, 100, 200));
+
+                ui.painter().text(
+                    Pos2::new(rect.left() + 8.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    &entry.hash,
+                    FontId::monospace(10.5),
+                    Color32::from_rgb(200, 150, 250),
+                );
+
+                let author_x = rect.left() + 60.0;
+                let display_author = MergeApp::truncate_owned(&entry.author, 15);
+                ui.painter().text(
+                    Pos2::new(author_x, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    &display_author,
+                    FontId::monospace(10.0),
+                    pal::TEXT_DIM,
+                );
+
+                let msg_x = rect.left() + 160.0;
+                let display_msg = MergeApp::truncate_owned(&entry.message, max_chars.saturating_sub(20));
+                ui.painter().text(
+                    Pos2::new(msg_x, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    &display_msg,
+                    FontId::monospace(11.0),
+                    pal::TEXT_NORMAL,
+                );
+            }
+        });
+}
 pub fn render_git_status_panel(
     app: &mut MergeApp,
     ui: &mut Ui,

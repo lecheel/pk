@@ -1,6 +1,6 @@
 use super::clipboard_utils::{get_clipboard_text, parse_clipboard_patch};
 use super::git_ops::GitStatus;
-use super::git_panels::{render_git_diff_panel, render_git_status_panel};
+use super::git_panels::{render_git_diff_panel, render_git_log_panel, render_git_status_panel};
 use super::matching::MergeMatching;
 use super::palette::pal;
 use super::state::{MarkPending, MergeApp};
@@ -68,6 +68,8 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         "Git Status"
                     } else if app.show_git_diff_window {
                         "Git Diff"
+                    } else if app.show_git_log_window {
+                        "Git Log"
                     } else {
                         "Search"
                     };
@@ -77,6 +79,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         ("🔍 Search", "Search", Color32::from_rgb(120, 180, 255)),
                         ("🌳 Status", "Git Status", Color32::from_rgb(120, 230, 160)),
                         ("📝 Diff", "Git Diff", Color32::from_rgb(235, 120, 120)),
+                        ("📜 Log", "Git Log", Color32::from_rgb(180, 130, 230)),
                         ("📂 Repos", "Repos", Color32::from_rgb(120, 230, 160)),
                         ("⚙ Config", "Settings", Color32::from_rgb(120, 180, 255)),
                         ("🐞 Debug", "Debug", Color32::from_rgb(220, 180, 50)),
@@ -99,6 +102,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                             app.show_debug = false;
                             app.show_git_status_window = false;
                             app.show_git_diff_window = false;
+                            app.show_git_log_window = false;
                         }
                     }
 
@@ -114,13 +118,14 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                             app.show_debug = false;
                             app.show_git_status_window = false;
                             app.show_git_diff_window = false;
-
+                            app.show_git_log_window = false;
                             match *tab_name {
                                 "Settings" => app.show_settings = true,
                                 "Repos" => app.show_repos_window = true,
                                 "Debug" => app.show_debug = true,
                                 "Git Status" => app.show_git_status_window = true,
                                 "Git Diff" => app.show_git_diff_window = true,
+                                "Git Log" => app.show_git_log_window = true,
                                 _ => {}
                             }
                         }
@@ -182,6 +187,8 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
         render_git_status_panel(app, &mut left_ui, row_h, char_w, left_w);
     } else if app.show_git_diff_window {
         render_git_diff_panel(app, &mut left_ui, row_h, char_w, left_w);
+    } else if app.show_git_log_window {
+        render_git_log_panel(app, &mut left_ui, row_h, char_w, left_w);
     } else {
         render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w, &row_font);
     }

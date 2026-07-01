@@ -76,8 +76,10 @@ pub struct MergeApp {
     pub git_statuses: Vec<GitStatus>,
     pub git_diff_rows: Vec<crate::diff::DiffRow>,
     pub git_hunks: Vec<super::git_ops::GitDiffHunk>,
+    pub git_log_entries: Vec<super::git_ops::GitLogEntry>,
     pub show_git_diff_window: bool,
     pub show_git_status_window: bool,
+    pub show_git_log_window: bool,
     pub show_repos_window: bool,
     pub filter_low_matches: bool,
     pub sync_anchors: Vec<SyncAnchor>,
@@ -180,8 +182,10 @@ impl MergeApp {
             git_statuses: Vec::new(),
             git_diff_rows: Vec::new(),
             git_hunks: Vec::new(),
+            git_log_entries: Vec::new(),
             show_git_diff_window: false,
             show_git_status_window: false,
+            show_git_log_window: false,
             show_repos_window: false,
             filter_low_matches: false,
             sync_anchors: Vec::new(),
@@ -240,6 +244,7 @@ impl MergeApp {
                 "Welcome! Open a .md file or paste a patch to begin.",
             ));
         }
+        app.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&app.base_dir));
         app.reparse();
         app
     }
@@ -455,6 +460,7 @@ impl MergeApp {
         self.git_diff_rows = diff_rows;
         self.git_hunks =
             super::git_ops::group_git_hunks(&self.git_diff_rows, self.file_lines.len());
+        self.git_log_entries = super::git_ops::get_git_log(repo_root);
     }
 
     pub fn reparse(&mut self) {
@@ -666,6 +672,7 @@ impl eframe::App for MergeApp {
                             self.base_dir = repo.source_path.clone();
                             self.start_pwd = repo.source_path.clone();
                             self.start_pwd_is_repo = true;
+                            self.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
                         }
                     }
                     self.available_repos = repos;
@@ -714,6 +721,8 @@ impl eframe::App for MergeApp {
                         self.show_git_diff_window = false;
                     } else if self.show_git_status_window {
                         self.show_git_status_window = false;
+                    } else if self.show_git_log_window {
+                        self.show_git_log_window = false;
                     } else if self.is_searching {
                         self.is_searching = false;
                         self.file_search_query.clear();

@@ -16,6 +16,41 @@ pub struct GitDiffHunk {
     pub current_line_range: std::ops::Range<usize>,
 }
 
+#[derive(Clone, Debug)]
+pub struct GitLogEntry {
+    pub hash: String,
+    pub author: String,
+    pub message: String,
+}
+
+pub fn get_git_log(base_dir: &std::path::Path) -> Vec<GitLogEntry> {
+    let repo = match git2::Repository::discover(base_dir) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    let mut walk = match repo.revwalk() {
+        Ok(w) => w,
+        Err(_) => return Vec::new(),
+    };
+    if walk.push_head().is_err() {
+        return Vec::new();
+    }
+    
+    let mut log = Vec::new();
+    for oid in walk {
+        if let Ok(oid) = oid {
+            if let Ok(commit) = repo.find_commit(oid) {
+                let hash = commit.id().to_string()[0..7].to_string();
+                let author = commit.author();
+                let name = author.name().unwrap_or("Unknown").to_string();
+                let message = commit.message().unwrap_or("").lines().next().unwrap_or("").to_string();
+                log.push(GitLogEntry { hash, author: name, message });
+            }
+        }
+    }
+    log
+}
+
 pub fn group_git_hunks(
     diff_rows: &[crate::diff::DiffRow],
     total_current_lines: usize,
