@@ -26,20 +26,21 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                     rect.height() / 2.0,
                     led_color,
                 );
-                ui.label(RichText::new(led_text).color(led_color).strong().monospace().small());
+                ui.label(RichText::new(led_text).color(led_color).strong().monospace().size(13.0));
                 ui.add(Separator::default().vertical());
 
                 if let Some(hunk) = app.current_hunk() {
                     ui.label(
                         RichText::new(format!("📄 {}", hunk.filename))
                             .color(pal::TEXT_NORMAL)
-                            .monospace(),
+                            .monospace()
+                            .size(13.0),
                     );
                     if let Some(ref mr) = app.match_result {
                         ui.add(Separator::default().vertical());
                         ui.label(
                             RichText::new(format!(
-                                "match {}–{}  │  search {} ln  │  replace {} ln",
+                                "match {}-{}  |  search {} ln  |  replace {} ln",
                                 mr.file_start + 1,
                                 mr.file_end,
                                 hunk.search.len(),
@@ -47,7 +48,7 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                             ))
                             .color(pal::TEXT_DIM)
                             .monospace()
-                            .small(),
+                            .size(13.0),
                         );
                     }
                 }
@@ -57,7 +58,7 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                         RichText::new(format!("ln {}  of {}", line + 1, app.file_lines.len()))
                             .color(pal::TEXT_DIM)
                             .monospace()
-                            .small(),
+                            .size(13.0),
                     );
                 }
                 if !app.file_anchors.is_empty() {
@@ -68,7 +69,7 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                         RichText::new(format!("⚓ {}", labels.join("  ")))
                             .color(pal::TEXT_ANCHOR)
                             .monospace()
-                            .small(),
+                            .size(13.0),
                     );
                 }
                 if app.mark_pending.is_some() {
@@ -77,7 +78,8 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                         RichText::new("m›_")
                             .color(pal::ACCENT_WARN)
                             .monospace()
-                            .strong(),
+                            .strong()
+                            .size(13.0),
                     );
                 }
                 if !app.vim_buffer.is_empty() {
@@ -85,13 +87,14 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                         ui.label(
                             RichText::new(format!("  {}█", app.vim_buffer))
                                 .color(Color32::from_rgb(200, 200, 100))
-                                .monospace(),
+                                .monospace()
+                                .size(13.0),
                         );
                     });
                 }
                 if let Some(ref msg) = app.message {
                     ui.add(Separator::default().vertical());
-                    ui.label(RichText::new(&msg.text).color(msg.color()).small());
+                    ui.label(RichText::new(&msg.text).color(msg.color()).size(13.0));
                 }
             });
         });
