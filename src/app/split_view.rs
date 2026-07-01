@@ -167,29 +167,76 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     } else {
         render_search_panel(app, &mut left_ui, &mr, row_h, char_w, left_w);
     }
+
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
     if app.hunks.is_empty() && app.file_lines.is_empty() {
-        right_ui.vertical_centered(|ui| {
-            ui.add_space(60.0);
-            ui.heading("Welcome to PCode Merge");
-            ui.add_space(20.0);
-            ui.label(
-                RichText::new("Workflow Guide")
-                    .color(pal::TEXT_NORMAL)
-                    .strong(),
-            );
-            ui.add_space(8.0);
-            ui.label("1. Click '📋 Paste Patch' or '📝 Paste Manually' on the left");
-            ui.label("2. Enter the target file path in the 'Target File' box");
-            ui.label("3. Use 'L' / 'Shift+L' to navigate between hunks");
-            ui.label("4. Press 'A' or click ⚡ Apply to merge the hunk");
-            ui.label("5. Press 'Alt+W' to save the file to disk");
-            ui.add_space(20.0);
-            ui.label(
-                RichText::new("Press ? for keyboard shortcuts")
-                    .color(pal::TEXT_DIM)
-                    .small(),
-            );
+        right_ui.horizontal(|ui| {
+            ui.add_space(40.0); // Left indentation
+            ui.vertical(|ui| {
+                ui.add_space(60.0);
+                ui.heading("Welcome to PCode Merge");
+                ui.add_space(20.0);
+                ui.label(
+                    RichText::new("Workflow Guide")
+                        .color(pal::TEXT_NORMAL)
+                        .strong(),
+                );
+                ui.add_space(8.0);
+                ui.label("1. Click '📋 Paste Patch' or '📝 Paste Manually' on the left");
+                ui.label("2. Enter the target file path in the 'Target File' box");
+                ui.label("3. Use 'L' / 'Shift+L' to navigate between hunks");
+                ui.label("4. Press 'A' or click ⚡ Apply to merge the hunk");
+                ui.label("5. Press 'Alt+W' to save the file to disk");
+
+                ui.add_space(30.0);
+                ui.label(
+                    RichText::new("Patch Style Prompt")
+                        .color(pal::TEXT_NORMAL)
+                        .strong(),
+                );
+                ui.add_space(4.0);
+                ui.label("Instruct your AI to use this format (double-click to copy):");
+                ui.add_space(8.0);
+
+                let prompt_text = "Please apply changes using this aider style format:
+// src/main.rs                
+<<<<<<< SEARCH
+[exact original lines (include enough context to be unique, avoid too thin blocks)]
+=======
+[modified lines]
+>>>>>>> REPLACE";
+
+                Frame::none()
+                    .fill(pal::BG_PANEL)
+                    .inner_margin(Margin::symmetric(10.0, 8.0))
+                    .show(ui, |ui| {
+                        let label = Label::new(
+                            RichText::new(prompt_text)
+                                .monospace()
+                                .color(pal::TEXT_NORMAL),
+                        )
+                        .wrap()
+                        .sense(Sense::click());
+
+                        let resp = ui.add(label);
+                        if resp.double_clicked() {
+                            ui.ctx().copy_text(prompt_text.to_string());
+                            app.set_message(StatusMessage::success(
+                                "Patch prompt copied to clipboard!",
+                            ));
+                        }
+                        if resp.hovered() {
+                            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                        }
+                    });
+
+                ui.add_space(20.0);
+                ui.label(
+                    RichText::new("Press ? for keyboard shortcuts")
+                        .color(pal::TEXT_DIM)
+                        .small(),
+                );
+            });
         });
     } else {
         render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w);
