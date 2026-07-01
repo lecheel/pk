@@ -2200,6 +2200,13 @@ fn render_file_panel(
                 let in_merged = merged_range.map_or(false, |(rs, re)| i >= rs && i < re);
                 let is_delete = in_auto_match && delete_file_indices.contains(&i);
                 let is_equal = in_auto_match && equal_file_indices.contains(&i);
+                // Lines inside the match window that are in the file but were not
+                // part of the search block at all (e.g. code inserted after the
+                // last time this hunk was applied).
+                let is_extra = in_auto_match
+                    && file_anchors.is_empty()
+                    && !is_delete
+                    && !is_equal;
                 let in_block_delete = match (app.del_start, app.del_end) {
                     (Some(s), Some(e)) => i >= s.min(e) && i <= s.max(e),
                     (Some(s), None) => i == s,
@@ -2243,6 +2250,8 @@ fn render_file_panel(
                     pal::BG_MERGED
                 } else if is_delete {
                     pal::BG_DELETE
+                } else if is_extra {
+                    Color32::from_rgb(25, 40, 55)
                 } else if is_cursor {
                     pal::BG_CURSOR
                 } else if in_auto_match && file_anchors.is_empty() && !is_auto_start_line {
@@ -2284,6 +2293,8 @@ fn render_file_panel(
                     pal::BAR_MERGED
                 } else if is_delete {
                     pal::TEXT_DELETE
+                } else if is_extra {
+                    Color32::from_rgb(90, 160, 220)
                 } else if is_cursor {
                     pal::BAR_CURSOR
                 } else if in_auto_match && file_anchors.is_empty() {
@@ -2309,6 +2320,8 @@ fn render_file_panel(
                     pal::TEXT_LNUM_ACTIVE
                 } else if is_delete {
                     pal::TEXT_DELETE
+                } else if is_extra {
+                    Color32::from_rgb(120, 180, 230)
                 } else if in_auto_match && file_anchors.is_empty() {
                     pal::TEXT_LNUM_ACTIVE
                 } else if is_search_hit {
@@ -2332,6 +2345,8 @@ fn render_file_panel(
                         Some(("-", pal::TEXT_DELETE))
                     } else if is_equal {
                         Some(("=", Color32::from_gray(60)))
+                    } else if is_extra {
+                        Some(("+", Color32::from_rgb(120, 180, 230)))
                     } else {
                         None
                     }
@@ -2355,6 +2370,8 @@ fn render_file_panel(
                     pal::TEXT_MERGED
                 } else if is_delete {
                     pal::TEXT_DELETE
+                } else if is_extra {
+                    Color32::from_rgb(140, 190, 235)
                 } else if in_auto_match && file_anchors.is_empty() {
                     pal::TEXT_MATCH
                 } else if is_search_hit {

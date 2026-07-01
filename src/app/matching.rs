@@ -72,36 +72,38 @@ impl MergeMatching for MergeApp {
         }
     }
     fn build_search_rows(hunk: &PatchHunk, mr: &MatchResult) -> Vec<SearchRow> {
-        let patch_diff = diff::diff_patch(&hunk.search, &hunk.replace);
+        // Build rows directly from the real search<->file alignment (mr.rows),
+        // instead of an unrelated search<->replace diff. mr.rows already has the
+        // correct per-line file index (right_num, 1-based) for every matched line,
+        // including cases where the file contains extra lines not present in search
+        // (e.g. an inserted line like `self.history.clear();`).
         let mut rows = Vec::new();
-        let mut file_idx = mr.file_start;
-        for (kind, left, _right) in &patch_diff {
-            match kind {
-                RowKind::Equal => {
-                    rows.push(SearchRow {
-                        text: left.clone().unwrap_or_default(),
-                        file_idx: Some(file_idx),
-                        kind: RowKind::Equal,
-                    });
-                    file_idx += 1;
-                }
-                RowKind::Delete => {
-                    rows.push(SearchRow {
-                        text: left.clone().unwrap_or_default(),
-                        file_idx: Some(file_idx),
-                        kind: RowKind::Delete,
-                    });
-                    file_idx += 1;
-                }
-                RowKind::Insert => {
-                    rows.push(SearchRow {
-                        text: left.clone().unwrap_or_default(),
-                        file_idx: None,
-                        kind: RowKind::Insert,
-                    });
+        for row in &mr.rows {
+            if let Some(left) = &row.left {
+                match row.kind {
+                    RowKind::Equal => {
+                        rows.push(SearchRow {
+                            text: left.clone(),
+                            // right_num is 1-based; convert to 0-based file index
+                            file_idx: row.right_num.map(|n| n.saturating_sub(1)),
+                            kind: RowKind::Equal,
+                        });
+                    }
+                    RowKind::Delete => {
+                        rows.push(SearchRow {
+                            text: left.clone(),
+                            file_idx: None,
+                            kind: RowKind::Delete,
+                        });
+                    }
+                    RowKind::Insert => {
+                        // Insert rows in mr.rows only have `right` (file-only lines),
+                        // never `left`, so this branch is unreachable here.
+                    }
                 }
             }
         }
+        let _ = hunk; // hunk.search order/count is implicitly preserved via mr.rows
         rows
     }
     fn score_appearance(score: f32) -> (Color32, Color32, &'static str) {
