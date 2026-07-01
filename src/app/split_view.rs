@@ -776,10 +776,6 @@ fn render_search_panel(
                 .map(|r| r.file_idx)
                 .collect();
 
-            let pointer_down = ui.input(|i| i.pointer.primary_down());
-            let pointer_pressed = ui.input(|i| i.pointer.primary_pressed());
-            let pointer_dragging = ui.input(|i| i.pointer.is_decidedly_dragging());
-
             for (line_idx, line) in hunk.search.iter().enumerate() {
                 let file_idx = search_file_map.get(line_idx).copied().flatten();
                 let is_matched = file_idx.is_some();
@@ -797,16 +793,9 @@ fn render_search_panel(
                     base_bg
                 };
                 let desired = Vec2::new(ui.available_width(), row_h);
-                let (rect, resp) = ui.allocate_exact_size(desired, Sense::click_and_drag());
-                if resp.hovered() {
-                    if pointer_pressed {
-                        set_selection = Some((line_idx, line_idx));
-                    } else if pointer_dragging && pointer_down {
-                        if let Some(start_sel) = app.left_selection {
-                            set_selection =
-                                Some((start_sel.0.min(line_idx), start_sel.1.max(line_idx)));
-                        }
-                    }
+                let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+                if resp.clicked() {
+                    set_selection = Some((line_idx, line_idx));
                 }
                 if resp.double_clicked() {
                     let q = line.trim().to_string();
@@ -1585,6 +1574,64 @@ fn render_file_panel(
                                 app.insert_cursor = 0;
                                 app.set_message(StatusMessage::info("Opened new line above"));
                             }
+                        } else if txt == "+" || txt == "-" {
+                            let delta: i32 = if txt == "+" { 1 } else { -1 };
+                            if let Some(cur) = app.cursor_line {
+                                // If no anchors exist, treat the auto match boundaries as anchors
+                                if app.file_anchors.is_empty() && mr.score > 0.0 {
+                                    if cur == mr.file_start || cur == mr.file_end.saturating_sub(1)
+                                    {
+                                        app.file_anchors.insert(
+                                            'a',
+                                            FileAnchor {
+                                                id: 'a',
+                                                line: mr.file_start,
+                                                end_line: Some(mr.file_end.saturating_sub(1)),
+                                            },
+                                        );
+                                    }
+                                }
+
+                                let on_end = app
+                                    .file_anchors
+                                    .values()
+                                    .find(|a| a.end_line == Some(cur))
+                                    .map(|a| a.id);
+                                let on_start = app
+                                    .file_anchors
+                                    .values()
+                                    .find(|a| a.line == cur)
+                                    .map(|a| a.id);
+
+                                if let Some(id) = on_end {
+                                    if let Some(anchor) = app.file_anchors.get_mut(&id) {
+                                        let current_end = anchor.end_line.unwrap_or(anchor.line);
+                                        let new_end = (current_end as i32 + delta).clamp(
+                                            anchor.line as i32,
+                                            app.file_lines.len().saturating_sub(1) as i32,
+                                        )
+                                            as usize;
+                                        anchor.end_line = Some(new_end);
+                                        app.cursor_line = Some(new_end);
+                                        cursor_changed = true;
+                                        app.scroll_to_match = true;
+                                    }
+                                } else if let Some(id) = on_start {
+                                    if let Some(anchor) = app.file_anchors.get_mut(&id) {
+                                        let max_bound = anchor
+                                            .end_line
+                                            .unwrap_or(app.file_lines.len().saturating_sub(1))
+                                            as i32;
+                                        let new_start = (anchor.line as i32 + delta)
+                                            .clamp(0, max_bound)
+                                            as usize;
+                                        anchor.line = new_start;
+                                        app.cursor_line = Some(new_start);
+                                        cursor_changed = true;
+                                        app.scroll_to_match = true;
+                                    }
+                                }
+                            }
                         } else if txt == "i" {
                             app.is_insert_mode = true;
                         } else if txt == "I" {
@@ -1988,9 +2035,6 @@ fn render_file_panel(
     let mut set_anchor_a_end: Option<usize> = None;
     let mut adjust_start_by: i32 = 0;
     let mut adjust_end_by: i32 = 0;
-    let mut did_scroll = false;
-    let mut drag_start_to: Option<usize> = None;
-    let mut drag_end_to: Option<usize> = None;
 
     let delete_file_indices: HashSet<usize> = app
         .search_rows
@@ -2366,29 +2410,69 @@ fn render_file_panel(
                         adjust_end_by = 1;
                     }
                 } else if is_auto_start_line && mr.score > 0.0 {
-                    // Thick drag handle at top of row
-                    let handle_rect = Rect::from_min_size(
-                        Pos2::new(rect.left(), rect.top()),
-                        Vec2::new(rect.width(), 4.0),
+                    let right_box_width = 250.0;
+                    let right_box_rect = Rect::from_min_size(
+                        Pos2::new(rect.right() - right_box_width, rect.top()),
+                        Vec2::new(right_box_width, rect.height()),
                     );
-                    ui.painter().rect_filled(handle_rect, 0.0, pal::BAR_MATCH);
-                    // Badge text
+                    ui.painter().rect_filled(
+                        right_box_rect,
+                        2.0,
+                        Color32::from_rgba_premultiplied(28, 60, 40, 230),
+                    );
                     ui.painter().text(
-                        Pos2::new(rect.right() - 8.0, rect.center().y),
-                        Align2::RIGHT_CENTER,
-                        format!(
-                            "▼ {}–{} ({:.0}%)  ↕ drag",
-                            auto_start + 1,
-                            auto_end,
-                            auto_score
-                        ),
+                        Pos2::new(right_box_rect.left() + 6.0, rect.center().y),
+                        Align2::LEFT_CENTER,
+                        format!("▼ {}–{} ({:.0}%)", auto_start + 1, auto_end, auto_score),
                         FontId::monospace(10.0),
                         Color32::from_rgb(120, 230, 160),
                     );
-                    // Apply button kept on left side of badge
+                    let mut next_x = right_box_rect.left() + 115.0;
+                    let btn_w = 18.0;
+                    let btn_h = row_h - 6.0;
+                    ui.painter().text(
+                        Pos2::new(next_x, rect.center().y),
+                        Align2::LEFT_CENTER,
+                        "S:",
+                        FontId::monospace(10.0),
+                        Color32::from_rgb(180, 220, 190),
+                    );
+                    next_x += 14.0;
+                    let dec_s_rect = Rect::from_min_size(
+                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
+                        Vec2::new(btn_w, btn_h),
+                    );
+                    if ui
+                        .put(
+                            dec_s_rect,
+                            Button::new(RichText::new("▲").small().monospace())
+                                .fill(Color32::from_rgb(40, 55, 45)),
+                        )
+                        .clicked()
+                    {
+                        adjust_start_by = -1;
+                    }
+                    next_x += btn_w + 2.0;
+                    let inc_s_rect = Rect::from_min_size(
+                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
+                        Vec2::new(btn_w, btn_h),
+                    );
+                    if ui
+                        .put(
+                            inc_s_rect,
+                            Button::new(RichText::new("▼").small().monospace())
+                                .fill(Color32::from_rgb(40, 55, 45)),
+                        )
+                        .clicked()
+                    {
+                        adjust_start_by = 1;
+                    }
                     let btn_size = Vec2::new(65.0, row_h - 4.0);
                     let btn_rect = Rect::from_min_size(
-                        Pos2::new(rect.left() + 58.0, rect.center().y - btn_size.y / 2.0),
+                        Pos2::new(
+                            right_box_rect.right() - btn_size.x - 4.0,
+                            rect.center().y - btn_size.y / 2.0,
+                        ),
                         btn_size,
                     );
                     if ui
@@ -2408,58 +2492,56 @@ fn render_file_panel(
                     {
                         apply_clicked = true;
                     }
-                    // Full-row drag zone
-                    let drag_resp = ui.interact(rect, Id::new("drag_start_handle"), Sense::drag());
-                    if drag_resp.hovered() || app.drag_start_active {
-                        ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
-                    }
-                    if drag_resp.drag_started() {
-                        app.drag_start_active = true;
-                    }
-                    if app.drag_start_active {
-                        if let Some(pos) = ui.ctx().input(|i| i.pointer.interact_pos()) {
-                            let line_delta = ((pos.y - rect.center().y) / row_h).round() as i32;
-                            let new_start = (auto_start as i32 + line_delta)
-                                .clamp(0, (auto_end as i32) - 1)
-                                as usize;
-                            drag_start_to = Some(new_start);
-                        }
-                    }
-                    if drag_resp.drag_stopped() {
-                        app.drag_start_active = false;
-                    }
                 } else if is_auto_end_line && mr.score > 0.0 {
-                    // Thick drag handle at bottom of row
-                    let handle_rect = Rect::from_min_size(
-                        Pos2::new(rect.left(), rect.bottom() - 4.0),
-                        Vec2::new(rect.width(), 4.0),
+                    let right_box_width = 120.0;
+                    let right_box_rect = Rect::from_min_size(
+                        Pos2::new(rect.right() - right_box_width, rect.top()),
+                        Vec2::new(right_box_width, rect.height()),
                     );
-                    ui.painter().rect_filled(handle_rect, 0.0, pal::BAR_MATCH);
+                    ui.painter().rect_filled(
+                        right_box_rect,
+                        2.0,
+                        Color32::from_rgba_premultiplied(28, 60, 40, 230),
+                    );
+                    let mut next_x = right_box_rect.left() + 6.0;
+                    let btn_w = 18.0;
+                    let btn_h = row_h - 6.0;
                     ui.painter().text(
-                        Pos2::new(rect.right() - 8.0, rect.center().y),
-                        Align2::RIGHT_CENTER,
-                        "▲ end  ↕ drag",
+                        Pos2::new(next_x, rect.center().y),
+                        Align2::LEFT_CENTER,
+                        "End block:",
                         FontId::monospace(10.0),
                         Color32::from_rgb(120, 230, 160),
                     );
-                    let drag_resp = ui.interact(rect, Id::new("drag_end_handle"), Sense::drag());
-                    if drag_resp.hovered() || app.drag_end_active {
-                        ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
+                    next_x += 62.0;
+                    let dec_e_rect = Rect::from_min_size(
+                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
+                        Vec2::new(btn_w, btn_h),
+                    );
+                    if ui
+                        .put(
+                            dec_e_rect,
+                            Button::new(RichText::new("▲").small().monospace())
+                                .fill(Color32::from_rgb(40, 55, 45)),
+                        )
+                        .clicked()
+                    {
+                        adjust_end_by = -1;
                     }
-                    if drag_resp.drag_started() {
-                        app.drag_end_active = true;
-                    }
-                    if app.drag_end_active {
-                        if let Some(pos) = ui.ctx().input(|i| i.pointer.interact_pos()) {
-                            let line_delta = ((pos.y - rect.center().y) / row_h).round() as i32;
-                            let new_end = (auto_end as i32 - 1 + line_delta)
-                                .clamp(auto_start as i32, app.file_lines.len() as i32 - 1)
-                                as usize;
-                            drag_end_to = Some(new_end);
-                        }
-                    }
-                    if drag_resp.drag_stopped() {
-                        app.drag_end_active = false;
+                    next_x += btn_w + 2.0;
+                    let inc_e_rect = Rect::from_min_size(
+                        Pos2::new(next_x, rect.center().y - btn_h / 2.0),
+                        Vec2::new(btn_w, btn_h),
+                    );
+                    if ui
+                        .put(
+                            inc_e_rect,
+                            Button::new(RichText::new("▼").small().monospace())
+                                .fill(Color32::from_rgb(40, 55, 45)),
+                        )
+                        .clicked()
+                    {
+                        adjust_end_by = 1;
                     }
                 }
                 if in_auto_match && i == auto_end.saturating_sub(1) && file_anchors.is_empty() {
@@ -2560,38 +2642,45 @@ fn render_file_panel(
     if let Some(val) = set_anchor_a_end {
         app.set_mark_a_end(val);
     }
-    if let Some(new_start) = drag_start_to {
-        if !app.file_anchors.contains_key(&'a') {
-            app.file_anchors.insert(
-                'a',
-                FileAnchor {
-                    id: 'a',
-                    line: new_start,
-                    end_line: Some(auto_end.saturating_sub(1)),
-                },
-            );
-        } else if let Some(anchor) = app.file_anchors.get_mut(&'a') {
-            let end = anchor.end_line.unwrap_or(anchor.line);
-            anchor.line = new_start.min(end);
-        }
-        app.recompute_match();
-        app.scroll_to_match = false;
-    }
-
-    if let Some(new_end) = drag_end_to {
+    if adjust_start_by != 0 || adjust_end_by != 0 {
         if !app.file_anchors.contains_key(&'a') {
             app.file_anchors.insert(
                 'a',
                 FileAnchor {
                     id: 'a',
                     line: auto_start,
-                    end_line: Some(new_end),
+                    end_line: Some(auto_end.saturating_sub(1)),
                 },
             );
-        } else if let Some(anchor) = app.file_anchors.get_mut(&'a') {
-            anchor.end_line = Some(new_end.max(anchor.line));
         }
-        app.recompute_match();
-        app.scroll_to_match = false;
+        let msg = {
+            if let Some(anchor) = app.file_anchors.get_mut(&'a') {
+                if adjust_start_by != 0 {
+                    let current_start = anchor.line;
+                    let new_start = (current_start as i32 + adjust_start_by)
+                        .clamp(0, app.file_lines.len().saturating_sub(1) as i32)
+                        as usize;
+                    anchor.line = new_start;
+                }
+                if adjust_end_by != 0 {
+                    let current_end = anchor.end_line.unwrap_or(anchor.line);
+                    let new_end = (current_end as i32 + adjust_end_by).clamp(
+                        anchor.line as i32,
+                        app.file_lines.len().saturating_sub(1) as i32,
+                    ) as usize;
+                    anchor.end_line = Some(new_end);
+                }
+                Some(StatusMessage::info(format!(
+                    "⚓ Adjusted ma range: lines {}-{}",
+                    anchor.file_start() + 1,
+                    anchor.file_end() + 1
+                )))
+            } else {
+                None
+            }
+        };
+        if let Some(msg) = msg {
+            app.set_message(msg);
+        }
     }
 }
