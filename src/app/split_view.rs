@@ -1261,7 +1261,10 @@ fn render_file_panel(
                     }
                 } else {
                     if ui
-                        .add(Button::new("^").small())
+                        .add(
+                            Button::new(RichText::new("▲").font(FontId::monospace(11.0)))
+                                .min_size(Vec2::new(20.0, row_h - 4.0)),
+                        )
                         .on_hover_text("Previous (Shift+L)")
                         .clicked()
                     {
@@ -1272,7 +1275,10 @@ fn render_file_panel(
                         }
                     }
                     if ui
-                        .add(Button::new("v").small())
+                        .add(
+                            Button::new(RichText::new("▼").font(FontId::monospace(11.0)))
+                                .min_size(Vec2::new(20.0, row_h - 4.0)),
+                        )
                         .on_hover_text("Next (L)")
                         .clicked()
                     {

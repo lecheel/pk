@@ -75,7 +75,7 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                 if app.mark_pending.is_some() {
                     ui.add(Separator::default().vertical());
                     ui.label(
-                        RichText::new("m›_")
+                        RichText::new("m>_")
                             .color(pal::ACCENT_WARN)
                             .monospace()
                             .strong()
