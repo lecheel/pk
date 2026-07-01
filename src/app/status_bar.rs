@@ -14,10 +14,18 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                 // --- MODIFIED / SAVED LED INDICATOR ---
                 let is_modified = !app.history.is_empty();
                 let (led_color, led_text) = if is_modified {
-                    (pal::ACCENT_WARN, "● Modified")
+                    (pal::ACCENT_WARN, "Modified")
                 } else {
-                    (pal::ACCENT_GOOD, "● Saved")
+                    (pal::ACCENT_GOOD, "Saved")
                 };
+                
+                // Draw an actual circle for the LED to avoid missing font glyphs (square boxes)
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), Sense::hover());
+                ui.painter().circle_filled(
+                    rect.center(),
+                    rect.height() / 2.0,
+                    led_color,
+                );
                 ui.label(RichText::new(led_text).color(led_color).strong().monospace().small());
                 ui.add(Separator::default().vertical());
 
