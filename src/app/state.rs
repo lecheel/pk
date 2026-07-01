@@ -87,6 +87,8 @@ pub struct MergeApp {
     pub del_end: Option<usize>,
     pub is_visual_mode: bool,
     pub visual_start: Option<usize>,
+    pub is_insert_mode: bool,
+    pub insert_cursor: usize,
     pub format_on_save: bool,
     pub fmt_command: String,
     pub show_settings: bool,
@@ -180,6 +182,8 @@ impl MergeApp {
             del_end: None,
             is_visual_mode: false,
             visual_start: None,
+            is_insert_mode: false,
+            insert_cursor: 0,
             format_on_save: config.format_on_save,
             fmt_command: config.fmt_command.clone(),
             show_settings: false,
@@ -554,6 +558,8 @@ impl MergeApp {
         self.del_end = None;
         self.is_visual_mode = false;
         self.visual_start = None;
+        self.is_insert_mode = false;
+        self.insert_cursor = 0;
         self.update_git_statuses();
         self.recompute_match();
     }
@@ -615,6 +621,8 @@ impl MergeApp {
         self.del_end = None;
         self.is_visual_mode = false;
         self.visual_start = None;
+        self.is_insert_mode = false;
+        self.insert_cursor = 0;
     }
 }
 
@@ -710,6 +718,29 @@ impl eframe::App for MergeApp {
             });
         }
 
+        if self.is_insert_mode {
+            TopBottomPanel::bottom("insert_hud")
+                .frame(
+                    Frame::none()
+                        .fill(Color32::from_rgb(25, 30, 45))
+                        .inner_margin(Margin::symmetric(8.0, 4.0)),
+                )
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("-- INSERT --")
+                                .color(pal::ACCENT_INFO)
+                                .strong()
+                                .monospace(),
+                        );
+                        ui.label(
+                            RichText::new("ESC to exit · Type to insert · Backspace to delete")
+                                .color(pal::TEXT_DIM)
+                                .small(),
+                        );
+                    });
+                });
+        }
         if self.is_searching {
             TopBottomPanel::bottom("vim_search_prompt")
                 .frame(

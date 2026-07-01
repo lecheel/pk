@@ -1306,7 +1306,112 @@ fn render_file_panel(
                     }
                 }
             });
-        } else if !ui.ctx().wants_keyboard_input() {
+            } else if app.is_insert_mode {
+                ui.ctx().set_cursor_icon(CursorIcon::Text);
+                ui.input(|i| {
+                    if i.key_pressed(Key::Escape) {
+                        app.is_insert_mode = false;
+                    }
+                    if i.key_pressed(Key::ArrowLeft) {
+                        app.insert_cursor = app.insert_cursor.saturating_sub(1);
+                    }
+                    if i.key_pressed(Key::ArrowRight) {
+                        let max_len = app.file_lines.get(app.cursor_line.unwrap_or(0)).map(|l| l.chars().count()).unwrap_or(0);
+                        app.insert_cursor = (app.insert_cursor + 1).min(max_len);
+                    }
+                    if i.key_pressed(Key::ArrowUp) {
+                        let cur = app.cursor_line.unwrap_or(0);
+                        if cur > 0 {
+                            app.cursor_line = Some(cur - 1);
+                            let max_len = app.file_lines.get(cur - 1).map(|l| l.chars().count()).unwrap_or(0);
+                            app.insert_cursor = app.insert_cursor.min(max_len);
+                        }
+                    }
+                    if i.key_pressed(Key::ArrowDown) {
+                        let cur = app.cursor_line.unwrap_or(0);
+                        if cur < app.file_lines.len() - 1 {
+                            app.cursor_line = Some(cur + 1);
+                            let max_len = app.file_lines.get(cur + 1).map(|l| l.chars().count()).unwrap_or(0);
+                            app.insert_cursor = app.insert_cursor.min(max_len);
+                        }
+                    }
+                    if i.key_pressed(Key::Home) {
+                        app.insert_cursor = 0;
+                    }
+                    if i.key_pressed(Key::End) {
+                        let max_len = app.file_lines.get(app.cursor_line.unwrap_or(0)).map(|l| l.chars().count()).unwrap_or(0);
+                        app.insert_cursor = max_len;
+                    }
+                    if i.key_pressed(Key::Enter) {
+                        if let Some(cur) = app.cursor_line {
+                            app.save_history();
+                            let line = app.file_lines[cur].clone();
+                            let left: String = line.chars().take(app.insert_cursor).collect();
+                            let right: String = line.chars().skip(app.insert_cursor).collect();
+                            app.file_lines[cur] = left;
+                            app.file_lines.insert(cur + 1, right);
+                            app.cursor_line = Some(cur + 1);
+                            app.insert_cursor = 0;
+                            app.scroll_to_match = true;
+                            app.recompute_match();
+                            app.update_git_statuses();
+                        }
+                    }
+                    if i.key_pressed(Key::Backspace) {
+                        if app.insert_cursor > 0 {
+                            if let Some(cur) = app.cursor_line {
+                                app.save_history();
+                                let line = app.file_lines[cur].clone();
+                                let mut chars: Vec<char> = line.chars().collect();
+                                chars.remove(app.insert_cursor - 1);
+                                app.file_lines[cur] = chars.iter().collect();
+                                app.insert_cursor -= 1;
+                                app.recompute_match();
+                                app.update_git_statuses();
+                            }
+                        } else if let Some(cur) = app.cursor_line {
+                            if cur > 0 {
+                                app.save_history();
+                                let line = app.file_lines[cur].clone();
+                                let prev_len = app.file_lines[cur - 1].chars().count();
+                                app.file_lines[cur - 1].push_str(&line);
+                                app.file_lines.remove(cur);
+                                app.cursor_line = Some(cur - 1);
+                                app.insert_cursor = prev_len;
+                                app.scroll_to_match = true;
+                                app.recompute_match();
+                                app.update_git_statuses();
+                            }
+                        }
+                    }
+                    for event in i.events.clone() {
+                        if let Event::Text(txt) = event {
+                            if txt != "\n" && txt != "\r" {
+                                if let Some(cur) = app.cursor_line {
+                                    app.save_history();
+                                    let line = app.file_lines[cur].clone();
+                                    let mut new_line = String::new();
+                                    let mut count = 0;
+                                    for c in line.chars() {
+                                        if count == app.insert_cursor {
+                                            new_line.push_str(&txt);
+                                        }
+                                        new_line.push(c);
+                                        count += 1;
+                                    }
+                                    if count == app.insert_cursor {
+                                        new_line.push_str(&txt);
+                                    }
+                                    app.file_lines[cur] = new_line;
+                                    app.insert_cursor += txt.chars().count();
+                                    app.recompute_match();
+                                    app.update_git_statuses();
+                                }
+                            }
+                        }
+                    }
+                });
+            } else if !ui.ctx().wants_keyboard_input() {
             let mut cursor_changed = false;
             let mut new_text = String::new();
             ui.input(|i| {
@@ -1447,6 +1552,8 @@ fn render_file_panel(
                                     app.scroll_to_match = true;
                                     app.recompute_match();
                                     app.update_git_statuses();
+                                    app.is_insert_mode = true;
+                                    app.insert_cursor = 0;
                                     app.set_message(StatusMessage::info("Opened new line below"));
                                 }
                             }
@@ -1458,65 +1565,20 @@ fn render_file_panel(
                                 app.scroll_to_match = true;
                                 app.recompute_match();
                                 app.update_git_statuses();
-                                app.set_message(StatusMessage::info("Opened new line above"));
+                                    app.is_insert_mode = true;
+                                    app.insert_cursor = 0;
+                                    app.set_message(StatusMessage::info("Opened new line above"));
                             }
-                        } else if txt == "+" || txt == "-" {
-                            let delta: i32 = if txt == "+" { 1 } else { -1 };
+                        } else if txt == "i" {
+                            app.is_insert_mode = true;
+                        } else if txt == "I" {
+                            app.is_insert_mode = true;
+                            app.insert_cursor = 0;
+                        } else if txt == "a" {
+                            app.is_insert_mode = true;
                             if let Some(cur) = app.cursor_line {
-                                // If no anchors exist, treat the auto match boundaries as anchors
-                                if app.file_anchors.is_empty() && mr.score > 0.0 {
-                                    if cur == mr.file_start || cur == mr.file_end.saturating_sub(1)
-                                    {
-                                        app.file_anchors.insert(
-                                            'a',
-                                            FileAnchor {
-                                                id: 'a',
-                                                line: mr.file_start,
-                                                end_line: Some(mr.file_end.saturating_sub(1)),
-                                            },
-                                        );
-                                    }
-                                }
-
-                                let on_end = app
-                                    .file_anchors
-                                    .values()
-                                    .find(|a| a.end_line == Some(cur))
-                                    .map(|a| a.id);
-                                let on_start = app
-                                    .file_anchors
-                                    .values()
-                                    .find(|a| a.line == cur)
-                                    .map(|a| a.id);
-
-                                if let Some(id) = on_end {
-                                    if let Some(anchor) = app.file_anchors.get_mut(&id) {
-                                        let current_end = anchor.end_line.unwrap_or(anchor.line);
-                                        let new_end = (current_end as i32 + delta).clamp(
-                                            anchor.line as i32,
-                                            app.file_lines.len().saturating_sub(1) as i32,
-                                        )
-                                            as usize;
-                                        anchor.end_line = Some(new_end);
-                                        app.cursor_line = Some(new_end);
-                                        cursor_changed = true;
-                                        app.scroll_to_match = true;
-                                    }
-                                } else if let Some(id) = on_start {
-                                    if let Some(anchor) = app.file_anchors.get_mut(&id) {
-                                        let max_bound = anchor
-                                            .end_line
-                                            .unwrap_or(app.file_lines.len().saturating_sub(1))
-                                            as i32;
-                                        let new_start = (anchor.line as i32 + delta)
-                                            .clamp(0, max_bound)
-                                            as usize;
-                                        anchor.line = new_start;
-                                        app.cursor_line = Some(new_start);
-                                        cursor_changed = true;
-                                        app.scroll_to_match = true;
-                                    }
-                                }
+                                let len = app.file_lines.get(cur).map(|l| l.chars().count()).unwrap_or(0);
+                                app.insert_cursor = (app.insert_cursor + 1).min(len);
                             }
                         } else if txt != "?"
                             && txt != "m"
@@ -1526,6 +1588,9 @@ fn render_file_panel(
                             && txt != "O"
                             && txt != "+"
                             && txt != "-"
+                            && txt != "i"
+                            && txt != "I"
+                            && txt != "a"
                         {
                             new_text.push_str(&txt);
                         }
@@ -1975,6 +2040,22 @@ fn render_file_panel(
                 let is_anchor_start = anchor_here.is_some();
                 let is_anchor_end = anchor_end_here.is_some();
                 let is_anchor_row = is_anchor_start || is_anchor_end;
+                
+                if is_cursor && app.is_insert_mode {
+                    let text_x = if is_anchor_row {
+                        rect.left() + 84.0
+                    } else {
+                        rect.left() + 58.0
+                    };
+                    let char_x = text_x + (app.insert_cursor as f32 * char_w);
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(char_x, rect.top() + 2.0),
+                            Pos2::new(char_x, rect.bottom() - 2.0),
+                        ],
+                        Stroke::new(2.0, pal::BAR_CURSOR),
+                    );
+                }
                 let base_bg = if in_visual_selection {
                     Color32::from_rgb(20, 50, 25)
                 } else if is_anchor_row {
