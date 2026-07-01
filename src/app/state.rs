@@ -101,8 +101,8 @@ pub struct MergeApp {
     pub active_repo_id: Option<String>,
     pub daemon_error: Option<String>,
     pub repo_receiver: mpsc::Receiver<Result<Vec<RepoInfo>, String>>,
+    pub concat_server_enabled: bool,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
     WaitingKey,
@@ -121,13 +121,19 @@ impl MergeApp {
             .and_then(|r| r.workdir().map(|w| w.display().to_string()))
             .unwrap_or_else(|| current_pwd.clone());
 
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let res = daemon::fetch_repos();
-            let _ = tx.send(res);
-        });
-
         let config = AppConfig::load();
+        let active_repo_id = if config.concat_server_enabled {
+            config.active_repo_id.clone().or_else(daemon::get_active_repo)
+        } else {
+            None
+        };
+        let (tx, rx) = mpsc::channel();
+        if config.concat_server_enabled {
+            std::thread::spawn(move || {
+                let res = daemon::fetch_repos();
+                let _ = tx.send(res);
+            });
+        }
         let active_repo_id = config
             .active_repo_id
             .clone()
@@ -199,8 +205,8 @@ impl MergeApp {
             active_repo_id: active_repo_id.clone(),
             daemon_error: None,
             repo_receiver: rx,
+            concat_server_enabled: config.concat_server_enabled,
         };
-
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
             let path = std::path::Path::new(&patch_file);
@@ -595,6 +601,7 @@ impl MergeApp {
             format_on_save: self.format_on_save,
             fmt_command: self.fmt_command.clone(),
             active_repo_id: self.active_repo_id.clone(),
+            concat_server_enabled: self.concat_server_enabled,
         };
         config.save();
     }

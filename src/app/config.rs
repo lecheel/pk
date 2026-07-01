@@ -7,14 +7,15 @@ pub struct AppConfig {
     pub format_on_save: bool,
     pub fmt_command: String,
     pub active_repo_id: Option<String>,
+    pub concat_server_enabled: bool,
 }
-
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             format_on_save: true,
             fmt_command: "rustfmt".to_string(),
             active_repo_id: None,
+            concat_server_enabled: true,
         }
     }
 }

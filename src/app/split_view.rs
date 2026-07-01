@@ -72,7 +72,8 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         "Search"
                     };
 
-                    let tabs = [
+                    let show_repos = app.concat_server_enabled;
+                    let all_tabs = [
                         ("🔍 Search", "Search", Color32::from_rgb(120, 180, 255)),
                         ("🌳 Status", "Git Status", Color32::from_rgb(120, 230, 160)),
                         ("📝 Diff", "Git Diff", Color32::from_rgb(235, 120, 120)),
@@ -80,6 +81,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         ("⚙ Config", "Settings", Color32::from_rgb(120, 180, 255)),
                         ("🐞 Debug", "Debug", Color32::from_rgb(220, 180, 50)),
                     ];
+                    let tabs: Vec<(&str, &str, Color32)> = all_tabs.iter().cloned().filter(|t| t.1 != "Repos" || show_repos).collect();
 
                     if app.fmt_error.is_some() {
                         let is_active = current_tab == "Error";
@@ -323,6 +325,20 @@ fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
             .small()
             .monospace(),
     );
+
+    ui.add_space(16.0);
+    ui.heading("Daemon Settings");
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        if ui.checkbox(&mut app.concat_server_enabled, "Enable Concat Server").changed() {
+            app.save_config();
+            if app.concat_server_enabled {
+                app.set_message(StatusMessage::info("Concat server enabled. Restart app to fetch repos."));
+            } else {
+                app.set_message(StatusMessage::info("Concat server disabled. Restart app to apply."));
+            }
+        }
+    });
 }
 fn render_repos_panel(app: &mut MergeApp, ui: &mut Ui) {
     ui.add_space(8.0);
