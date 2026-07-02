@@ -207,71 +207,61 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
         right_ui.horizontal(|ui| {
             ui.add_space(40.0); // Left indentation
             ui.vertical(|ui| {
+                const BODY_SIZE: f32 = 14.0;
+                let body = |s: &str| RichText::new(s).size(BODY_SIZE).color(pal::TEXT_NORMAL);
+                let key = |s: &str| {
+                    RichText::new(s)
+                        .size(BODY_SIZE)
+                        .color(Color32::from_rgb(120, 220, 160))
+                        .strong()
+                };
+
                 ui.add_space(60.0);
                 ui.heading("Welcome to PCode Merge");
                 ui.add_space(20.0);
                 ui.label(
                     RichText::new("Workflow Guide")
+                        .size(BODY_SIZE)
                         .color(pal::TEXT_NORMAL)
                         .strong(),
                 );
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    ui.label("1. Click '📋 Paste Patch', press '");
-                    ui.label(
-                        RichText::new("*")
-                            .color(Color32::from_rgb(120, 220, 160))
-                            .strong(),
-                    );
-                    ui.label("', or '📝 Paste Manually' on the left");
+                    ui.label(body("1. Click '📋 Paste Patch', press '"));
+                    ui.label(key("*"));
+                    ui.label(body("', or '📝 Paste Manually' on the left"));
                 });
-                ui.label("2. Enter the target file path in the 'Target File' box");
+                ui.label(body(
+                    "2. Enter the target file path in the 'Target File' box",
+                ));
                 ui.horizontal(|ui| {
-                    ui.label("3. Use '");
-                    ui.label(
-                        RichText::new("l")
-                            .color(Color32::from_rgb(120, 220, 160))
-                            .strong(),
-                    );
-                    ui.label("' / 'Shift+L' to navigate between hunks");
+                    ui.label(body("3. Use '"));
+                    ui.label(key("l / L"));
+                    ui.label(body("' to navigate between hunks"));
                 });
                 ui.horizontal(|ui| {
-                    ui.label("4. Press '");
-                    ui.label(
-                        RichText::new("a")
-                            .color(Color32::from_rgb(120, 220, 160))
-                            .strong(),
-                    );
-                    ui.label("' or click ⚡ Apply to merge the hunk");
+                    ui.label(body("4. Press '"));
+                    ui.label(key("a"));
+                    ui.label(body("' or click ⚡ Apply to merge the hunk"));
                 });
                 ui.horizontal(|ui| {
-                    ui.label("5. Press");
-                    ui.label(
-                        RichText::new("Alt+w")
-                            .color(Color32::from_rgb(120, 220, 160))
-                            .strong(),
-                    );
-                    ui.label("' to save the current file to disk");
+                    ui.label(body("5. Press '"));
+                    ui.label(key("Alt+w"));
+                    ui.label(body("' to save the current file to disk"));
                 });
                 ui.horizontal(|ui| {
-                    ui.label("6. Press '");
-                    ui.label(
-                        RichText::new("w")
-                            .color(Color32::from_rgb(120, 220, 160))
-                            .strong(),
-                    );
-                    ui.label("' to save all modified files to disk");
+                    ui.label(body("6. Press '"));
+                    ui.label(key("w"));
+                    ui.label(body("' to save all modified files to disk"));
                 });
-
                 ui.add_space(30.0);
                 ui.label(
                     RichText::new("Patch Style Prompt")
+                        .size(BODY_SIZE)
                         .color(pal::TEXT_NORMAL)
                         .strong(),
                 );
                 ui.add_space(4.0);
-                ui.label("Instruct your AI to use this format (double-click to copy):");
-                ui.add_space(8.0);
 
                 let prompt_text = "Please apply changes using this aider style format:
 // src/main.rs                
@@ -281,6 +271,26 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
 [modified lines]
 >>>>>>> REPLACE";
 
+                let do_copy = |ui: &Ui, app: &mut MergeApp| {
+                    ui.ctx().copy_text(prompt_text.to_string());
+                    app.set_message(StatusMessage::success("Patch prompt copied to clipboard!"));
+                };
+
+                ui.horizontal(|ui| {
+                    ui.label(body("Instruct your AI to use this format:"));
+                    let copy_btn =
+                        ui.add(Button::new(RichText::new("📋 Copy").size(BODY_SIZE)).small());
+                    if copy_btn.hovered() {
+                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                    }
+                    if copy_btn
+                        .on_hover_text("Click to copy, or double-click the box below")
+                        .clicked()
+                    {
+                        do_copy(ui, app);
+                    }
+                });
+                ui.add_space(8.0);
                 Frame::none()
                     .fill(pal::BG_PANEL)
                     .inner_margin(Margin::symmetric(10.0, 8.0))
@@ -288,28 +298,24 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         let label = Label::new(
                             RichText::new(prompt_text)
                                 .monospace()
+                                .size(BODY_SIZE)
                                 .color(pal::TEXT_NORMAL),
                         )
                         .wrap()
                         .sense(Sense::click());
-
                         let resp = ui.add(label);
                         if resp.double_clicked() {
-                            ui.ctx().copy_text(prompt_text.to_string());
-                            app.set_message(StatusMessage::success(
-                                "Patch prompt copied to clipboard!",
-                            ));
+                            do_copy(ui, app);
                         }
                         if resp.hovered() {
                             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                         }
                     });
-
                 ui.add_space(20.0);
                 ui.label(
                     RichText::new("Press ? for keyboard shortcuts")
-                        .color(pal::TEXT_DIM)
-                        .small(),
+                        .size(12.0)
+                        .color(pal::TEXT_DIM),
                 );
             });
         });
