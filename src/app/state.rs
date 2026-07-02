@@ -1,3 +1,4 @@
+use super::clipboard_utils::get_clipboard_text;
 use super::config::AppConfig;
 use super::daemon::{self, RepoInfo};
 use super::git_ops::GitStatus;
@@ -747,6 +748,21 @@ impl eframe::App for MergeApp {
                         .any(|e| matches!(e, Event::Text(t) if t == "?"))
                 {
                     self.show_help = !self.show_help;
+                }
+                if !self.is_searching
+                    && i.events
+                        .iter()
+                        .any(|e| matches!(e, Event::Text(t) if t == "*"))
+                {
+                    if let Some(text) = get_clipboard_text() {
+                        self.patch_text = text;
+                        self.reparse();
+                    } else {
+                        self.show_manual_paste = true;
+                        self.set_message(StatusMessage::warning(
+                            "Clipboard is empty or inaccessible. Use manual paste window.",
+                        ));
+                    }
                 }
             });
         }

@@ -209,7 +209,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         .strong(),
                 );
                 ui.add_space(8.0);
-                ui.label("1. Click '📋 Paste Patch' or '📝 Paste Manually' on the left");
+                ui.label("1. Click '📋 Paste Patch', press '*', or '📝 Paste Manually' on the left");
                 ui.label("2. Enter the target file path in the 'Target File' box");
                 ui.label("3. Use 'L' / 'Shift+L' to navigate between hunks");
                 ui.label("4. Press 'A' or click ⚡ Apply to merge the hunk");
@@ -635,7 +635,7 @@ fn render_search_panel(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         if ui
-            .button("📋 Paste Patch")
+            .button("📋 Paste Patch (*)")
             .on_hover_text("Load and reparse a patch directly from your system clipboard")
             .clicked()
         {
@@ -1553,6 +1553,9 @@ fn render_file_panel(
                 }
                 if i.key_pressed(Key::W) && i.modifiers.alt {
                     app.save_file();
+                }
+                if i.key_pressed(Key::W) && !i.modifiers.alt && !i.modifiers.shift && !i.modifiers.ctrl {
+                    app.save_all_files();
                 }
                 if i.key_pressed(Key::Q) && i.modifiers.alt {
                     app.quit_requested = true;

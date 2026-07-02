@@ -55,7 +55,7 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
 
                 if app.patch_text.is_empty() {
                     if ui
-                        .button("📋 Paste Patch")
+                        .button("📋 Paste Patch (*)")
                         .on_hover_text("Parse patch directly from clipboard")
                         .clicked()
                     {
