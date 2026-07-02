@@ -1,6 +1,9 @@
 use super::clipboard_utils::{get_clipboard_text, parse_clipboard_patch};
 use super::git_ops::GitStatus;
-use super::git_panels::{render_git_commit_detail_panel, render_git_diff_panel, render_git_log_panel, render_git_status_panel};
+use super::git_panels::{
+    render_git_commit_detail_panel, render_git_diff_panel, render_git_log_panel,
+    render_git_status_panel,
+};
 use super::matching::MergeMatching;
 use super::palette::pal;
 use super::state::{MarkPending, MergeApp};
@@ -84,7 +87,11 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         ("⚙ Config", "Settings", Color32::from_rgb(120, 180, 255)),
                         ("🐞 Debug", "Debug", Color32::from_rgb(220, 180, 50)),
                     ];
-                    let tabs: Vec<(&str, &str, Color32)> = all_tabs.iter().cloned().filter(|t| t.1 != "Repos" || show_repos).collect();
+                    let tabs: Vec<(&str, &str, Color32)> = all_tabs
+                        .iter()
+                        .cloned()
+                        .filter(|t| t.1 != "Repos" || show_repos)
+                        .collect();
 
                     if app.fmt_error.is_some() {
                         let is_active = current_tab == "Error";
@@ -209,11 +216,52 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         .strong(),
                 );
                 ui.add_space(8.0);
-                ui.label("1. Click '📋 Paste Patch', press '*', or '📝 Paste Manually' on the left");
+                ui.horizontal(|ui| {
+                    ui.label("1. Click '📋 Paste Patch', press '");
+                    ui.label(
+                        RichText::new("*")
+                            .color(Color32::from_rgb(120, 220, 160))
+                            .strong(),
+                    );
+                    ui.label("', or '📝 Paste Manually' on the left");
+                });
                 ui.label("2. Enter the target file path in the 'Target File' box");
-                ui.label("3. Use 'L' / 'Shift+L' to navigate between hunks");
-                ui.label("4. Press 'A' or click ⚡ Apply to merge the hunk");
-                ui.label("5. Press 'Alt+W' to save the file to disk");
+                ui.horizontal(|ui| {
+                    ui.label("3. Use '");
+                    ui.label(
+                        RichText::new("l")
+                            .color(Color32::from_rgb(120, 220, 160))
+                            .strong(),
+                    );
+                    ui.label("' / 'Shift+L' to navigate between hunks");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("4. Press '");
+                    ui.label(
+                        RichText::new("a")
+                            .color(Color32::from_rgb(120, 220, 160))
+                            .strong(),
+                    );
+                    ui.label("' or click ⚡ Apply to merge the hunk");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("5. Press 'Alt+");
+                    ui.label(
+                        RichText::new("w")
+                            .color(Color32::from_rgb(120, 220, 160))
+                            .strong(),
+                    );
+                    ui.label("' to save the current file to disk");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("6. Press '");
+                    ui.label(
+                        RichText::new("w")
+                            .color(Color32::from_rgb(120, 220, 160))
+                            .strong(),
+                    );
+                    ui.label("' to save all modified files to disk");
+                });
 
                 ui.add_space(30.0);
                 ui.label(
@@ -339,12 +387,19 @@ fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
     ui.heading("Daemon Settings");
     ui.add_space(8.0);
     ui.horizontal(|ui| {
-        if ui.checkbox(&mut app.concat_server_enabled, "Enable Concat Server").changed() {
+        if ui
+            .checkbox(&mut app.concat_server_enabled, "Enable Concat Server")
+            .changed()
+        {
             app.save_config();
             if app.concat_server_enabled {
-                app.set_message(StatusMessage::info("Concat server enabled. Restart app to fetch repos."));
+                app.set_message(StatusMessage::info(
+                    "Concat server enabled. Restart app to fetch repos.",
+                ));
             } else {
-                app.set_message(StatusMessage::info("Concat server disabled. Restart app to apply."));
+                app.set_message(StatusMessage::info(
+                    "Concat server disabled. Restart app to apply.",
+                ));
             }
         }
     });
@@ -1554,7 +1609,11 @@ fn render_file_panel(
                 if i.key_pressed(Key::W) && i.modifiers.alt {
                     app.save_file();
                 }
-                if i.key_pressed(Key::W) && !i.modifiers.alt && !i.modifiers.shift && !i.modifiers.ctrl {
+                if i.key_pressed(Key::W)
+                    && !i.modifiers.alt
+                    && !i.modifiers.shift
+                    && !i.modifiers.ctrl
+                {
                     app.save_all_files();
                 }
                 if i.key_pressed(Key::Q) && i.modifiers.alt {
@@ -2211,10 +2270,7 @@ fn render_file_panel(
                 // Lines inside the match window that are in the file but were not
                 // part of the search block at all (e.g. code inserted after the
                 // last time this hunk was applied).
-                let is_extra = in_auto_match
-                    && file_anchors.is_empty()
-                    && !is_delete
-                    && !is_equal;
+                let is_extra = in_auto_match && file_anchors.is_empty() && !is_delete && !is_equal;
                 let in_block_delete = match (app.del_start, app.del_end) {
                     (Some(s), Some(e)) => i >= s.min(e) && i <= s.max(e),
                     (Some(s), None) => i == s,
