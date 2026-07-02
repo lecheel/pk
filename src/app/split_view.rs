@@ -245,9 +245,9 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                     ui.label("' or click ⚡ Apply to merge the hunk");
                 });
                 ui.horizontal(|ui| {
-                    ui.label("5. Press 'Alt+");
+                    ui.label("5. Press");
                     ui.label(
-                        RichText::new("w")
+                        RichText::new("Alt+w")
                             .color(Color32::from_rgb(120, 220, 160))
                             .strong(),
                     );
