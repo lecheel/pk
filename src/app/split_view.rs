@@ -84,7 +84,11 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         ("🔍 Search", "Search", Color32::from_rgb(120, 180, 255)),
                         ("🌳 Status", "Git Status", Color32::from_rgb(120, 230, 160)),
                         ("📝 Diff", "Git Diff", Color32::from_rgb(235, 120, 120)),
-                        ("🔀 Diff Side", "Git Diff Side", Color32::from_rgb(100, 210, 220)),
+                        (
+                            "🔀 Diff Side",
+                            "Git Diff Side",
+                            Color32::from_rgb(100, 210, 220),
+                        ),
                         ("📜 Log", "Git Log", Color32::from_rgb(180, 130, 230)),
                         ("📂 Repos", "Repos", Color32::from_rgb(120, 230, 160)),
                         ("⚙ Config", "Settings", Color32::from_rgb(120, 180, 255)),
@@ -104,7 +108,8 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                             } else {
                                 pal::TEXT_DIM
                             })
-                            .strong();
+                            .strong()
+                            .size(12.0);
                         if ui.selectable_label(is_active, rich_text).clicked() {
                             app.show_fmt_error = true;
                             app.show_settings = false;
@@ -120,7 +125,8 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         let is_active = current_tab == *tab_name;
                         let rich_text = RichText::new(*label)
                             .color(if is_active { *color } else { pal::TEXT_DIM })
-                            .strong();
+                            .strong()
+                            .size(12.0);
                         if ui.selectable_label(is_active, rich_text).clicked() {
                             app.show_fmt_error = false;
                             app.show_settings = false;
@@ -1303,7 +1309,13 @@ fn render_search_panel(
         app.right_selection = None;
     }
 }
-fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_w: f32, panel_w: f32) {
+fn render_git_diff_side_panel(
+    app: &mut MergeApp,
+    ui: &mut Ui,
+    row_h: f32,
+    char_w: f32,
+    panel_w: f32,
+) {
     let row_font = FontId::monospace(11.0);
     let half_w = (panel_w - 10.0) / 2.0;
     let lnum_w = 5.0 * char_w;
@@ -1325,6 +1337,26 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
         app.diff_side_hunk_idx = hunk_count - 1;
     }
 
+    // Keyboard navigation: l = next hunk, L (Shift+l) = previous hunk
+    if !ui.ctx().wants_keyboard_input() && hunk_count > 0 {
+        ui.input(|i| {
+            if i.key_pressed(Key::L) {
+                if i.modifiers.shift {
+                    if app.diff_side_hunk_idx > 0 {
+                        app.diff_side_hunk_idx -= 1;
+                    } else {
+                        app.diff_side_hunk_idx = hunk_count.saturating_sub(1);
+                    }
+                } else if app.diff_side_hunk_idx + 1 < hunk_count {
+                    app.diff_side_hunk_idx += 1;
+                } else {
+                    app.diff_side_hunk_idx = 0;
+                }
+                app.diff_side_scroll_target = hunk_row_starts.get(app.diff_side_hunk_idx).copied();
+            }
+        });
+    }
+
     let file_count = app.git_changed_files.len();
     let file_idx = app.git_changed_file_idx;
     let current_rel_file = app.git_changed_files.get(file_idx).cloned();
@@ -1333,29 +1365,37 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
         ui.label(
             RichText::new("Full-file diff vs HEAD (side by side)")
                 .color(pal::TEXT_DIM)
-                .small(),
+                .size(12.0),
         );
-        if ui.small_button("🔄 Refresh").clicked() {
+        if ui.button(RichText::new("🔄 Refresh").size(12.0)).clicked() {
             app.refresh_git_changed_files();
             app.update_git_statuses();
         }
         ui.add(Separator::default().vertical());
-        ui.label(RichText::new("File:").color(pal::TEXT_DIM).small());
+        ui.label(RichText::new("File:").color(pal::TEXT_DIM).size(12.0));
         ui.add_enabled_ui(file_count > 0, |ui| {
             if ui
-                .button(RichText::new("◀ File").small().monospace())
+                .button(RichText::new("◀ File").size(12.0).monospace())
                 .on_hover_text("Previous changed file")
                 .clicked()
             {
-                let new_idx = if file_idx == 0 { file_count - 1 } else { file_idx - 1 };
+                let new_idx = if file_idx == 0 {
+                    file_count - 1
+                } else {
+                    file_idx - 1
+                };
                 app.load_git_changed_file(new_idx);
             }
             if ui
-                .button(RichText::new("File ▶").small().monospace())
+                .button(RichText::new("File ▶").size(12.0).monospace())
                 .on_hover_text("Next changed file")
                 .clicked()
             {
-                let new_idx = if file_idx + 1 < file_count { file_idx + 1 } else { 0 };
+                let new_idx = if file_idx + 1 < file_count {
+                    file_idx + 1
+                } else {
+                    0
+                };
                 app.load_git_changed_file(new_idx);
             }
         });
@@ -1364,20 +1404,28 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
                 RichText::new(format!("{}/{}", file_idx + 1, file_count))
                     .color(pal::TEXT_DIM)
                     .monospace()
-                    .small(),
+                    .size(12.0),
             );
+            if let Some(rel) = &current_rel_file {
+                ui.label(
+                    RichText::new(format!("({})", rel))
+                        .color(pal::TEXT_NORMAL)
+                        .monospace()
+                        .size(12.0),
+                );
+            }
         } else {
             ui.label(
                 RichText::new("no changed files")
                     .color(pal::TEXT_DIM)
-                    .small(),
+                    .size(12.0),
             );
         }
         ui.add(Separator::default().vertical());
         ui.add_enabled_ui(hunk_count > 0, |ui| {
             if ui
-                .button(RichText::new("▲ Prev Hunk").small().monospace())
-                .on_hover_text("Jump to previous changed block")
+                .button(RichText::new("▲ Prev Hunk").size(12.0).monospace())
+                .on_hover_text("Jump to previous changed block (L)")
                 .clicked()
             {
                 if app.diff_side_hunk_idx > 0 {
@@ -1388,8 +1436,8 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
                 app.diff_side_scroll_target = hunk_row_starts.get(app.diff_side_hunk_idx).copied();
             }
             if ui
-                .button(RichText::new("▼ Next Hunk").small().monospace())
-                .on_hover_text("Jump to next changed block")
+                .button(RichText::new("▼ Next Hunk").size(12.0).monospace())
+                .on_hover_text("Jump to next changed block (l)")
                 .clicked()
             {
                 if app.diff_side_hunk_idx + 1 < hunk_count {
@@ -1402,26 +1450,32 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
         });
         if hunk_count > 0 {
             ui.label(
-                RichText::new(format!("Hunk {}/{}", app.diff_side_hunk_idx + 1, hunk_count))
-                    .color(pal::TEXT_DIM)
-                    .monospace()
-                    .small(),
+                RichText::new(format!(
+                    "Hunk {}/{}",
+                    app.diff_side_hunk_idx + 1,
+                    hunk_count
+                ))
+                .color(pal::TEXT_DIM)
+                .monospace()
+                .size(12.0),
             );
         }
     });
-    if let Some(rel) = &current_rel_file {
-        ui.label(
-            RichText::new(rel)
-                .color(pal::TEXT_NORMAL)
-                .monospace()
-                .small(),
-        );
-    }
     ui.add_space(2.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new("OLD (HEAD)").color(pal::TEXT_DIM).small().strong());
+        ui.label(
+            RichText::new("OLD (HEAD)")
+                .color(pal::TEXT_DIM)
+                .size(12.0)
+                .strong(),
+        );
         ui.add_space((half_w - 90.0).max(0.0));
-        ui.label(RichText::new("NEW (working)").color(pal::TEXT_DIM).small().strong());
+        ui.label(
+            RichText::new("NEW (working)")
+                .color(pal::TEXT_DIM)
+                .size(12.0)
+                .strong(),
+        );
     });
     ui.add(Separator::default());
     if rows.is_empty() {
@@ -1458,7 +1512,10 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
                 ui.painter().rect_filled(left_rect, 0.0, lbg);
                 ui.painter().rect_filled(right_rect, 0.0, rbg);
                 if let Some(l) = &row.left {
-                    let num_text = row.left_num.map(|n| format!("{:>4}", n)).unwrap_or_default();
+                    let num_text = row
+                        .left_num
+                        .map(|n| format!("{:>4}", n))
+                        .unwrap_or_default();
                     ui.painter().text(
                         Pos2::new(left_rect.left() + 4.0, rect.center().y),
                         Align2::LEFT_CENTER,
@@ -1480,7 +1537,10 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
                     );
                 }
                 if let Some(r) = &row.right {
-                    let num_text = row.right_num.map(|n| format!("{:>4}", n)).unwrap_or_default();
+                    let num_text = row
+                        .right_num
+                        .map(|n| format!("{:>4}", n))
+                        .unwrap_or_default();
                     ui.painter().text(
                         Pos2::new(right_rect.left() + 4.0, rect.center().y),
                         Align2::LEFT_CENTER,
@@ -1550,7 +1610,8 @@ fn render_file_panel(
         .map(|h| h.search.is_empty())
         .unwrap_or(false);
     let is_applied = app.applied_hunks.contains(&app.current_hunk);
-    let score_ok = is_new_file_creation || mr.score >= app.min_match_score || !file_anchors.is_empty();
+    let score_ok =
+        is_new_file_creation || mr.score >= app.min_match_score || !file_anchors.is_empty();
     let can_apply = !is_applied && score_ok;
     let apply_line = if file_anchors.is_empty() {
         mr.file_start + 1
@@ -1621,7 +1682,7 @@ fn render_file_panel(
                     ui.add(Separator::default().vertical());
                 }
                 if unique_files.len() > 1 {
-                    ui.label(RichText::new("File:").color(pal::TEXT_DIM).small());
+                    ui.label(RichText::new("File:").color(pal::TEXT_DIM).size(12.0));
                     if ui
                         .add_enabled(current_file_idx > 0, Button::new("◀").small())
                         .clicked()
@@ -1801,11 +1862,10 @@ fn render_file_panel(
                 } else {
                     pal::ACCENT_BAD
                 };
-                let label =
-                    RichText::new(format!("{:.0}% @{}", cand_score, cand_start + 1))
-                        .color(color)
-                        .monospace()
-                        .small();
+                let label = RichText::new(format!("{:.0}% @{}", cand_score, cand_start + 1))
+                    .color(color)
+                    .monospace()
+                    .small();
                 if ui.selectable_label(is_current, label).clicked() {
                     app.candidate_index = idx;
                     app.scroll_to_match = true;

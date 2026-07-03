@@ -291,13 +291,21 @@ impl MergeApp {
             }
         };
         let mut opts = git2::StatusOptions::new();
-        opts.include_untracked(true).recurse_untracked_dirs(true);
+        opts.include_untracked(false);
         let mut files: Vec<String> = repo
             .statuses(Some(&mut opts))
             .map(|statuses| {
                 statuses
                     .iter()
-                    .filter_map(|e| e.path().map(|p| p.to_string()))
+                    .filter_map(|e| {
+                        let s = e.status();
+                        // Only include modified or deleted files, exclude newly added (staged or untracked)
+                        if s.is_index_new() || s.is_wt_new() {
+                            None
+                        } else {
+                            e.path().map(|p| p.to_string())
+                        }
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -351,10 +359,7 @@ impl MergeApp {
                 Err(e) => {
                     self.file_text.clear();
                     self.file_lines.clear();
-                    self.set_message(StatusMessage::error(format!(
-                        "Cannot read {}: {}",
-                        path, e
-                    )));
+                    self.set_message(StatusMessage::error(format!("Cannot read {}: {}", path, e)));
                     return;
                 }
             }
@@ -873,12 +878,46 @@ impl eframe::App for MergeApp {
         }
 
         if ctx.input(|i| i.key_pressed(Key::F4)) {
+            self.show_fmt_error = false;
+            self.show_settings = false;
+            self.show_repos_window = false;
+            self.show_debug = false;
+            self.show_git_status_window = false;
+            self.show_git_diff_side = false;
+            self.show_git_log_window = false;
             self.show_git_diff_window = !self.show_git_diff_window;
         }
+        if ctx.input(|i| i.key_pressed(Key::F5)) {
+            self.show_fmt_error = false;
+            self.show_settings = false;
+            self.show_repos_window = false;
+            self.show_debug = false;
+            self.show_git_status_window = false;
+            self.show_git_diff_window = false;
+            self.show_git_log_window = false;
+            self.show_git_diff_side = !self.show_git_diff_side;
+            if self.show_git_diff_side {
+                self.refresh_git_changed_files();
+            }
+        }
         if ctx.input(|i| i.key_pressed(Key::F3)) {
+            self.show_fmt_error = false;
+            self.show_settings = false;
+            self.show_repos_window = false;
+            self.show_git_status_window = false;
+            self.show_git_diff_window = false;
+            self.show_git_diff_side = false;
+            self.show_git_log_window = false;
             self.show_debug = !self.show_debug;
         }
         if ctx.input(|i| i.key_pressed(Key::F1)) {
+            self.show_fmt_error = false;
+            self.show_settings = false;
+            self.show_repos_window = false;
+            self.show_debug = false;
+            self.show_git_diff_window = false;
+            self.show_git_diff_side = false;
+            self.show_git_log_window = false;
             self.show_git_status_window = !self.show_git_status_window;
         }
 
