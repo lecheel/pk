@@ -376,6 +376,17 @@ fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
             app.save_config();
         }
     });
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Min match floor (hide below):");
+        if ui
+            .add(Slider::new(&mut app.min_match_floor, 0.0..=100.0).suffix("%"))
+            .changed()
+        {
+            app.save_config();
+            app.recompute_match();
+        }
+    });
     ui.add_space(8.0);
     ui.heading("Formatter Settings");
     ui.add_space(8.0);

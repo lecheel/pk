@@ -8,6 +8,7 @@ use crate::app::pal;
 use crate::diff::MatchResult;
 use crate::patch::PatchHunk;
 use eframe::egui::*;
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::mpsc;
 
@@ -112,6 +113,7 @@ pub struct MergeApp {
     pub concat_server_enabled: bool,
     pub ignore_comments: bool,
     pub min_match_score: f32,
+    pub min_match_floor: f32,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
@@ -228,6 +230,7 @@ impl MergeApp {
             concat_server_enabled: config.concat_server_enabled,
             ignore_comments: config.ignore_comments,
             min_match_score: config.min_match_score,
+            min_match_floor: config.min_match_floor,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -640,6 +643,7 @@ impl MergeApp {
             concat_server_enabled: self.concat_server_enabled,
             ignore_comments: self.ignore_comments,
             min_match_score: self.min_match_score,
+            min_match_floor: self.min_match_floor,
         };
         config.save();
     }

@@ -12,9 +12,14 @@ pub struct AppConfig {
     pub ignore_comments: bool,
     #[serde(default = "default_min_match_score")]
     pub min_match_score: f32,
+    #[serde(default = "default_min_match_floor")]
+    pub min_match_floor: f32,
 }
 fn default_min_match_score() -> f32 {
     60.0
+}
+fn default_min_match_floor() -> f32 {
+    15.0
 }
 impl Default for AppConfig {
     fn default() -> Self {
@@ -25,6 +30,7 @@ impl Default for AppConfig {
             concat_server_enabled: true,
             ignore_comments: false,
             min_match_score: default_min_match_score(),
+            min_match_floor: default_min_match_floor(),
         }
     }
 }

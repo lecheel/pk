@@ -42,7 +42,8 @@ impl MergeMatching for MergeApp {
             }
         } else {
             let best = diff::find_best_match(&hunk.search, &self.file_lines, self.ignore_comments);
-            if best.score < self.min_match_score {
+            // Tier 1: Hard floor. Discard completely unrecognizable matches.
+            if best.score < self.min_match_floor {
                 self.match_result = None;
                 self.search_rows = Vec::new();
                 return;
