@@ -692,6 +692,9 @@ fn render_search_panel(
     let mut apply_clicked_id: Option<char> = None;
     let mut apply_clicked = false;
     let mut apply_clicked_line: Option<usize> = None;
+    let mut apply_selection: Option<(usize, (usize, usize))> = None;
+    let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+    let primary_down = ui.input(|i| i.pointer.primary_down());
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
@@ -1116,7 +1119,47 @@ fn render_search_panel(
                 if ui.put(btn_line_rect, btn_line).clicked() {
                     apply_clicked_line = Some(cur_ln);
                 }
-
+                x_offset += btn_line_size.x + 4.0;
+                let btn_star_rect = Rect::from_min_size(
+                    Pos2::new(
+                        hdr_rect.right() - btn_line_size.x - x_offset,
+                        hdr_rect.center().y - btn_line_size.y / 2.0,
+                    ),
+                    btn_line_size,
+                );
+                let btn_star = Button::new(
+                    RichText::new(format!("*({})", cur_ln + 1))
+                        .color(Color32::WHITE)
+                        .strong()
+                        .monospace(),
+                )
+                .fill(Color32::from_rgb(40, 90, 55))
+                .min_size(btn_line_size);
+                if ui.put(btn_star_rect, btn_star).clicked() {
+                    apply_clicked_line = Some(cur_ln);
+                }
+                x_offset += btn_line_size.x + 4.0;
+                if let Some((lo, hi)) = app.right_selection {
+                    let sel_btn_size = Vec2::new(120.0, row_h - 4.0);
+                    let sel_btn_rect = Rect::from_min_size(
+                        Pos2::new(
+                            hdr_rect.right() - sel_btn_size.x - x_offset,
+                            hdr_rect.center().y - sel_btn_size.y / 2.0,
+                        ),
+                        sel_btn_size,
+                    );
+                    let sel_btn = Button::new(
+                        RichText::new(format!("⚡ Apply sel {}-{}", lo + 1, hi + 1))
+                            .color(Color32::WHITE)
+                            .strong()
+                            .small()
+                            .monospace(),
+                    )
+                    .fill(Color32::from_rgb(70, 45, 100));
+                    if ui.put(sel_btn_rect, sel_btn).clicked() {
+                        apply_selection = Some((cur_ln, (lo, hi)));
+                    }
+                }
                 for (line_idx, line) in hunk.replace.iter().enumerate() {
                     let desired = Vec2::new(ui.available_width(), row_h);
                     let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
@@ -1153,9 +1196,38 @@ fn render_search_panel(
                             }
                         }
                     }
-                    ui.painter().rect_filled(rect, 0.0, pal::BG_INSERT);
+                    if primary_down {
+                        if let Some(pos) = pointer_pos {
+                            if rect.contains(pos) {
+                                if app.right_drag_anchor.is_none() {
+                                    app.right_drag_anchor = Some(line_idx);
+                                }
+                                let anchor = app.right_drag_anchor.unwrap();
+                                let lo = anchor.min(line_idx);
+                                let hi = anchor.max(line_idx);
+                                app.right_selection = Some((lo, hi));
+                            }
+                        }
+                    }
+                    let is_replace_selected = app
+                        .right_selection
+                        .map_or(false, |(s, e)| line_idx >= s && line_idx <= e);
+                    let replace_bg = if is_replace_selected {
+                        Color32::from_rgb(55, 40, 85)
+                    } else {
+                        pal::BG_INSERT
+                    };
+                    ui.painter().rect_filled(rect, 0.0, replace_bg);
                     let bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
-                    ui.painter().rect_filled(bar, 0.0, pal::BAR_MATCH);
+                    ui.painter().rect_filled(
+                        bar,
+                        0.0,
+                        if is_replace_selected {
+                            Color32::from_rgb(140, 100, 220)
+                        } else {
+                            pal::BAR_MATCH
+                        },
+                    );
                     ui.painter().text(
                         Pos2::new(lnum_x, rect.center().y),
                         Align2::LEFT_CENTER,
@@ -1183,6 +1255,9 @@ fn render_search_panel(
                         },
                     );
                 }
+                if !primary_down {
+                    app.right_drag_anchor = None;
+                }
             }
         });
 
@@ -1198,8 +1273,11 @@ fn render_search_panel(
     if let Some(ln) = apply_clicked_line {
         app.apply_merge(Some(ln), None);
     }
+    if let Some((target_line, range)) = apply_selection {
+        app.apply_merge_partial(Some(target_line), None, range);
+        app.right_selection = None;
+    }
 }
-
 fn render_file_panel(
     app: &mut MergeApp,
     ui: &mut Ui,

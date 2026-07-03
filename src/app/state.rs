@@ -72,6 +72,8 @@ pub struct MergeApp {
     pub start_pwd: String,
     pub start_pwd_is_repo: bool,
     pub left_selection: Option<(usize, usize)>,
+    pub right_selection: Option<(usize, usize)>,
+    pub right_drag_anchor: Option<usize>,
     pub file_anchors: BTreeMap<char, FileAnchor>,
     pub mark_pending: Option<MarkPending>,
     pub git_statuses: Vec<GitStatus>,
@@ -179,6 +181,8 @@ impl MergeApp {
             start_pwd,
             start_pwd_is_repo,
             left_selection: None,
+            right_selection: None,
+            right_drag_anchor: None,
             file_anchors: BTreeMap::new(),
             mark_pending: None,
             git_statuses: Vec::new(),
@@ -572,6 +576,8 @@ impl MergeApp {
         self.manual_paste_text.clear();
         self.last_action = None;
         self.left_selection = None;
+        self.right_selection = None;
+        self.right_drag_anchor = None;
         self.sync_anchors.clear();
         self.pending_sync = None;
         self.pending_line_actions.clear();
@@ -632,6 +638,8 @@ impl MergeApp {
         self.cursor_line = None;
         self.scroll_to_match = true;
         self.left_selection = None;
+        self.right_selection = None;
+        self.right_drag_anchor = None;
         self.git_statuses.clear();
         self.git_diff_rows.clear();
         self.git_hunks.clear();
@@ -648,8 +656,50 @@ impl MergeApp {
         self.is_insert_mode = false;
         self.insert_cursor = 0;
     }
+    pub fn apply_merge_partial(
+        &mut self,
+        target_line: Option<usize>,
+        marker: Option<char>,
+        range: (usize, usize),
+    ) {
+        let hunk = match self.current_hunk() {
+            Some(h) => h.clone(),
+            None => return,
+        };
+        if hunk.replace.is_empty() {
+            return;
+        }
+        let (lo, hi) = range;
+        let hi = hi.min(hunk.replace.len().saturating_sub(1));
+        if lo > hi {
+            return;
+        }
+        let sliced: Vec<String> = hunk.replace[lo..=hi].to_vec();
+        let insert_at = if let Some(id) = marker {
+            self.file_anchors.get(&id).map(|a| a.line)
+        } else {
+            target_line.or(self.cursor_line)
+        };
+        let insert_at = match insert_at {
+            Some(l) => l,
+            None => return,
+        };
+        self.save_history();
+        let pos = (insert_at + 1).min(self.file_lines.len());
+        for (offset, line) in sliced.iter().enumerate() {
+            self.file_lines.insert(pos + offset, line.clone());
+        }
+        self.merged_range = Some((pos, pos + sliced.len()));
+        self.scroll_to_match = true;
+        self.recompute_match();
+        self.update_git_statuses();
+        self.set_message(StatusMessage::success(format!(
+            "Inserted {} selected REPLACE line(s) at line {}",
+            sliced.len(),
+            pos + 1
+        )));
+    }
 }
-
 impl Drop for MergeApp {
     fn drop(&mut self) {
         println!("[App] Saving config on exit...");
@@ -735,6 +785,9 @@ impl eframe::App for MergeApp {
                         self.pending_sync = None;
                     } else if !self.file_anchors.is_empty() || self.mark_pending.is_some() {
                         self.clear_marks();
+                    } else if self.right_selection.is_some() {
+                        self.right_selection = None;
+                        self.right_drag_anchor = None;
                     } else if self.left_selection.is_some() {
                         self.left_selection = None;
                     } else if self.del_start.is_some() || self.del_end.is_some() {
