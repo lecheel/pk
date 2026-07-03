@@ -2351,6 +2351,11 @@ fn render_file_panel(
                     .values()
                     .find(|a| a.id == 'a' && a.end_line == Some(i));
                 let is_anchor = anchor_here.is_some() || anchor_end_here.is_some();
+                let in_anchor_a_range = file_anchors.get(&'a').map_or(false, |a| {
+                    let end = a.end_line.unwrap_or(a.line);
+                    let (lo, hi) = (a.line.min(end), a.line.max(end));
+                    i >= lo && i <= hi
+                });
                 let is_cursor = cursor_line == Some(i);
                 let in_merged = merged_range.map_or(false, |(rs, re)| i >= rs && i < re);
                 let is_delete = in_auto_match && delete_file_indices.contains(&i);
@@ -2400,6 +2405,8 @@ fn render_file_panel(
                     Color32::from_rgb(20, 50, 25)
                 } else if is_anchor_row {
                     Color32::from_rgba_premultiplied(45, 38, 15, 60)
+                } else if in_anchor_a_range {
+                    Color32::from_rgba_premultiplied(45, 38, 15, 32)
                 } else if in_block_delete {
                     pal::BG_DELETE
                 } else if in_merged {
@@ -2445,6 +2452,13 @@ fn render_file_panel(
                     Color32::from_rgb(60, 120, 70)
                 } else if is_anchor_row {
                     pal::BAR_ANCHOR
+                } else if in_anchor_a_range {
+                    Color32::from_rgba_premultiplied(
+                        pal::BAR_ANCHOR.r(),
+                        pal::BAR_ANCHOR.g(),
+                        pal::BAR_ANCHOR.b(),
+                        140,
+                    )
                 } else if in_block_delete {
                     pal::TEXT_DELETE
                 } else if in_merged {
@@ -2484,6 +2498,8 @@ fn render_file_panel(
                     }
                 }
                 let num_color = if is_anchor_row {
+                    pal::TEXT_ANCHOR
+                } else if in_anchor_a_range {
                     pal::TEXT_ANCHOR
                 } else if in_block_delete {
                     pal::TEXT_DELETE
@@ -2534,6 +2550,8 @@ fn render_file_panel(
                     );
                 }
                 let text_color = if is_anchor_row {
+                    pal::TEXT_ANCHOR
+                } else if in_anchor_a_range {
                     pal::TEXT_ANCHOR
                 } else if in_block_delete {
                     pal::TEXT_DELETE
