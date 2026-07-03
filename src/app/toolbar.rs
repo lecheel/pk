@@ -111,7 +111,10 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                 }
                 let mut filter_low = app.filter_low_matches;
                 if ui
-                    .checkbox(&mut filter_low, format!("Filter <{:.0}%", app.min_match_score))
+                    .checkbox(
+                        &mut filter_low,
+                        format!("Filter <{:.0}%", app.min_match_score),
+                    )
                     .on_hover_text(format!(
                         "Skip and hide hunks with less than {:.0}% match score",
                         app.min_match_score

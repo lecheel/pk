@@ -40,7 +40,7 @@ pub fn get_git_log(base_dir: &std::path::Path) -> Vec<GitLogEntry> {
     if walk.push_head().is_err() {
         return Vec::new();
     }
-    
+
     let mut log = Vec::new();
     for oid in walk {
         if let Ok(oid) = oid {
@@ -53,22 +53,38 @@ pub fn get_git_log(base_dir: &std::path::Path) -> Vec<GitLogEntry> {
                 let time = author.when().seconds().to_string();
                 let message = commit.summary().unwrap_or("").to_string();
                 let body = commit.message().unwrap_or("").to_string();
-                
+
                 let mut files_changed = Vec::new();
                 if let Ok(tree) = commit.tree() {
                     let parent_tree = commit.parents().next().and_then(|p| p.tree().ok());
-                    if let Ok(diff) = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None) {
-                        let _ = diff.foreach(&mut |d, _| {
-                            let path = d.new_file().path().or_else(|| d.old_file().path());
-                            if let Some(p) = path {
-                                files_changed.push(p.display().to_string());
-                            }
-                            true
-                        }, None, None, None);
+                    if let Ok(diff) =
+                        repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
+                    {
+                        let _ = diff.foreach(
+                            &mut |d, _| {
+                                let path = d.new_file().path().or_else(|| d.old_file().path());
+                                if let Some(p) = path {
+                                    files_changed.push(p.display().to_string());
+                                }
+                                true
+                            },
+                            None,
+                            None,
+                            None,
+                        );
                     }
                 }
 
-                log.push(GitLogEntry { hash, full_hash, author: name, email, time, message, body, files_changed });
+                log.push(GitLogEntry {
+                    hash,
+                    full_hash,
+                    author: name,
+                    email,
+                    time,
+                    message,
+                    body,
+                    files_changed,
+                });
             }
         }
     }

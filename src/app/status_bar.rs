@@ -18,15 +18,18 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                 } else {
                     (pal::ACCENT_GOOD, "Saved")
                 };
-                
+
                 // Draw an actual circle for the LED to avoid missing font glyphs (square boxes)
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), Sense::hover());
-                ui.painter().circle_filled(
-                    rect.center(),
-                    rect.height() / 2.0,
-                    led_color,
+                ui.painter()
+                    .circle_filled(rect.center(), rect.height() / 2.0, led_color);
+                ui.label(
+                    RichText::new(led_text)
+                        .color(led_color)
+                        .strong()
+                        .monospace()
+                        .size(13.0),
                 );
-                ui.label(RichText::new(led_text).color(led_color).strong().monospace().size(13.0));
                 ui.add(Separator::default().vertical());
 
                 if let Some(hunk) = app.current_hunk() {

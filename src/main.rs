@@ -2,6 +2,7 @@ use eframe::egui;
 
 mod app;
 mod diff;
+mod git_diff_vim;
 mod patch;
 
 fn main() -> eframe::Result<()> {

@@ -9,6 +9,7 @@ use super::palette::pal;
 use super::state::{MarkPending, MergeApp};
 use super::types::{Action, FileAnchor, SearchRow, StatusMessage};
 use crate::diff::RowKind;
+use crate::git_diff_vim::{parse_vim_buffer, VimCmd};
 use eframe::egui::*;
 use std::collections::HashSet;
 use std::sync::mpsc;
@@ -341,6 +342,29 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     }
 }
 
+impl MergeApp {
+    /// After applying a hunk, switch to the diff-side view and put the
+    /// cursor on the first changed row so the result is immediately
+    /// inspectable and correctable, instead of leaving the user to
+    /// discover a bad merge later via git status.
+    pub fn jump_to_diff_side_after_merge(&mut self) {
+        self.refresh_git_diff_side_rows();
+        self.show_git_diff_side = true;
+        self.show_settings = false;
+        self.show_repos_window = false;
+        self.show_debug = false;
+        self.show_git_status_window = false;
+        self.show_git_diff_window = false;
+        self.show_git_log_window = false;
+        let first_change = self
+            .git_diff_rows
+            .iter()
+            .position(|r| !matches!(r.kind, RowKind::Equal));
+        self.git_diff_cursor = first_change;
+        self.git_diff_scroll_to_cursor = true;
+        self.diff_side_scroll_target = first_change;
+    }
+}
 fn render_fmt_error_panel(app: &mut MergeApp, ui: &mut Ui) {
     ui.add_space(12.0);
     ui.label(
@@ -1297,16 +1321,20 @@ fn render_search_panel(
     }
     if apply_clicked {
         app.apply_merge(None, None);
+        app.jump_to_diff_side_after_merge();
     }
     if let Some(id) = apply_clicked_id {
         app.apply_merge(None, Some(id));
+        app.jump_to_diff_side_after_merge();
     }
     if let Some(ln) = apply_clicked_line {
         app.apply_merge(Some(ln), None);
+        app.jump_to_diff_side_after_merge();
     }
     if let Some((target_line, range)) = apply_selection {
         app.apply_merge_partial(Some(target_line), None, range);
         app.right_selection = None;
+        app.jump_to_diff_side_after_merge();
     }
 }
 fn render_git_diff_side_panel(
@@ -1338,9 +1366,10 @@ fn render_git_diff_side_panel(
     }
 
     // Keyboard navigation: l = next hunk, L (Shift+l) = previous hunk
+    // Keyboard navigation: l = next hunk, L (Shift+l) = previous hunk
     if !ui.ctx().wants_keyboard_input() && hunk_count > 0 {
         ui.input(|i| {
-            if i.key_pressed(Key::L) {
+            if i.key_pressed(Key::L) && app.git_diff_vim_buffer.is_empty() {
                 if i.modifiers.shift {
                     if app.diff_side_hunk_idx > 0 {
                         app.diff_side_hunk_idx -= 1;
@@ -1356,7 +1385,77 @@ fn render_git_diff_side_panel(
             }
         });
     }
-
+    // Cursor movement + vim-style dd/yy/p/P/gg/G editing, scoped to this panel.
+    // Cursor movement + vim-style dd/yy/p/P/gg/G editing, scoped to this panel.
+    if app.git_diff_insert_mode {
+        ui.ctx().set_cursor_icon(CursorIcon::Text);
+        handle_git_diff_insert_mode(app, ui);
+    } else if !ui.ctx().wants_keyboard_input() && !rows.is_empty() {
+        let cur = app.git_diff_cursor.unwrap_or(0).min(rows.len() - 1);
+        let mut new_text = String::new();
+        let mut moved = false;
+        let mut revert_to_head = false;
+        let mut enter_insert = false;
+        let mut enter_insert_at_start = false;
+        ui.input(|i| {
+            if i.key_pressed(Key::ArrowDown) {
+                app.git_diff_cursor = Some((cur + 1).min(rows.len() - 1));
+                moved = true;
+            }
+            if i.key_pressed(Key::ArrowUp) {
+                app.git_diff_cursor = Some(cur.saturating_sub(1));
+                moved = true;
+            }
+            if app.git_diff_cursor.is_none() {
+                app.git_diff_cursor = Some(cur);
+            }
+            for event in i.events.clone() {
+                if let Event::Text(txt) = event {
+                    match txt.as_str() {
+                        "r" if app.git_diff_vim_buffer.is_empty() => revert_to_head = true,
+                        "i" if app.git_diff_vim_buffer.is_empty() => enter_insert = true,
+                        "I" if app.git_diff_vim_buffer.is_empty() => enter_insert_at_start = true,
+                        _ => new_text.push_str(&txt),
+                    }
+                }
+            }
+        });
+        if moved {
+            app.git_diff_scroll_to_cursor = true;
+        }
+        if revert_to_head {
+            apply_git_diff_vim_cmd(app, VimCmd::RevertToHead, cur, &hunk_row_starts);
+        }
+        if enter_insert || enter_insert_at_start {
+            if let Some(fl) = app
+                .git_diff_rows
+                .get(cur)
+                .and_then(|r| r.right_num)
+                .map(|n| n - 1)
+            {
+                app.cursor_line = Some(fl);
+                app.git_diff_insert_mode = true;
+                app.insert_cursor = if enter_insert_at_start {
+                    0
+                } else {
+                    app.file_lines
+                        .get(fl)
+                        .map(|l| l.chars().count())
+                        .unwrap_or(0)
+                };
+            }
+        }
+        if !new_text.is_empty() {
+            app.git_diff_vim_buffer.push_str(&new_text);
+            let (cmd, clear) = parse_vim_buffer(&app.git_diff_vim_buffer);
+            if let Some(cmd) = cmd {
+                apply_git_diff_vim_cmd(app, cmd, cur, &hunk_row_starts);
+            }
+            if clear {
+                app.git_diff_vim_buffer.clear();
+            }
+        }
+    }
     let file_count = app.git_changed_files.len();
     let file_idx = app.git_changed_file_idx;
     let current_rel_file = app.git_changed_files.get(file_idx).cloned();
@@ -1494,8 +1593,15 @@ fn render_git_diff_side_panel(
         .show(ui, |ui| {
             for (row_idx, row) in rows.iter().enumerate() {
                 let desired = Vec2::new(half_w * 2.0 + 8.0, row_h);
-                let (rect, _resp) = ui.allocate_exact_size(desired, Sense::hover());
+                let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+                if resp.clicked() {
+                    app.git_diff_cursor = Some(row_idx);
+                }
                 if scroll_target == Some(row_idx) {
+                    ui.scroll_to_rect(rect, Some(Align::Center));
+                    scrolled = true;
+                }
+                if app.git_diff_scroll_to_cursor && app.git_diff_cursor == Some(row_idx) {
                     ui.scroll_to_rect(rect, Some(Align::Center));
                     scrolled = true;
                 }
@@ -1504,10 +1610,15 @@ fn render_git_diff_side_panel(
                 let mut right_rect = rect;
                 right_rect.min.x = rect.min.x + half_w + 8.0;
                 right_rect.set_width(half_w);
-                let (lbg, rbg) = match row.kind {
-                    RowKind::Equal => (pal::BG_ROW_EVEN, pal::BG_ROW_EVEN),
-                    RowKind::Delete => (pal::BG_DELETE, Color32::TRANSPARENT),
-                    RowKind::Insert => (Color32::TRANSPARENT, pal::BG_INSERT),
+                let is_cursor = app.git_diff_cursor == Some(row_idx);
+                let (lbg, rbg) = if is_cursor {
+                    (pal::BG_CURSOR, pal::BG_CURSOR)
+                } else {
+                    match row.kind {
+                        RowKind::Equal => (pal::BG_ROW_EVEN, pal::BG_ROW_EVEN),
+                        RowKind::Delete => (pal::BG_DELETE, Color32::TRANSPARENT),
+                        RowKind::Insert => (Color32::TRANSPARENT, pal::BG_INSERT),
+                    }
                 };
                 ui.painter().rect_filled(left_rect, 0.0, lbg);
                 ui.painter().rect_filled(right_rect, 0.0, rbg);
@@ -1570,7 +1681,204 @@ fn render_git_diff_side_panel(
         });
     if scrolled {
         app.diff_side_scroll_target = None;
+        app.git_diff_scroll_to_cursor = false;
     }
+}
+fn apply_git_diff_vim_cmd(
+    app: &mut MergeApp,
+    cmd: VimCmd,
+    cursor_row: usize,
+    hunk_row_starts: &[usize],
+) {
+    // Map a diff-row index to the corresponding line in the working buffer
+    // (app.file_lines) via the row's right-side (new/working) line number.
+    let row_to_file_line = |app: &MergeApp, row_idx: usize| -> Option<usize> {
+        app.git_diff_rows
+            .get(row_idx)
+            .and_then(|r| r.right_num)
+            .map(|n| n - 1)
+    };
+    match cmd {
+        VimCmd::DeleteLines(n) => {
+            if let Some(fl) = row_to_file_line(app, cursor_row) {
+                app.save_history();
+                let end = (fl + n).min(app.file_lines.len());
+                if fl < end {
+                    app.file_lines.drain(fl..end);
+                    app.recompute_match();
+                    app.update_git_statuses();
+                    app.refresh_git_diff_side_rows();
+                    app.git_diff_cursor =
+                        Some(cursor_row.min(app.git_diff_rows.len().saturating_sub(1)));
+                }
+            }
+        }
+        VimCmd::Yank => {
+            if let Some(fl) = row_to_file_line(app, cursor_row) {
+                app.yanked_line = app.file_lines.get(fl).cloned();
+                app.set_message(StatusMessage::info(format!("Yanked line {}", fl + 1)));
+            }
+        }
+        VimCmd::PasteBelow => {
+            if let (Some(fl), Some(text)) =
+                (row_to_file_line(app, cursor_row), app.yanked_line.clone())
+            {
+                app.save_history();
+                if fl + 1 <= app.file_lines.len() {
+                    app.file_lines.insert(fl + 1, text);
+                    app.recompute_match();
+                    app.update_git_statuses();
+                    app.refresh_git_diff_side_rows();
+                    app.set_message(StatusMessage::info("Pasted below"));
+                }
+            }
+        }
+        VimCmd::PasteAbove => {
+            if let (Some(fl), Some(text)) =
+                (row_to_file_line(app, cursor_row), app.yanked_line.clone())
+            {
+                app.save_history();
+                app.file_lines.insert(fl, text);
+                app.recompute_match();
+                app.update_git_statuses();
+                app.refresh_git_diff_side_rows();
+                app.set_message(StatusMessage::info("Pasted above"));
+            }
+        }
+        VimCmd::GotoTop => {
+            app.git_diff_cursor = Some(0);
+            app.git_diff_scroll_to_cursor = true;
+        }
+        VimCmd::GotoBottom => {
+            app.git_diff_cursor = Some(app.git_diff_rows.len().saturating_sub(1));
+            app.git_diff_scroll_to_cursor = true;
+        }
+        VimCmd::Undo => {
+            app.undo();
+            app.refresh_git_diff_side_rows();
+        }
+        VimCmd::NextGitHunk => {
+            if let Some(&next) = hunk_row_starts.iter().find(|&&s| s > cursor_row) {
+                app.git_diff_cursor = Some(next);
+            } else if let Some(&first) = hunk_row_starts.first() {
+                app.git_diff_cursor = Some(first);
+            }
+            app.git_diff_scroll_to_cursor = true;
+        }
+        VimCmd::PrevGitHunk => {
+            if let Some(&prev) = hunk_row_starts.iter().rev().find(|&&s| s < cursor_row) {
+                app.git_diff_cursor = Some(prev);
+            } else if let Some(&last) = hunk_row_starts.last() {
+                app.git_diff_cursor = Some(last);
+            }
+            app.git_diff_scroll_to_cursor = true;
+        }
+        VimCmd::RevertToHead => {
+            // Pair up a Delete row (HEAD content) with the Insert/Equal row that
+            // replaced it, and restore the HEAD text into the working buffer.
+            if let Some(row) = app.git_diff_rows.get(cursor_row).cloned() {
+                let head_text = match row.kind {
+                    RowKind::Delete => row.left.clone(),
+                    RowKind::Insert => {
+                        // find nearest preceding Delete row to pull HEAD text from
+                        app.git_diff_rows[..cursor_row]
+                            .iter()
+                            .rev()
+                            .find(|r| matches!(r.kind, RowKind::Delete))
+                            .and_then(|r| r.left.clone())
+                    }
+                    RowKind::Equal => row.left.clone(),
+                };
+                if let (Some(text), Some(fl)) = (
+                    head_text,
+                    row.right_num.map(|n| n - 1).or_else(|| {
+                        // Delete-only row has no right_num; revert means "insert HEAD
+                        // line back" at the position right before the next right_num.
+                        app.git_diff_rows[cursor_row..]
+                            .iter()
+                            .find_map(|r| r.right_num)
+                            .map(|n| n - 1)
+                    }),
+                ) {
+                    app.save_history();
+                    match row.kind {
+                        RowKind::Delete => {
+                            app.file_lines.insert(fl, text);
+                        }
+                        _ => {
+                            if fl < app.file_lines.len() {
+                                app.file_lines[fl] = text;
+                            }
+                        }
+                    }
+                    app.recompute_match();
+                    app.update_git_statuses();
+                    app.refresh_git_diff_side_rows();
+                    app.set_message(StatusMessage::success("Reverted line to HEAD"));
+                }
+            }
+        }
+        VimCmd::RepeatLast | VimCmd::NextSearchMatch | VimCmd::PrevSearchMatch => {}
+    }
+}
+fn handle_git_diff_insert_mode(app: &mut MergeApp, ui: &mut Ui) {
+    ui.input(|i| {
+        if i.key_pressed(Key::Escape) {
+            app.git_diff_insert_mode = false;
+            app.refresh_git_diff_side_rows();
+            return;
+        }
+        let Some(cur) = app.cursor_line else {
+            return;
+        };
+        if i.key_pressed(Key::ArrowLeft) {
+            app.insert_cursor = app.insert_cursor.saturating_sub(1);
+        }
+        if i.key_pressed(Key::ArrowRight) {
+            let max_len = app
+                .file_lines
+                .get(cur)
+                .map(|l| l.chars().count())
+                .unwrap_or(0);
+            app.insert_cursor = (app.insert_cursor + 1).min(max_len);
+        }
+        if i.key_pressed(Key::Backspace) && app.insert_cursor > 0 {
+            app.save_history();
+            let line = app.file_lines[cur].clone();
+            let mut chars: Vec<char> = line.chars().collect();
+            chars.remove(app.insert_cursor - 1);
+            app.file_lines[cur] = chars.iter().collect();
+            app.insert_cursor -= 1;
+            app.recompute_match();
+            app.update_git_statuses();
+        }
+        for event in i.events.clone() {
+            if let Event::Text(txt) = event {
+                if txt != "\n" && txt != "\r" {
+                    app.save_history();
+                    let line = app.file_lines[cur].clone();
+                    let mut new_line = String::new();
+                    let mut count = 0;
+                    for c in line.chars() {
+                        if count == app.insert_cursor {
+                            new_line.push_str(&txt);
+                        }
+                        new_line.push(c);
+                        count += 1;
+                    }
+                    if count == app.insert_cursor {
+                        new_line.push_str(&txt);
+                    }
+                    app.file_lines[cur] = new_line;
+                    app.insert_cursor += txt.chars().count();
+                    app.recompute_match();
+                    app.update_git_statuses();
+                }
+            }
+        }
+    });
+    // Live-refresh the diff view while typing so the correction is visible immediately.
+    app.refresh_git_diff_side_rows();
 }
 fn render_file_panel(
     app: &mut MergeApp,

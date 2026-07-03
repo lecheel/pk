@@ -119,6 +119,10 @@ pub struct MergeApp {
     pub diff_side_scroll_target: Option<usize>,
     pub git_changed_files: Vec<String>,
     pub git_changed_file_idx: usize,
+    pub git_diff_cursor: Option<usize>,
+    pub git_diff_vim_buffer: String,
+    pub git_diff_scroll_to_cursor: bool,
+    pub git_diff_insert_mode: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
@@ -241,6 +245,10 @@ impl MergeApp {
             diff_side_scroll_target: None,
             git_changed_files: Vec::new(),
             git_changed_file_idx: 0,
+            git_diff_cursor: None,
+            git_diff_vim_buffer: String::new(),
+            git_diff_scroll_to_cursor: false,
+            git_diff_insert_mode: false,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -589,6 +597,12 @@ impl MergeApp {
         self.git_hunks =
             super::git_ops::group_git_hunks(&self.git_diff_rows, self.file_lines.len());
         self.git_log_entries = super::git_ops::get_git_log(repo_root);
+    }
+    /// Recompute the HEAD-vs-working diff shown in the diff-side panel.
+    /// Called after any in-place edit made from that panel (dd/yy/p/insert/revert)
+    /// so the view stays in sync with the corrected buffer.
+    pub fn refresh_git_diff_side_rows(&mut self) {
+        self.update_git_statuses();
     }
 
     pub fn reparse(&mut self) {
