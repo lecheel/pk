@@ -1366,7 +1366,6 @@ fn render_git_diff_side_panel(
     }
 
     // Keyboard navigation: l = next hunk, L (Shift+l) = previous hunk
-    // Keyboard navigation: l = next hunk, L (Shift+l) = previous hunk
     if !ui.ctx().wants_keyboard_input() && hunk_count > 0 {
         ui.input(|i| {
             if i.key_pressed(Key::L) && app.git_diff_vim_buffer.is_empty() {
@@ -1385,7 +1384,6 @@ fn render_git_diff_side_panel(
             }
         });
     }
-    // Cursor movement + vim-style dd/yy/p/P/gg/G editing, scoped to this panel.
     // Cursor movement + vim-style dd/yy/p/P/gg/G editing, scoped to this panel.
     if app.git_diff_insert_mode {
         ui.ctx().set_cursor_icon(CursorIcon::Text);
@@ -1616,7 +1614,7 @@ fn render_git_diff_side_panel(
                     }
                 } else {
                     ui.label(
-                        RichText::new("→ right-click a NEW line to set insert point")
+                        RichText::new("→ click ⚓ on a NEW line to set insert point")
                             .color(pal::TEXT_DIM)
                             .small(),
                     );
@@ -1708,7 +1706,7 @@ fn render_git_diff_side_panel(
                     (l, r)
                 };
                 let desired = Vec2::new(half_w * 2.0 + 8.0, row_h);
-                let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(desired, Sense::click_and_drag());
                 if resp.clicked() {
                     app.git_diff_cursor = Some(row_idx);
                 }
@@ -1755,6 +1753,33 @@ fn render_git_diff_side_panel(
                         0.0,
                         Stroke::new(2.0, Color32::from_rgb(230, 190, 90)),
                     );
+                }
+                if row.right_num.is_some() {
+                    let anchor_btn_w = 20.0;
+                    let anchor_btn_rect = Rect::from_min_size(
+                        Pos2::new(right_rect.right() - anchor_btn_w - 2.0, rect.top() + 1.0),
+                        Vec2::new(anchor_btn_w, rect.height() - 2.0),
+                    );
+                    let anchor_btn = Button::new(
+                        RichText::new("⚓").small().monospace().color(if is_insert_anchor {
+                            Color32::from_rgb(255, 220, 120)
+                        } else {
+                            pal::TEXT_DIM
+                        }),
+                    )
+                    .fill(if is_insert_anchor {
+                        Color32::from_rgb(70, 55, 15)
+                    } else {
+                        Color32::TRANSPARENT
+                    })
+                    .frame(false);
+                    if ui
+                        .put(anchor_btn_rect, anchor_btn)
+                        .on_hover_text("Set insert anchor at this working line")
+                        .clicked()
+                    {
+                        app.diff_side_insert_anchor = Some(row_idx);
+                    }
                 }
                 if let Some(l) = &row.left {
                     let num_text = row
@@ -1813,6 +1838,17 @@ fn render_git_diff_side_panel(
                 ui.painter().rect_filled(sep, 0.0, pal::SEPARATOR);
             }
         });
+    if !primary_down {
+        local_left_drag_anchor = None;
+        local_right_drag_anchor = None;
+    }
+    app.diff_side_left_drag_anchor = local_left_drag_anchor;
+    app.diff_side_left_selection = local_left_selection;
+    app.diff_side_right_drag_anchor = local_right_drag_anchor;
+    app.diff_side_right_selection = local_right_selection;
+    if let Some(row_idx) = set_insert_anchor {
+        app.diff_side_insert_anchor = Some(row_idx);
+    }
     if scrolled {
         app.diff_side_scroll_target = None;
         app.git_diff_scroll_to_cursor = false;
