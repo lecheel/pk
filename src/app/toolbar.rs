@@ -1,5 +1,5 @@
 //--+ file:///src/app/toolbar.rs
-use super::clipboard_utils::get_clipboard_text;
+use super::clipboard_utils::{get_clipboard_text, parse_clipboard_patch};
 use super::matching::MergeMatching;
 use super::palette::pal;
 use super::state::MergeApp;
@@ -37,40 +37,37 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                         }
                     }
                 }
-                if ui.button("Open File…").clicked() {
-                    if let Some(path) = rfd::FileDialog::new().pick_file() {
-                        if let Ok(content) = std::fs::read_to_string(&path) {
-                            app.file_text = content;
-                            app.file_lines = app.file_text.lines().map(String::from).collect();
-                            app.file_path = path.display().to_string();
-                            if let Some(parent) = path.parent() {
-                                app.base_dir = parent.display().to_string();
+                if ui
+                    .button("📋 Paste Patch (*)")
+                    .on_hover_text("Load and reparse a patch directly from your system clipboard")
+                    .clicked()
+                {
+                    if let Some(pasted) = get_clipboard_text() {
+                        let parsed_hunks = parse_clipboard_patch(&pasted);
+                        if !parsed_hunks.is_empty() {
+                            let _ = std::fs::write("temp.md", &pasted);
+                            app.initial_patch_path = Some("temp.md".to_string());
+                            app.patch_text = pasted;
+                            app.reparse();
+                            if !app.hunks.is_empty() && app.hunks[0].filename.is_empty() {
+                                app.set_message(StatusMessage::warning(
+                                    "Search pattern loaded. Enter the target filename below.",
+                                ));
+                            } else {
+                                app.set_message(StatusMessage::success(
+                                    "Loaded patch from clipboard (saved as temp.md)",
+                                ));
                             }
-                            app.reset_for_new_file();
-                            app.recompute_match();
+                        } else {
+                            app.set_message(StatusMessage::error(
+                                "Clipboard content is empty or invalid",
+                            ));
                         }
+                    } else {
+                        app.set_message(StatusMessage::error("Could not read text from clipboard"));
                     }
                 }
                 ui.add(Separator::default().vertical().spacing(12.0));
-
-                if app.patch_text.is_empty() {
-                    if ui
-                        .button("📋 Paste Patch (*)")
-                        .on_hover_text("Parse patch directly from clipboard")
-                        .clicked()
-                    {
-                        if let Some(text) = get_clipboard_text() {
-                            app.patch_text = text;
-                            app.reparse();
-                        } else {
-                            app.show_manual_paste = true;
-                            app.set_message(StatusMessage::warning(
-                                "Clipboard is empty or inaccessible. Use manual paste window.",
-                            ));
-                        }
-                    }
-                    ui.add(Separator::default().vertical().spacing(12.0));
-                }
 
                 if let Some(ref mr) = app.match_result {
                     let (bg, fg, icon) = MergeApp::score_appearance(mr.score);
