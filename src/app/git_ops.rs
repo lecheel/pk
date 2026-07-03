@@ -133,6 +133,7 @@ pub fn get_line_statuses(
     base_dir: &Path,
     file_path: &Path,
     current_lines: &[String],
+    ignore_comments: bool,
 ) -> (Vec<GitStatus>, Vec<crate::diff::DiffRow>) {
     let mut statuses = vec![GitStatus::Unchanged; current_lines.len()];
     let repo = match git2::Repository::discover(base_dir) {
@@ -200,7 +201,7 @@ pub fn get_line_statuses(
     };
     let head_content = String::from_utf8_lossy(blob.content());
     let head_lines: Vec<String> = head_content.lines().map(String::from).collect();
-    let diff = diff_patch(&head_lines, current_lines);
+    let diff = diff_patch(&head_lines, current_lines, ignore_comments);
     let diff_rows = crate::diff::build_rows(&diff, 1, 1);
 
     let mut cur_idx = 0;

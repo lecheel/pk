@@ -8,6 +8,8 @@ pub struct AppConfig {
     pub fmt_command: String,
     pub active_repo_id: Option<String>,
     pub concat_server_enabled: bool,
+    #[serde(default)]
+    pub ignore_comments: bool,
 }
 impl Default for AppConfig {
     fn default() -> Self {
@@ -16,6 +18,7 @@ impl Default for AppConfig {
             fmt_command: "rustfmt".to_string(),
             active_repo_id: None,
             concat_server_enabled: true,
+            ignore_comments: false,
         }
     }
 }

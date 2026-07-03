@@ -46,16 +46,28 @@ pub fn is_valuable_line(line: &str) -> bool {
 pub fn diff_patch(
     search: &[String],
     replace: &[String],
+    ignore_comments: bool,
 ) -> Vec<(RowKind, Option<String>, Option<String>)> {
-    lcs_diff(search, replace)
+    lcs_diff(search, replace, ignore_comments)
 }
-fn lcs_diff(left: &[String], right: &[String]) -> Vec<(RowKind, Option<String>, Option<String>)> {
+fn is_comment_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("//") 
+        || trimmed.starts_with("#") 
+        || trimmed.starts_with("--") 
+        || trimmed.starts_with("/*")
+        || trimmed.starts_with("*")
+        || trimmed.starts_with("<!--")
+}
+fn lcs_diff(left: &[String], right: &[String], ignore_comments: bool) -> Vec<(RowKind, Option<String>, Option<String>)> {
     let m = left.len();
     let n = right.len();
     let mut dp = vec![vec![0usize; n + 1]; m + 1];
     for i in 1..=m {
         for j in 1..=n {
-            if left[i - 1] == right[j - 1] {
+            let equal = left[i - 1] == right[j - 1] 
+                || (ignore_comments && is_comment_line(&left[i - 1]) && is_comment_line(&right[j - 1]));
+            if equal {
                 dp[i][j] = dp[i - 1][j - 1] + 1;
             } else {
                 dp[i][j] = dp[i - 1][j].max(dp[i][j - 1]);
@@ -66,7 +78,9 @@ fn lcs_diff(left: &[String], right: &[String]) -> Vec<(RowKind, Option<String>, 
     let mut i = m;
     let mut j = n;
     while i > 0 || j > 0 {
-        if i > 0 && j > 0 && left[i - 1] == right[j - 1] {
+        let equal = i > 0 && j > 0 && (left[i - 1] == right[j - 1] 
+            || (ignore_comments && is_comment_line(&left[i - 1]) && is_comment_line(&right[j - 1])));
+        if equal {
             result.push((
                 RowKind::Equal,
                 Some(left[i - 1].clone()),
@@ -85,7 +99,7 @@ fn lcs_diff(left: &[String], right: &[String]) -> Vec<(RowKind, Option<String>, 
     result.reverse();
     result
 }
-pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
+pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool) -> MatchResult {
     if search.is_empty() || file.is_empty() {
         return MatchResult {
             score: 0.0,
@@ -96,16 +110,15 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
         };
     }
     let search_len = search.len();
-    let valuable_search_count = search.iter().filter(|l| is_valuable_line(l)).count();
-
+    let valuable_search_count = search.iter().filter(|l| is_valuable_line(l) && (!ignore_comments || !is_comment_line(l))).count();
     if search_len > file.len() {
-        let raw = lcs_diff(search, file);
+        let raw = lcs_diff(search, file, ignore_comments);
         let score = if valuable_search_count > 0 {
             let mut matched_valuable = 0;
             for (kind, left, _) in &raw {
                 if *kind == RowKind::Equal {
                     if let Some(ref l) = left {
-                        if is_valuable_line(l) {
+                        if is_valuable_line(l) && (!ignore_comments || !is_comment_line(l)) {
                             matched_valuable += 1;
                         }
                     }
@@ -135,16 +148,14 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
     let mut all_candidates: Vec<(usize, usize, f32)> = Vec::new();
     let required_lines: Vec<&String> = search
         .iter()
-        .filter(|l| !l.trim().is_empty())
+        .filter(|l| !l.trim().is_empty() && (!ignore_comments || !is_comment_line(l)))
         .take(2)
         .collect();
-
-    const BOUNDARY_ANCHOR: usize = 3; // bump to 4-5 if you still see collisions
-    let s_head = first_n_nonempty(search, BOUNDARY_ANCHOR);
-    let s_tail = last_n_nonempty(search, BOUNDARY_ANCHOR);
+    const BOUNDARY_ANCHOR: usize = 3; 
+    let s_head = first_n_nonempty(search, BOUNDARY_ANCHOR, ignore_comments);
+    let s_tail = last_n_nonempty(search, BOUNDARY_ANCHOR, ignore_comments);
     let k_head = s_head.len();
     let k_tail = s_tail.len();
-
     for window_size in min_window..=max_window {
         for start in 0..=file.len().saturating_sub(window_size) {
             let window = &file[start..start + window_size];
@@ -158,23 +169,20 @@ pub fn find_best_match(search: &[String], file: &[String]) -> MatchResult {
             if !all_present {
                 continue;
             }
-
-            let w_head = first_n_nonempty(window, k_head);
-            let w_tail = last_n_nonempty(window, k_tail);
+            let w_head = first_n_nonempty(window, k_head, ignore_comments);
+            let w_tail = last_n_nonempty(window, k_tail, ignore_comments);
             let boundary_match =
                 !s_head.is_empty() && !s_tail.is_empty() && w_head == s_head && w_tail == s_tail;
-
             if !boundary_match {
                 continue;
             }
-            let raw = lcs_diff(search, window);
-
+            let raw = lcs_diff(search, window, ignore_comments);
             let score = if valuable_search_count > 0 {
                 let mut matched_valuable = 0;
                 for (kind, left, _) in &raw {
                     if *kind == RowKind::Equal {
                         if let Some(ref l) = left {
-                            if is_valuable_line(l) {
+                            if is_valuable_line(l) && (!ignore_comments || !is_comment_line(l)) {
                                 matched_valuable += 1;
                             }
                         }
@@ -225,6 +233,7 @@ pub fn compute_match_for_window(
     file: &[String],
     file_start: usize,
     file_end: usize,
+    ignore_comments: bool,
 ) -> MatchResult {
     if search.is_empty() || file.is_empty() || file_start >= file.len() {
         return MatchResult {
@@ -237,12 +246,12 @@ pub fn compute_match_for_window(
     }
     let end = file_end.min(file.len());
     let window = &file[file_start..end];
-    let raw = lcs_diff(search, window);
-    let valuable_search_count = search.iter().filter(|l| is_valuable_line(l)).count();
-    let first_non_empty = search.iter().find(|l| !l.trim().is_empty());
-    let last_non_empty = search.iter().rev().find(|l| !l.trim().is_empty());
-    let win_first = window.iter().find(|l| !l.trim().is_empty());
-    let win_last = window.iter().rev().find(|l| !l.trim().is_empty());
+    let raw = lcs_diff(search, window, ignore_comments);
+    let valuable_search_count = search.iter().filter(|l| is_valuable_line(l) && (!ignore_comments || !is_comment_line(l))).count();
+    let first_non_empty = search.iter().find(|l| !l.trim().is_empty() && (!ignore_comments || !is_comment_line(l)));
+    let last_non_empty = search.iter().rev().find(|l| !l.trim().is_empty() && (!ignore_comments || !is_comment_line(l)));
+    let win_first = window.iter().find(|l| !l.trim().is_empty() && (!ignore_comments || !is_comment_line(l)));
+    let win_last = window.iter().rev().find(|l| !l.trim().is_empty() && (!ignore_comments || !is_comment_line(l)));
     let boundary_match = match (first_non_empty, win_first, last_non_empty, win_last) {
         (Some(s_first), Some(w_first), Some(s_last), Some(w_last)) => {
             s_first.trim() == w_first.trim() && s_last.trim() == w_last.trim()
@@ -256,7 +265,7 @@ pub fn compute_match_for_window(
         for (kind, left, _) in &raw {
             if *kind == RowKind::Equal {
                 if let Some(ref l) = left {
-                    if is_valuable_line(l) {
+                    if is_valuable_line(l) && (!ignore_comments || !is_comment_line(l)) {
                         matched_valuable += 1;
                     }
                 }
@@ -311,21 +320,26 @@ pub fn build_rows(
     rows
 }
 
-fn first_n_nonempty(lines: &[String], n: usize) -> Vec<String> {
+fn first_n_nonempty(lines: &[String], n: usize, ignore_comments: bool) -> Vec<String> {
     lines
         .iter()
+        .filter(|l| {
+            let trimmed = l.trim();
+            !trimmed.is_empty() && (!ignore_comments || !is_comment_line(l))
+        })
         .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
         .take(n)
         .collect()
 }
-
-fn last_n_nonempty(lines: &[String], n: usize) -> Vec<String> {
+fn last_n_nonempty(lines: &[String], n: usize, ignore_comments: bool) -> Vec<String> {
     let mut v: Vec<String> = lines
         .iter()
         .rev()
+        .filter(|l| {
+            let trimmed = l.trim();
+            !trimmed.is_empty() && (!ignore_comments || !is_comment_line(l))
+        })
         .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
         .take(n)
         .collect();
     v.reverse();

@@ -354,6 +354,19 @@ fn render_fmt_error_panel(app: &mut MergeApp, ui: &mut Ui) {
 }
 fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
     ui.add_space(8.0);
+    ui.heading("Diff Settings");
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        if ui
+            .checkbox(&mut app.ignore_comments, "Ignore Comments in LCS")
+            .changed()
+        {
+            app.save_config();
+            app.recompute_match();
+            app.update_git_statuses();
+        }
+    });
+    ui.add_space(8.0);
     ui.heading("Formatter Settings");
     ui.add_space(8.0);
     ui.horizontal(|ui| {

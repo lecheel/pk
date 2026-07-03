@@ -41,7 +41,7 @@ impl MergeMatching for MergeApp {
                 self.search_rows = Vec::new();
             }
         } else {
-            let best = diff::find_best_match(&hunk.search, &self.file_lines);
+            let best = diff::find_best_match(&hunk.search, &self.file_lines, self.ignore_comments);
             if best.score <= 15.0 {
                 // Ignore extremely low scores/trivial matches
                 self.match_result = None;
@@ -58,7 +58,7 @@ impl MergeMatching for MergeApp {
                     let (start, end, _) = best.candidates[idx];
                     let cands = best.candidates.clone();
                     let mut mr =
-                        diff::compute_match_for_window(&hunk.search, &self.file_lines, start, end);
+                        diff::compute_match_for_window(&hunk.search, &self.file_lines, start, end, self.ignore_comments);
                     mr.candidates = cands;
                     mr
                 }

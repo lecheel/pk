@@ -110,6 +110,7 @@ pub struct MergeApp {
     pub daemon_error: Option<String>,
     pub repo_receiver: mpsc::Receiver<Result<Vec<RepoInfo>, String>>,
     pub concat_server_enabled: bool,
+    pub ignore_comments: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
@@ -224,6 +225,7 @@ impl MergeApp {
             daemon_error: None,
             repo_receiver: rx,
             concat_server_enabled: config.concat_server_enabled,
+            ignore_comments: config.ignore_comments,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -278,7 +280,7 @@ impl MergeApp {
             if self.file_lines.is_empty() {
                 return true;
             }
-            let best = crate::diff::find_best_match(&hunk.search, &self.file_lines);
+            let best = crate::diff::find_best_match(&hunk.search, &self.file_lines, self.ignore_comments);
             best.score >= 60.0
         } else {
             false
@@ -469,7 +471,7 @@ impl MergeApp {
         let repo_root = std::path::Path::new(&self.base_dir);
         let file_path = std::path::Path::new(&self.file_path);
         let (statuses, diff_rows) =
-            super::git_ops::get_line_statuses(repo_root, file_path, &self.file_lines);
+            super::git_ops::get_line_statuses(repo_root, file_path, &self.file_lines, self.ignore_comments);
         self.git_statuses = statuses;
         self.git_diff_rows = diff_rows;
         self.git_hunks =
@@ -626,6 +628,7 @@ impl MergeApp {
             fmt_command: self.fmt_command.clone(),
             active_repo_id: self.active_repo_id.clone(),
             concat_server_enabled: self.concat_server_enabled,
+            ignore_comments: self.ignore_comments,
         };
         config.save();
     }
