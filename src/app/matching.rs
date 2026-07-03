@@ -48,7 +48,7 @@ impl MergeMatching for MergeApp {
                 self.search_rows = Vec::new();
                 return;
             }
-            let mr = if best.candidates.is_empty() {
+            let mut mr = if best.candidates.is_empty() {
                 best
             } else {
                 let idx = self.candidate_index.min(best.candidates.len() - 1);
@@ -57,12 +57,18 @@ impl MergeMatching for MergeApp {
                 } else {
                     let (start, end, _) = best.candidates[idx];
                     let cands = best.candidates.clone();
-                    let mut mr =
-                        diff::compute_match_for_window(&hunk.search, &self.file_lines, start, end, self.ignore_comments);
+                    let mut mr = diff::compute_match_for_window(
+                        &hunk.search,
+                        &self.file_lines,
+                        start,
+                        end,
+                        self.ignore_comments,
+                    );
                     mr.candidates = cands;
                     mr
                 }
             };
+            fix_missing_trailing_brackets(hunk, &mut mr, &self.file_lines);
             self.search_rows = Self::build_search_rows(hunk, &mr);
             if self.cursor_line.is_none() {
                 self.cursor_line = Some(mr.file_start);
@@ -106,6 +112,7 @@ impl MergeMatching for MergeApp {
         let _ = hunk; // hunk.search order/count is implicitly preserved via mr.rows
         rows
     }
+
     fn score_appearance(score: f32) -> (Color32, Color32, &'static str) {
         if score >= 95.0 {
             (Color32::from_rgb(20, 70, 30), pal::ACCENT_GOOD, "✓✓")
@@ -122,5 +129,59 @@ impl MergeMatching for MergeApp {
         } else {
             (Color32::from_rgb(70, 20, 20), pal::ACCENT_BAD, "✗")
         }
+    }
+}
+
+fn fix_missing_trailing_brackets(hunk: &PatchHunk, mr: &mut MatchResult, file_lines: &[String]) {
+    let mut s = hunk.search.clone();
+    while s.last().map(|l| l.trim().is_empty()).unwrap_or(false) {
+        s.pop();
+    }
+    let mut r = hunk.replace.clone();
+    while r.last().map(|l| l.trim().is_empty()).unwrap_or(false) {
+        r.pop();
+    }
+
+    if r.is_empty() || s.is_empty() {
+        return;
+    }
+
+    // Count trailing closing brackets in replace block
+    let mut r_brackets = 0;
+    for line in r.iter().rev() {
+        if line.trim().starts_with('}') {
+            r_brackets += 1;
+        } else {
+            break;
+        }
+    }
+
+    // Count trailing closing brackets in search block
+    let mut s_brackets = 0;
+    for line in s.iter().rev() {
+        if line.trim().starts_with('}') {
+            s_brackets += 1;
+        } else {
+            break;
+        }
+    }
+
+    // If replace has more closing brackets than search, and the file has them
+    // immediately after the match, extend the match to include them.
+    if r_brackets > s_brackets {
+        let extra_brackets = r_brackets - s_brackets;
+        let mut file_idx = mr.file_end;
+        for _ in 0..extra_brackets {
+            if file_idx >= file_lines.len() {
+                return;
+            }
+            let trimmed = file_lines[file_idx].trim();
+            if trimmed.starts_with('}') {
+                file_idx += 1;
+            } else {
+                return;
+            }
+        }
+        mr.file_end = file_idx;
     }
 }

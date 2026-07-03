@@ -59,20 +59,16 @@ fn is_comment_line(line: &str) -> bool {
         || trimmed.starts_with("*")
         || trimmed.starts_with("<!--")
 }
-fn lcs_diff(
-    left: &[String],
-    right: &[String],
-    ignore_comments: bool,
-) -> Vec<(RowKind, Option<String>, Option<String>)> {
+
+fn lcs_diff(left: &[String], right: &[String], ignore_comments: bool) -> Vec<(RowKind, Option<String>, Option<String>)> {
     let m = left.len();
     let n = right.len();
     let mut dp = vec![vec![0usize; n + 1]; m + 1];
     for i in 1..=m {
         for j in 1..=n {
-            let equal = left[i - 1] == right[j - 1]
-                || (ignore_comments
-                    && is_comment_line(&left[i - 1])
-                    && is_comment_line(&right[j - 1]));
+            // Use trim_end to ignore trailing \r (CRLF vs LF mismatches)
+            let equal = left[i - 1].trim_end() == right[j - 1].trim_end()
+                || (ignore_comments && is_comment_line(&left[i - 1]) && is_comment_line(&right[j - 1]));
             if equal {
                 dp[i][j] = dp[i - 1][j - 1] + 1;
             } else {
@@ -84,12 +80,9 @@ fn lcs_diff(
     let mut i = m;
     let mut j = n;
     while i > 0 || j > 0 {
-        let equal = i > 0
-            && j > 0
-            && (left[i - 1] == right[j - 1]
-                || (ignore_comments
-                    && is_comment_line(&left[i - 1])
-                    && is_comment_line(&right[j - 1])));
+        // Use trim_end to ignore trailing \r (CRLF vs LF mismatches)
+        let equal = i > 0 && j > 0 && (left[i - 1].trim_end() == right[j - 1].trim_end()
+            || (ignore_comments && is_comment_line(&left[i - 1]) && is_comment_line(&right[j - 1])));
         if equal {
             result.push((
                 RowKind::Equal,
@@ -109,6 +102,7 @@ fn lcs_diff(
     result.reverse();
     result
 }
+
 pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool) -> MatchResult {
     if search.is_empty() || file.is_empty() {
         return MatchResult {
@@ -158,6 +152,7 @@ pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool
     // boundary anchors.
     let min_window = search_len.saturating_sub(2).max(1);
     let mut best_score = -1.0_f32;
+    let mut best_matched_count = 0;
     let mut best_start = 0;
     let mut best_end = 0;
     let mut best_raw = Vec::new();
@@ -278,12 +273,44 @@ pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool
                 * 100.0
         };
 
-        if score > best_score {
+        // Track the file index of the last matched line to avoid deleting
+        // trailing unmatched lines (e.g. the next function's end bracket)
+        let mut last_equal_file_end = start;
+        let mut file_idx = start;
+        for (kind, _, _) in &raw {
+            match kind {
+                RowKind::Equal => {
+                    last_equal_file_end = file_idx + 1;
+                    file_idx += 1;
+                }
+                RowKind::Insert => {
+                    file_idx += 1;
+                }
+                _ => {}
+            }
+        }
+        let actual_end = if last_equal_file_end > start { last_equal_file_end } else { end };
+        
+        let matched_count = raw.iter().filter(|(k, _, _)| *k == RowKind::Equal).count();
+
+        // Tie-breaker: if scores are equal, prefer the window that matches 
+        // more lines (closer to the full search_len) to avoid missing 
+        // ignored lines like "}"
+        let is_better = if score > best_score {
+            true
+        } else if (score - best_score).abs() < 0.1 {
+            matched_count > best_matched_count
+        } else {
+            false
+        };
+
+        if is_better {
             best_score = score;
+            best_matched_count = matched_count;
             best_start = start;
-            best_end = end;
+            best_end = actual_end;
             best_raw = raw;
-            all_candidates.push((start, end, score));
+            all_candidates.push((start, actual_end, score));
         }
     }
     let rows = build_rows(&best_raw, 1, best_start + 1);
@@ -378,11 +405,29 @@ pub fn compute_match_for_window(
         (matched as f32 / search.len().max(1) as f32) * 100.0
     };
 
+    // Track the file index of the last matched line to avoid deleting
+    // trailing unmatched lines (e.g. the next function's end bracket)
+    let mut last_equal_file_end = file_start;
+    let mut file_idx = file_start;
+    for (kind, _, _) in &raw {
+        match kind {
+            RowKind::Equal => {
+                last_equal_file_end = file_idx + 1;
+                file_idx += 1;
+            }
+            RowKind::Insert => {
+                file_idx += 1;
+            }
+            _ => {}
+        }
+    }
+    let actual_end = if last_equal_file_end > file_start { last_equal_file_end } else { end };
+
     let rows = build_rows(&raw, 1, file_start + 1);
     MatchResult {
         score,
         file_start,
-        file_end: end,
+        file_end: actual_end,
         rows,
         candidates: vec![],
     }
