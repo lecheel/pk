@@ -115,6 +115,10 @@ pub struct MergeApp {
     pub ignore_comments: bool,
     pub min_match_score: f32,
     pub min_match_floor: f32,
+    pub diff_side_hunk_idx: usize,
+    pub diff_side_scroll_target: Option<usize>,
+    pub git_changed_files: Vec<String>,
+    pub git_changed_file_idx: usize,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
@@ -233,6 +237,10 @@ impl MergeApp {
             ignore_comments: config.ignore_comments,
             min_match_score: config.min_match_score,
             min_match_floor: config.min_match_floor,
+            diff_side_hunk_idx: 0,
+            diff_side_scroll_target: None,
+            git_changed_files: Vec::new(),
+            git_changed_file_idx: 0,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -272,6 +280,90 @@ impl MergeApp {
         app
     }
 
+    pub fn refresh_git_changed_files(&mut self) {
+        let repo_root = std::path::Path::new(&self.base_dir);
+        let repo = match git2::Repository::discover(repo_root) {
+            Ok(r) => r,
+            Err(_) => {
+                self.git_changed_files.clear();
+                self.git_changed_file_idx = 0;
+                return;
+            }
+        };
+        let mut opts = git2::StatusOptions::new();
+        opts.include_untracked(true).recurse_untracked_dirs(true);
+        let mut files: Vec<String> = repo
+            .statuses(Some(&mut opts))
+            .map(|statuses| {
+                statuses
+                    .iter()
+                    .filter_map(|e| e.path().map(|p| p.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        files.sort();
+        files.dedup();
+        self.git_changed_files = files;
+        // Try to keep the currently loaded file selected, if it's in the list.
+        if let Some(workdir) = repo.workdir() {
+            let cur = std::path::Path::new(&self.file_path);
+            if let Ok(rel) = cur.strip_prefix(workdir) {
+                let rel_str = rel.display().to_string().replace('\\', "/");
+                if let Some(idx) = self.git_changed_files.iter().position(|f| *f == rel_str) {
+                    self.git_changed_file_idx = idx;
+                    return;
+                }
+            }
+        }
+        if self.git_changed_file_idx >= self.git_changed_files.len() {
+            self.git_changed_file_idx = 0;
+        }
+    }
+    pub fn load_git_changed_file(&mut self, idx: usize) {
+        if idx >= self.git_changed_files.len() {
+            return;
+        }
+        self.git_changed_file_idx = idx;
+        let rel = self.git_changed_files[idx].clone();
+        let path = std::path::Path::new(&self.base_dir)
+            .join(&rel)
+            .display()
+            .to_string();
+        if path == self.file_path {
+            return;
+        }
+        self.save_file_state();
+        self.file_path = path.clone();
+        if let Some(saved) = self.file_states.get(&path).cloned() {
+            self.file_lines = saved.lines;
+            self.applied_hunks = saved.applied_hunks;
+            self.history = saved.history;
+            self.merged_range = saved.merged_range;
+        } else {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    self.file_text = content;
+                    self.file_lines = self.file_text.lines().map(String::from).collect();
+                    self.applied_hunks.clear();
+                    self.merged_range = None;
+                    self.history.clear();
+                }
+                Err(e) => {
+                    self.file_text.clear();
+                    self.file_lines.clear();
+                    self.set_message(StatusMessage::error(format!(
+                        "Cannot read {}: {}",
+                        path, e
+                    )));
+                    return;
+                }
+            }
+        }
+        self.diff_side_hunk_idx = 0;
+        self.diff_side_scroll_target = Some(0);
+        self.update_git_statuses();
+        self.set_message(StatusMessage::info(format!("Diff: {}", rel)));
+    }
     pub fn is_hunk_match_ok(&self, hunk_idx: usize) -> bool {
         if let Some(hunk) = self.hunks.get(hunk_idx) {
             if hunk.search.is_empty() {

@@ -136,7 +136,10 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                                 "Debug" => app.show_debug = true,
                                 "Git Status" => app.show_git_status_window = true,
                                 "Git Diff" => app.show_git_diff_window = true,
-                                "Git Diff Side" => app.show_git_diff_side = true,
+                                "Git Diff Side" => {
+                                    app.show_git_diff_side = true;
+                                    app.refresh_git_changed_files();
+                                }
                                 "Git Log" => app.show_git_log_window = true,
                                 _ => {}
                             }
@@ -1306,6 +1309,25 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
     let lnum_w = 5.0 * char_w;
     let text_x_off = 4.0 + lnum_w + 6.0;
     let max_chars = ((half_w - text_x_off - 6.0) / char_w).floor().max(4.0) as usize;
+
+    // Group contiguous non-Equal rows into navigable "hunks".
+    let rows = app.git_diff_rows.clone();
+    let mut hunk_row_starts: Vec<usize> = Vec::new();
+    for (i, row) in rows.iter().enumerate() {
+        let is_change = !matches!(row.kind, RowKind::Equal);
+        let prev_is_change = i > 0 && !matches!(rows[i - 1].kind, RowKind::Equal);
+        if is_change && !prev_is_change {
+            hunk_row_starts.push(i);
+        }
+    }
+    let hunk_count = hunk_row_starts.len();
+    if app.diff_side_hunk_idx >= hunk_count && hunk_count > 0 {
+        app.diff_side_hunk_idx = hunk_count - 1;
+    }
+
+    let file_count = app.git_changed_files.len();
+    let file_idx = app.git_changed_file_idx;
+    let current_rel_file = app.git_changed_files.get(file_idx).cloned();
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.label(
@@ -1314,9 +1336,87 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
                 .small(),
         );
         if ui.small_button("🔄 Refresh").clicked() {
+            app.refresh_git_changed_files();
             app.update_git_statuses();
         }
+        ui.add(Separator::default().vertical());
+        ui.label(RichText::new("File:").color(pal::TEXT_DIM).small());
+        ui.add_enabled_ui(file_count > 0, |ui| {
+            if ui
+                .button(RichText::new("◀ File").small().monospace())
+                .on_hover_text("Previous changed file")
+                .clicked()
+            {
+                let new_idx = if file_idx == 0 { file_count - 1 } else { file_idx - 1 };
+                app.load_git_changed_file(new_idx);
+            }
+            if ui
+                .button(RichText::new("File ▶").small().monospace())
+                .on_hover_text("Next changed file")
+                .clicked()
+            {
+                let new_idx = if file_idx + 1 < file_count { file_idx + 1 } else { 0 };
+                app.load_git_changed_file(new_idx);
+            }
+        });
+        if file_count > 0 {
+            ui.label(
+                RichText::new(format!("{}/{}", file_idx + 1, file_count))
+                    .color(pal::TEXT_DIM)
+                    .monospace()
+                    .small(),
+            );
+        } else {
+            ui.label(
+                RichText::new("no changed files")
+                    .color(pal::TEXT_DIM)
+                    .small(),
+            );
+        }
+        ui.add(Separator::default().vertical());
+        ui.add_enabled_ui(hunk_count > 0, |ui| {
+            if ui
+                .button(RichText::new("▲ Prev Hunk").small().monospace())
+                .on_hover_text("Jump to previous changed block")
+                .clicked()
+            {
+                if app.diff_side_hunk_idx > 0 {
+                    app.diff_side_hunk_idx -= 1;
+                } else {
+                    app.diff_side_hunk_idx = hunk_count.saturating_sub(1);
+                }
+                app.diff_side_scroll_target = hunk_row_starts.get(app.diff_side_hunk_idx).copied();
+            }
+            if ui
+                .button(RichText::new("▼ Next Hunk").small().monospace())
+                .on_hover_text("Jump to next changed block")
+                .clicked()
+            {
+                if app.diff_side_hunk_idx + 1 < hunk_count {
+                    app.diff_side_hunk_idx += 1;
+                } else {
+                    app.diff_side_hunk_idx = 0;
+                }
+                app.diff_side_scroll_target = hunk_row_starts.get(app.diff_side_hunk_idx).copied();
+            }
+        });
+        if hunk_count > 0 {
+            ui.label(
+                RichText::new(format!("Hunk {}/{}", app.diff_side_hunk_idx + 1, hunk_count))
+                    .color(pal::TEXT_DIM)
+                    .monospace()
+                    .small(),
+            );
+        }
     });
+    if let Some(rel) = &current_rel_file {
+        ui.label(
+            RichText::new(rel)
+                .color(pal::TEXT_NORMAL)
+                .monospace()
+                .small(),
+        );
+    }
     ui.add_space(2.0);
     ui.horizontal(|ui| {
         ui.label(RichText::new("OLD (HEAD)").color(pal::TEXT_DIM).small().strong());
@@ -1324,7 +1424,7 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
         ui.label(RichText::new("NEW (working)").color(pal::TEXT_DIM).small().strong());
     });
     ui.add(Separator::default());
-    if app.git_diff_rows.is_empty() {
+    if rows.is_empty() {
         ui.add_space(6.0);
         ui.label(
             RichText::new("No changes vs HEAD, or file is not tracked by git.")
@@ -1332,16 +1432,19 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
         );
         return;
     }
-    let rows = app.git_diff_rows.clone();
+    let scroll_target = app.diff_side_scroll_target;
+    let mut scrolled = false;
     ScrollArea::vertical()
         .id_source("git_diff_side_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            let mut left_n = 0usize;
-            let mut right_n = 0usize;
-            for row in rows.iter() {
+            for (row_idx, row) in rows.iter().enumerate() {
                 let desired = Vec2::new(half_w * 2.0 + 8.0, row_h);
                 let (rect, _resp) = ui.allocate_exact_size(desired, Sense::hover());
+                if scroll_target == Some(row_idx) {
+                    ui.scroll_to_rect(rect, Some(Align::Center));
+                    scrolled = true;
+                }
                 let mut left_rect = rect;
                 left_rect.set_width(half_w);
                 let mut right_rect = rect;
@@ -1355,11 +1458,11 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
                 ui.painter().rect_filled(left_rect, 0.0, lbg);
                 ui.painter().rect_filled(right_rect, 0.0, rbg);
                 if let Some(l) = &row.left {
-                    left_n += 1;
+                    let num_text = row.left_num.map(|n| format!("{:>4}", n)).unwrap_or_default();
                     ui.painter().text(
                         Pos2::new(left_rect.left() + 4.0, rect.center().y),
                         Align2::LEFT_CENTER,
-                        format!("{:>4}", left_n),
+                        &num_text,
                         row_font.clone(),
                         pal::TEXT_DIM,
                     );
@@ -1377,11 +1480,11 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
                     );
                 }
                 if let Some(r) = &row.right {
-                    right_n += 1;
+                    let num_text = row.right_num.map(|n| format!("{:>4}", n)).unwrap_or_default();
                     ui.painter().text(
                         Pos2::new(right_rect.left() + 4.0, rect.center().y),
                         Align2::LEFT_CENTER,
-                        format!("{:>4}", right_n),
+                        &num_text,
                         row_font.clone(),
                         pal::TEXT_DIM,
                     );
@@ -1405,6 +1508,9 @@ fn render_git_diff_side_panel(app: &mut MergeApp, ui: &mut Ui, row_h: f32, char_
                 ui.painter().rect_filled(sep, 0.0, pal::SEPARATOR);
             }
         });
+    if scrolled {
+        app.diff_side_scroll_target = None;
+    }
 }
 fn render_file_panel(
     app: &mut MergeApp,
