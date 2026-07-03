@@ -1109,7 +1109,7 @@ fn render_search_panel(
                     btn_line_size,
                 );
                 let btn_line = Button::new(
-                    RichText::new(format!(">({})", cur_ln + 1))
+                    RichText::new(format!(">({}", cur_ln + 1))
                         .color(Color32::WHITE)
                         .strong()
                         .monospace(),
@@ -1128,7 +1128,7 @@ fn render_search_panel(
                     btn_line_size,
                 );
                 let btn_star = Button::new(
-                    RichText::new(format!("*({})", cur_ln + 1))
+                    RichText::new(format!("*({}", cur_ln + 1))
                         .color(Color32::WHITE)
                         .strong()
                         .monospace(),
