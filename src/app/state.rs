@@ -85,6 +85,7 @@ pub struct MergeApp {
     pub git_log_entries: Vec<super::git_ops::GitLogEntry>,
     pub selected_git_log_entry: Option<usize>,
     pub show_git_diff_window: bool,
+    pub show_git_diff_side: bool,
     pub show_git_status_window: bool,
     pub show_git_log_window: bool,
     pub show_repos_window: bool,
@@ -202,6 +203,7 @@ impl MergeApp {
             git_log_entries: Vec::new(),
             selected_git_log_entry: None,
             show_git_diff_window: false,
+            show_git_diff_side: false,
             show_git_status_window: false,
             show_git_log_window: false,
             show_repos_window: false,
@@ -799,6 +801,8 @@ impl eframe::App for MergeApp {
                         self.show_help = false;
                     } else if self.show_debug {
                         self.show_debug = false;
+                    } else if self.show_git_diff_side {
+                        self.show_git_diff_side = false;
                     } else if self.show_git_diff_window {
                         self.show_git_diff_window = false;
                     } else if self.show_git_status_window {
