@@ -1945,7 +1945,7 @@ fn render_file_panel(
                             && txt != "-"
                             && txt != "i"
                             && txt != "I"
-                            && txt != "a"
+                            && (txt != "a" || app.d_pending)
                             && txt != "H"
                             && txt != "L"
                         {

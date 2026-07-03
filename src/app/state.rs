@@ -280,7 +280,8 @@ impl MergeApp {
             if self.file_lines.is_empty() {
                 return true;
             }
-            let best = crate::diff::find_best_match(&hunk.search, &self.file_lines, self.ignore_comments);
+            let best =
+                crate::diff::find_best_match(&hunk.search, &self.file_lines, self.ignore_comments);
             best.score >= 60.0
         } else {
             false
@@ -472,11 +473,14 @@ impl MergeApp {
         let file_path = std::path::Path::new(&self.file_path);
         println!(
             "[DEBUG update_git_statuses] ignore_comments={}, file={}",
-            self.ignore_comments,
-            self.file_path
+            self.ignore_comments, self.file_path
         );
-        let (statuses, diff_rows) =
-            super::git_ops::get_line_statuses(repo_root, file_path, &self.file_lines, self.ignore_comments);
+        let (statuses, diff_rows) = super::git_ops::get_line_statuses(
+            repo_root,
+            file_path,
+            &self.file_lines,
+            self.ignore_comments,
+        );
         println!(
             "[DEBUG update_git_statuses] statuses_len={}, diff_rows_len={}",
             statuses.len(),
