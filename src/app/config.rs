@@ -53,10 +53,12 @@ impl AppConfig {
         if let Some(path) = Self::config_path() {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
+                    println!("[DEBUG config] Loaded config: ignore_comments={}", config.ignore_comments);
                     return config;
                 }
             }
         }
+        println!("[DEBUG config] Using default config: ignore_comments=false");
         Self::default()
     }
 

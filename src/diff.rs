@@ -109,6 +109,12 @@ pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool
             candidates: vec![],
         };
     }
+    println!(
+        "[DEBUG find_best_match] ignore_comments={}, search_len={}, file_len={}",
+        ignore_comments,
+        search.len(),
+        file.len()
+    );
     let search_len = search.len();
     let valuable_search_count = search.iter().filter(|l| is_valuable_line(l) && (!ignore_comments || !is_comment_line(l))).count();
     if search_len > file.len() {
@@ -138,8 +144,12 @@ pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool
             candidates: vec![(0, file.len(), score)],
         };
     }
+    // No upper cap on window size: the file's matching region may be
+    // significantly larger than the search (e.g. many decorative comments
+    // interspersed). The boundary check is the real filter, not the window
+    // size range.
     let min_window = search_len.saturating_sub(2).max(1);
-    let max_window = (search_len + 3).min(file.len());
+    let max_window = file.len();
     let mut best_score = -1.0_f32;
     let mut best_start = 0;
     let mut best_end = 0;
@@ -152,8 +162,12 @@ pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool
         .take(2)
         .collect();
     const BOUNDARY_ANCHOR: usize = 3; 
-    let s_head = first_n_nonempty(search, BOUNDARY_ANCHOR, ignore_comments);
-    let s_tail = last_n_nonempty(search, BOUNDARY_ANCHOR, ignore_comments);
+    // Boundary anchor always strips comments: decorative comments in the file
+    // (e.g. "// Dummy code iteration 1 of 4") must not reject a structurally
+    // valid window. The LCS stage below still respects `ignore_comments`
+    // for actual content equality.
+    let s_head = first_n_nonempty(search, BOUNDARY_ANCHOR, true);
+    let s_tail = last_n_nonempty(search, BOUNDARY_ANCHOR, true);
     let k_head = s_head.len();
     let k_tail = s_tail.len();
     for window_size in min_window..=max_window {
@@ -169,8 +183,8 @@ pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool
             if !all_present {
                 continue;
             }
-            let w_head = first_n_nonempty(window, k_head, ignore_comments);
-            let w_tail = last_n_nonempty(window, k_tail, ignore_comments);
+            let w_head = first_n_nonempty(window, k_head, true);
+            let w_tail = last_n_nonempty(window, k_tail, true);
             let boundary_match =
                 !s_head.is_empty() && !s_tail.is_empty() && w_head == s_head && w_tail == s_tail;
             if !boundary_match {
@@ -209,6 +223,12 @@ pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool
             }
         }
     }
+    println!(
+        "[DEBUG find_best_match] finished search. best_score={:.1}%, best_start={}, best_end={}",
+        best_score * 100.0,
+        best_start,
+        best_end
+    );
     let rows = build_rows(&best_raw, 1, best_start + 1);
     let score = (best_score * 100.0).clamp(0.0, 100.0);
     all_candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
@@ -244,6 +264,13 @@ pub fn compute_match_for_window(
             candidates: vec![],
         };
     }
+    println!(
+        "[DEBUG compute_match_for_window] ignore_comments={}, search_len={}, window=[{},{}]",
+        ignore_comments,
+        search.len(),
+        file_start,
+        file_end
+    );
     let end = file_end.min(file.len());
     let window = &file[file_start..end];
     let raw = lcs_diff(search, window, ignore_comments);
@@ -277,6 +304,10 @@ pub fn compute_match_for_window(
         (matched as f32 / search.len().max(1) as f32) * 100.0
     };
 
+    println!(
+        "[DEBUG compute_match_for_window] calculated score={:.1}%, boundary_match={}",
+        score, boundary_match
+    );
     let rows = build_rows(&raw, 1, file_start + 1);
     MatchResult {
         score,

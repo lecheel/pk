@@ -41,7 +41,12 @@ impl MergeMatching for MergeApp {
                 self.search_rows = Vec::new();
             }
         } else {
+            println!(
+                "[DEBUG recompute_match] hunk={}, ignore_comments={}, search_lines={}, file_lines={}",
+                self.current_hunk, self.ignore_comments, hunk.search.len(), self.file_lines.len()
+            );
             let best = diff::find_best_match(&hunk.search, &self.file_lines, self.ignore_comments);
+            println!("[DEBUG recompute_match] find_best_match score={:.1}%, candidates={}", best.score, best.candidates.len());
             if best.score <= 15.0 {
                 // Ignore extremely low scores/trivial matches
                 self.match_result = None;
@@ -57,8 +62,13 @@ impl MergeMatching for MergeApp {
                 } else {
                     let (start, end, _) = best.candidates[idx];
                     let cands = best.candidates.clone();
+                    println!(
+                        "[DEBUG recompute_match] candidate_idx={} > 0, computing window match for ({}, {})",
+                        idx, start, end
+                    );
                     let mut mr =
                         diff::compute_match_for_window(&hunk.search, &self.file_lines, start, end, self.ignore_comments);
+                    println!("[DEBUG recompute_match] compute_match_for_window score={:.1}%", mr.score);
                     mr.candidates = cands;
                     mr
                 }
