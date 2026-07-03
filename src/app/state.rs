@@ -471,20 +471,11 @@ impl MergeApp {
     pub fn update_git_statuses(&mut self) {
         let repo_root = std::path::Path::new(&self.base_dir);
         let file_path = std::path::Path::new(&self.file_path);
-        println!(
-            "[DEBUG update_git_statuses] ignore_comments={}, file={}",
-            self.ignore_comments, self.file_path
-        );
         let (statuses, diff_rows) = super::git_ops::get_line_statuses(
             repo_root,
             file_path,
             &self.file_lines,
             self.ignore_comments,
-        );
-        println!(
-            "[DEBUG update_git_statuses] statuses_len={}, diff_rows_len={}",
-            statuses.len(),
-            diff_rows.len()
         );
         self.git_statuses = statuses;
         self.git_diff_rows = diff_rows;
