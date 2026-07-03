@@ -131,7 +131,10 @@ impl MergeApp {
 
         let config = AppConfig::load();
         let active_repo_id = if config.concat_server_enabled {
-            config.active_repo_id.clone().or_else(daemon::get_active_repo)
+            config
+                .active_repo_id
+                .clone()
+                .or_else(daemon::get_active_repo)
         } else {
             None
         };
@@ -710,7 +713,6 @@ impl MergeApp {
 }
 impl Drop for MergeApp {
     fn drop(&mut self) {
-        println!("[App] Saving config on exit...");
         self.save_config();
     }
 }
@@ -733,7 +735,8 @@ impl eframe::App for MergeApp {
                             self.base_dir = repo.source_path.clone();
                             self.start_pwd = repo.source_path.clone();
                             self.start_pwd_is_repo = true;
-                            self.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
+                            self.git_log_entries =
+                                super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
                         }
                     }
                     self.available_repos = repos;
