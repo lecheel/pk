@@ -123,6 +123,11 @@ pub struct MergeApp {
     pub git_diff_vim_buffer: String,
     pub git_diff_scroll_to_cursor: bool,
     pub git_diff_insert_mode: bool,
+    pub diff_side_left_selection: Option<(usize, usize)>,
+    pub diff_side_right_selection: Option<(usize, usize)>,
+    pub diff_side_left_drag_anchor: Option<usize>,
+    pub diff_side_right_drag_anchor: Option<usize>,
+    pub diff_side_insert_anchor: Option<usize>,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
@@ -249,6 +254,11 @@ impl MergeApp {
             git_diff_vim_buffer: String::new(),
             git_diff_scroll_to_cursor: false,
             git_diff_insert_mode: false,
+            diff_side_left_selection: None,
+            diff_side_right_selection: None,
+            diff_side_left_drag_anchor: None,
+            diff_side_right_drag_anchor: None,
+            diff_side_insert_anchor: None,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -601,8 +611,99 @@ impl MergeApp {
     /// Recompute the HEAD-vs-working diff shown in the diff-side panel.
     /// Called after any in-place edit made from that panel (dd/yy/p/insert/revert)
     /// so the view stays in sync with the corrected buffer.
+    /// Recompute the HEAD-vs-working diff shown in the diff-side panel.
+    /// Called after any in-place edit made from that panel (dd/yy/p/insert/revert)
+    /// so the view stays in sync with the corrected buffer.
     pub fn refresh_git_diff_side_rows(&mut self) {
         self.update_git_statuses();
+    }
+    /// Resolve a diff-side row index to the working-file line it sits after,
+    /// by walking forward (or, failing that, backward) to the nearest row
+    /// that still has a right-side (working) line number.
+    fn diff_side_row_to_insert_after(&self, anchor_row: usize) -> Option<usize> {
+        if let Some(n) = self.git_diff_rows.get(anchor_row).and_then(|r| r.right_num) {
+            return Some(n - 1);
+        }
+        self.git_diff_rows[..anchor_row]
+            .iter()
+            .rev()
+            .find_map(|r| r.right_num)
+            .map(|n| n - 1)
+    }
+    /// Insert the currently selected HEAD (left-side) lines into the working
+    /// buffer, right after the chosen insert anchor row.
+    pub fn insert_diff_side_selection(&mut self) {
+        let (Some((lo, hi)), Some(anchor_row)) =
+            (self.diff_side_left_selection, self.diff_side_insert_anchor)
+        else {
+            return;
+        };
+        if hi >= self.git_diff_rows.len() {
+            return;
+        }
+        let texts: Vec<String> = self.git_diff_rows[lo..=hi]
+            .iter()
+            .filter_map(|r| r.left.clone())
+            .collect();
+        if texts.is_empty() {
+            self.set_message(StatusMessage::warning(
+                "Nothing to insert in that HEAD selection",
+            ));
+            return;
+        }
+        let Some(after_line) = self.diff_side_row_to_insert_after(anchor_row) else {
+            self.set_message(StatusMessage::warning(
+                "Couldn't resolve insert point — pick a NEW-side line",
+            ));
+            return;
+        };
+        self.save_history();
+        let pos = (after_line + 1).min(self.file_lines.len());
+        let count = texts.len();
+        for (i, t) in texts.into_iter().enumerate() {
+            self.file_lines.insert(pos + i, t);
+        }
+        self.diff_side_left_selection = None;
+        self.diff_side_insert_anchor = None;
+        self.recompute_match();
+        self.refresh_git_diff_side_rows();
+        self.set_message(StatusMessage::success(format!(
+            "Inserted {} HEAD line(s) at line {}",
+            count,
+            pos + 1
+        )));
+    }
+    /// Delete the currently selected working (right-side) lines directly
+    /// from the working buffer.
+    pub fn delete_diff_side_selection(&mut self) {
+        let Some((lo, hi)) = self.diff_side_right_selection else {
+            return;
+        };
+        if hi >= self.git_diff_rows.len() {
+            return;
+        }
+        let to_delete: HashSet<usize> = self.git_diff_rows[lo..=hi]
+            .iter()
+            .filter_map(|r| r.right_num)
+            .map(|n| n - 1)
+            .collect();
+        if to_delete.is_empty() {
+            self.set_message(StatusMessage::warning("Nothing to delete in that selection"));
+            return;
+        }
+        self.save_history();
+        let count = to_delete.len();
+        self.file_lines = self
+            .file_lines
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !to_delete.contains(i))
+            .map(|(_, l)| l.clone())
+            .collect();
+        self.diff_side_right_selection = None;
+        self.recompute_match();
+        self.refresh_git_diff_side_rows();
+        self.set_message(StatusMessage::success(format!("Deleted {} line(s)", count)));
     }
 
     pub fn reparse(&mut self) {

@@ -1585,17 +1585,142 @@ fn render_git_diff_side_panel(
         );
         return;
     }
+    // Action toolbar: reflects last frame's selection state (same one-frame
+    // lag pattern used by the other drag-selection HUDs in this app).
+    if app.diff_side_left_selection.is_some() || app.diff_side_right_selection.is_some() {
+        let mut insert_clicked = false;
+        let mut delete_clicked = false;
+        let mut clear_left_sel = false;
+        let mut clear_right_sel = false;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if let Some((lo, hi)) = app.diff_side_left_selection {
+                let count = hi - lo + 1;
+                ui.label(
+                    RichText::new(format!("⬅ HEAD selection: {} line(s)", count))
+                        .color(Color32::from_rgb(190, 160, 255))
+                        .small()
+                        .monospace(),
+                );
+                if app.diff_side_insert_anchor.is_some() {
+                    let btn = Button::new(
+                        RichText::new("⚡ Insert into working →")
+                            .color(Color32::WHITE)
+                            .strong()
+                            .small()
+                            .monospace(),
+                    )
+                    .fill(Color32::from_rgb(70, 45, 100));
+                    if ui.add(btn).clicked() {
+                        insert_clicked = true;
+                    }
+                } else {
+                    ui.label(
+                        RichText::new("→ right-click a NEW line to set insert point")
+                            .color(pal::TEXT_DIM)
+                            .small(),
+                    );
+                }
+                if ui.small_button("✕").clicked() {
+                    clear_left_sel = true;
+                }
+            }
+            if let Some((lo, hi)) = app.diff_side_right_selection {
+                let count = hi - lo + 1;
+                ui.add(Separator::default().vertical());
+                ui.label(
+                    RichText::new(format!("➡ Working selection: {} line(s)", count))
+                        .color(pal::TEXT_DELETE)
+                        .small()
+                        .monospace(),
+                );
+                let btn = Button::new(
+                    RichText::new("🗑 Delete")
+                        .color(Color32::WHITE)
+                        .strong()
+                        .small()
+                        .monospace(),
+                )
+                .fill(Color32::from_rgb(120, 40, 40));
+                if ui.add(btn).clicked() {
+                    delete_clicked = true;
+                }
+                if ui.small_button("✕").clicked() {
+                    clear_right_sel = true;
+                }
+            }
+        });
+        ui.add_space(2.0);
+        if insert_clicked {
+            app.insert_diff_side_selection();
+        }
+        if delete_clicked {
+            app.delete_diff_side_selection();
+        }
+        if clear_left_sel {
+            app.diff_side_left_selection = None;
+            app.diff_side_left_drag_anchor = None;
+        }
+        if clear_right_sel {
+            app.diff_side_right_selection = None;
+            app.diff_side_right_drag_anchor = None;
+        }
+    }
     let scroll_target = app.diff_side_scroll_target;
     let mut scrolled = false;
+    let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+    let primary_down = ui.input(|i| i.pointer.primary_down());
+    let mut local_left_drag_anchor = app.diff_side_left_drag_anchor;
+    let mut local_left_selection = app.diff_side_left_selection;
+    let mut local_right_drag_anchor = app.diff_side_right_drag_anchor;
+    let mut local_right_selection = app.diff_side_right_selection;
+    let mut set_insert_anchor: Option<usize> = None;
     ScrollArea::vertical()
         .id_source("git_diff_side_scroll")
         .auto_shrink([false, false])
+        .drag_to_scroll(false)
         .show(ui, |ui| {
             for (row_idx, row) in rows.iter().enumerate() {
+                let is_cursor = app.git_diff_cursor == Some(row_idx);
+                let is_left_sel =
+                    local_left_selection.map_or(false, |(s, e)| row_idx >= s && row_idx <= e);
+                let is_right_sel =
+                    local_right_selection.map_or(false, |(s, e)| row_idx >= s && row_idx <= e);
+                let is_insert_anchor = app.diff_side_insert_anchor == Some(row_idx);
+                let (lbg, rbg) = if is_cursor {
+                    (pal::BG_CURSOR, pal::BG_CURSOR)
+                } else {
+                    let base = match row.kind {
+                        RowKind::Equal => (pal::BG_ROW_EVEN, pal::BG_ROW_EVEN),
+                        RowKind::Delete => (pal::BG_DELETE, Color32::TRANSPARENT),
+                        RowKind::Insert => (Color32::TRANSPARENT, pal::BG_INSERT),
+                    };
+                    let l = if is_left_sel {
+                        Color32::from_rgb(55, 40, 85)
+                    } else {
+                        base.0
+                    };
+                    let r = if is_right_sel {
+                        Color32::from_rgb(70, 30, 30)
+                    } else {
+                        base.1
+                    };
+                    (l, r)
+                };
                 let desired = Vec2::new(half_w * 2.0 + 8.0, row_h);
                 let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
                 if resp.clicked() {
                     app.git_diff_cursor = Some(row_idx);
+                }
+                if resp.secondary_clicked() {
+                    if let Some(pos) = pointer_pos {
+                        let mut rr = rect;
+                        rr.min.x = rect.min.x + half_w + 8.0;
+                        rr.set_width(half_w);
+                        if rr.contains(pos) {
+                            set_insert_anchor = Some(row_idx);
+                        }
+                    }
                 }
                 if scroll_target == Some(row_idx) {
                     ui.scroll_to_rect(rect, Some(Align::Center));
@@ -1610,18 +1735,27 @@ fn render_git_diff_side_panel(
                 let mut right_rect = rect;
                 right_rect.min.x = rect.min.x + half_w + 8.0;
                 right_rect.set_width(half_w);
-                let is_cursor = app.git_diff_cursor == Some(row_idx);
-                let (lbg, rbg) = if is_cursor {
-                    (pal::BG_CURSOR, pal::BG_CURSOR)
-                } else {
-                    match row.kind {
-                        RowKind::Equal => (pal::BG_ROW_EVEN, pal::BG_ROW_EVEN),
-                        RowKind::Delete => (pal::BG_DELETE, Color32::TRANSPARENT),
-                        RowKind::Insert => (Color32::TRANSPARENT, pal::BG_INSERT),
+                if primary_down {
+                    if let Some(pos) = pointer_pos {
+                        if left_rect.contains(pos) {
+                            let anchor = *local_left_drag_anchor.get_or_insert(row_idx);
+                            local_left_selection = Some((anchor.min(row_idx), anchor.max(row_idx)));
+                        } else if right_rect.contains(pos) {
+                            let anchor = *local_right_drag_anchor.get_or_insert(row_idx);
+                            local_right_selection =
+                                Some((anchor.min(row_idx), anchor.max(row_idx)));
+                        }
                     }
-                };
+                }
                 ui.painter().rect_filled(left_rect, 0.0, lbg);
                 ui.painter().rect_filled(right_rect, 0.0, rbg);
+                if is_insert_anchor {
+                    ui.painter().rect_stroke(
+                        right_rect,
+                        0.0,
+                        Stroke::new(2.0, Color32::from_rgb(230, 190, 90)),
+                    );
+                }
                 if let Some(l) = &row.left {
                     let num_text = row
                         .left_num
