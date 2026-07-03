@@ -1349,7 +1349,7 @@ fn render_file_panel(
         .map(|h| h.search.is_empty())
         .unwrap_or(false);
     let is_applied = app.applied_hunks.contains(&app.current_hunk);
-    let score_ok = is_new_file_creation || mr.score > app.min_match_score || !file_anchors.is_empty();
+    let score_ok = is_new_file_creation || mr.score >= app.min_match_score || !file_anchors.is_empty();
     let can_apply = !is_applied && score_ok;
     let apply_line = if file_anchors.is_empty() {
         mr.file_start + 1

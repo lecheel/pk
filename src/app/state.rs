@@ -284,7 +284,7 @@ impl MergeApp {
             }
             let best =
                 crate::diff::find_best_match(&hunk.search, &self.file_lines, self.ignore_comments);
-            best.score > 0.0
+            best.score >= self.min_match_score
         } else {
             false
         }
