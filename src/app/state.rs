@@ -74,6 +74,8 @@ pub struct MergeApp {
     pub left_selection: Option<(usize, usize)>,
     pub right_selection: Option<(usize, usize)>,
     pub right_drag_anchor: Option<usize>,
+    pub file_drag_selection: Option<(usize, usize)>,
+    pub file_drag_anchor: Option<usize>,
     pub file_anchors: BTreeMap<char, FileAnchor>,
     pub mark_pending: Option<MarkPending>,
     pub git_statuses: Vec<GitStatus>,
@@ -183,6 +185,8 @@ impl MergeApp {
             left_selection: None,
             right_selection: None,
             right_drag_anchor: None,
+            file_drag_selection: None,
+            file_drag_anchor: None,
             file_anchors: BTreeMap::new(),
             mark_pending: None,
             git_statuses: Vec::new(),
@@ -578,6 +582,8 @@ impl MergeApp {
         self.left_selection = None;
         self.right_selection = None;
         self.right_drag_anchor = None;
+        self.file_drag_selection = None;
+        self.file_drag_anchor = None;
         self.sync_anchors.clear();
         self.pending_sync = None;
         self.pending_line_actions.clear();
@@ -640,6 +646,8 @@ impl MergeApp {
         self.left_selection = None;
         self.right_selection = None;
         self.right_drag_anchor = None;
+        self.file_drag_selection = None;
+        self.file_drag_anchor = None;
         self.git_statuses.clear();
         self.git_diff_rows.clear();
         self.git_hunks.clear();
@@ -785,6 +793,9 @@ impl eframe::App for MergeApp {
                         self.pending_sync = None;
                     } else if !self.file_anchors.is_empty() || self.mark_pending.is_some() {
                         self.clear_marks();
+                    } else if self.file_drag_selection.is_some() {
+                        self.file_drag_selection = None;
+                        self.file_drag_anchor = None;
                     } else if self.right_selection.is_some() {
                         self.right_selection = None;
                         self.right_drag_anchor = None;
@@ -1006,7 +1017,77 @@ impl eframe::App for MergeApp {
                     });
                 });
         }
-
+        if let Some((s, e)) = self.file_drag_selection {
+            let (lo, hi) = (s.min(e), s.max(e));
+            TopBottomPanel::bottom("file_drag_hud")
+                .frame(
+                    Frame::none()
+                        .fill(Color32::from_rgb(32, 24, 48))
+                        .inner_margin(Margin::symmetric(10.0, 4.0)),
+                )
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "Drag selection: lines {}–{} ({} lines)",
+                                lo + 1,
+                                hi + 1,
+                                hi - lo + 1
+                            ))
+                            .color(Color32::from_rgb(190, 160, 255))
+                            .strong()
+                            .monospace()
+                            .small(),
+                        );
+                        ui.add(Separator::default().vertical());
+                        let del_btn = Button::new(
+                            RichText::new("🗑 Delete block")
+                                .color(Color32::WHITE)
+                                .strong()
+                                .small()
+                                .monospace(),
+                        )
+                        .fill(Color32::from_rgb(120, 40, 40));
+                        if ui.add(del_btn).clicked() {
+                            self.delete_block_range(lo, hi);
+                            self.file_drag_selection = None;
+                            self.file_drag_anchor = None;
+                        }
+                        let anchor_btn = Button::new(
+                            RichText::new("⚓ Set anchor ma")
+                                .color(Color32::WHITE)
+                                .strong()
+                                .small()
+                                .monospace(),
+                        )
+                        .fill(Color32::from_rgb(90, 70, 15));
+                        if ui.add(anchor_btn).clicked() {
+                            self.file_anchors.insert(
+                                'a',
+                                FileAnchor {
+                                    id: 'a',
+                                    line: lo,
+                                    end_line: Some(hi),
+                                },
+                            );
+                            self.scroll_to_match = true;
+                            self.set_message(StatusMessage::info(format!(
+                                "⚓ ma set at lines {}-{}",
+                                lo + 1,
+                                hi + 1
+                            )));
+                            self.file_drag_selection = None;
+                            self.file_drag_anchor = None;
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.button("✕ Clear").clicked() {
+                                self.file_drag_selection = None;
+                                self.file_drag_anchor = None;
+                            }
+                        });
+                    });
+                });
+        }
         super::toolbar::render_toolbar(self, ctx);
         super::status_bar::render_status_bar(self, ctx);
         CentralPanel::default().show(ctx, |ui| {

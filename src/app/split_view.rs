@@ -2322,7 +2322,10 @@ fn render_file_panel(
     let mut set_anchor_a_end: Option<usize> = None;
     let mut adjust_start_by: i32 = 0;
     let mut adjust_end_by: i32 = 0;
-
+    let mut local_drag_anchor = app.file_drag_anchor;
+    let mut local_drag_selection = app.file_drag_selection;
+    let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+    let primary_down = ui.input(|i| i.pointer.primary_down());
     let delete_file_indices: HashSet<usize> = app
         .search_rows
         .iter()
@@ -2339,6 +2342,7 @@ fn render_file_panel(
     ScrollArea::both()
         .id_source("file_scroll")
         .auto_shrink([false, false])
+        .drag_to_scroll(false)
         .show(ui, |ui| {
             for (i, line) in file_lines.iter().enumerate() {
                 let in_auto_match = i >= auto_start && i < auto_end;
@@ -2363,6 +2367,8 @@ fn render_file_panel(
                 };
                 let in_visual_selection =
                     visual_range.map_or(false, |(min, max)| i >= min && i <= max);
+                let in_drag_selection =
+                    local_drag_selection.map_or(false, |(s, e)| i >= s && i <= e);
                 let is_search_hit = !search_query.is_empty()
                     && line.to_lowercase().contains(&search_query.to_lowercase());
                 let is_current_search = is_search_hit && current_search_line == Some(i);
@@ -2376,7 +2382,7 @@ fn render_file_panel(
                     ui.available_width(),
                     if row_is_tall { row_h + 6.0 } else { row_h },
                 );
-                let (rect, row_resp) = ui.allocate_exact_size(desired, Sense::click());
+                let (rect, row_resp) = ui.allocate_exact_size(desired, Sense::click_and_drag());
                 let should_scroll = scroll_to_match
                     && (is_cursor
                         || (cursor_line.is_none() && is_anchor)
@@ -2388,7 +2394,9 @@ fn render_file_panel(
                 let is_anchor_start = anchor_here.is_some();
                 let is_anchor_end = anchor_end_here.is_some();
                 let is_anchor_row = is_anchor_start || is_anchor_end;
-                let base_bg = if in_visual_selection {
+                let base_bg = if in_drag_selection {
+                    Color32::from_rgb(45, 30, 65)
+                } else if in_visual_selection {
                     Color32::from_rgb(20, 50, 25)
                 } else if is_anchor_row {
                     Color32::from_rgba_premultiplied(45, 38, 15, 60)
@@ -2431,7 +2439,9 @@ fn render_file_panel(
                     Pos2::new(rect.left() + 2.0, rect.top()),
                     Vec2::new(3.0, rect.height()),
                 );
-                let bar_color = if in_visual_selection {
+                let bar_color = if in_drag_selection {
+                    Color32::from_rgb(160, 110, 230)
+                } else if in_visual_selection {
                     Color32::from_rgb(60, 120, 70)
                 } else if is_anchor_row {
                     pal::BAR_ANCHOR
@@ -2459,6 +2469,19 @@ fn render_file_panel(
                     set_cursor = Some(i);
                     let max_col = line.chars().count().saturating_sub(1);
                     app.cursor_col = app.cursor_col.min(max_col);
+                }
+                if primary_down {
+                    if let Some(pos) = pointer_pos {
+                        if rect.contains(pos) {
+                            if local_drag_anchor.is_none() {
+                                local_drag_anchor = Some(i);
+                            }
+                            let anchor = local_drag_anchor.unwrap();
+                            let lo = anchor.min(i);
+                            let hi = anchor.max(i);
+                            local_drag_selection = Some((lo, hi));
+                        }
+                    }
                 }
                 let num_color = if is_anchor_row {
                     pal::TEXT_ANCHOR
@@ -2905,7 +2928,11 @@ fn render_file_panel(
             }
             ui.add_space(row_h * 3.0);
         });
-
+    if !primary_down {
+        local_drag_anchor = None;
+    }
+    app.file_drag_anchor = local_drag_anchor;
+    app.file_drag_selection = local_drag_selection;
     if scroll_to_match && !did_scroll {
         did_scroll = true;
     }
