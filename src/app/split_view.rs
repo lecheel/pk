@@ -367,6 +367,16 @@ fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
         }
     });
     ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.label("Min match score to auto-apply:");
+        if ui
+            .add(Slider::new(&mut app.min_match_score, 0.0..=100.0).suffix("%"))
+            .changed()
+        {
+            app.save_config();
+        }
+    });
+    ui.add_space(8.0);
     ui.heading("Formatter Settings");
     ui.add_space(8.0);
     ui.horizontal(|ui| {
@@ -913,13 +923,23 @@ fn render_search_panel(
                     "✚ New file / Append".to_string(),
                 )
             } else {
+                let cand_suffix = if mr.candidates.len() > 1 {
+                    format!(
+                        "  ·  candidate {}/{}",
+                        app.candidate_index + 1,
+                        mr.candidates.len()
+                    )
+                } else {
+                    String::new()
+                };
                 (
                     banner_bg,
                     format!(
-                        "{:.0}%  match @ lines {}–{}",
+                        "{:.0}%  match @ lines {}–{}{}",
                         mr.score,
                         mr.file_start + 1,
-                        mr.file_end
+                        mr.file_end,
+                        cand_suffix
                     ),
                 )
             };
@@ -1329,7 +1349,7 @@ fn render_file_panel(
         .map(|h| h.search.is_empty())
         .unwrap_or(false);
     let is_applied = app.applied_hunks.contains(&app.current_hunk);
-    let score_ok = is_new_file_creation || mr.score > 60.0 || !file_anchors.is_empty();
+    let score_ok = is_new_file_creation || mr.score > app.min_match_score || !file_anchors.is_empty();
     let can_apply = !is_applied && score_ok;
     let apply_line = if file_anchors.is_empty() {
         mr.file_start + 1
@@ -1352,12 +1372,53 @@ fn render_file_panel(
         .position(|f| *f == current_file_name)
         .unwrap_or(0);
 
+    let patch_source_badge = app.initial_patch_path.as_ref().map(|p| {
+        if p.contains("imp.md") || p.ends_with("imp.md") {
+            ("📄 imp.md".to_string(), Color32::from_rgb(120, 180, 255))
+        } else if p.contains("todo.md") || p.ends_with("todo.md") {
+            ("📋 todo.md".to_string(), Color32::from_rgb(230, 180, 90))
+        } else if p == "temp.md" {
+            ("📎 temp.md".to_string(), Color32::from_rgb(180, 130, 230))
+        } else {
+            let name = std::path::Path::new(p)
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_else(|| p.clone());
+            (format!("📄 {}", name), Color32::from_rgb(235, 235, 235))
+        }
+    });
+
     Frame::none()
         .fill(Color32::from_rgb(25, 32, 42))
         .inner_margin(Margin::symmetric(6.0, 4.0))
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
+                if let Some((label, color)) = &patch_source_badge {
+                    // Perceptual luminance to pick a readable text color against the solid fill
+                    let lum = 0.299 * color.r() as f32
+                        + 0.587 * color.g() as f32
+                        + 0.114 * color.b() as f32;
+                    let text_color = if lum > 140.0 {
+                        Color32::from_rgb(15, 15, 20)
+                    } else {
+                        Color32::from_rgb(245, 245, 245)
+                    };
+                    Frame::none()
+                        .fill(*color)
+                        .rounding(3.0)
+                        .inner_margin(Margin::symmetric(6.0, 2.0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new(label)
+                                    .color(text_color)
+                                    .strong()
+                                    .monospace()
+                                    .small(),
+                            );
+                        });
+                    ui.add(Separator::default().vertical());
+                }
                 if unique_files.len() > 1 {
                     ui.label(RichText::new("File:").color(pal::TEXT_DIM).small());
                     if ui
@@ -1526,6 +1587,32 @@ fn render_file_panel(
                 }
             });
         });
+    if candidate_count > 1 {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.label(RichText::new("Candidates:").color(pal::TEXT_DIM).small());
+            for (idx, &(cand_start, _cand_end, cand_score)) in mr.candidates.iter().enumerate() {
+                let is_current = idx == candidate_idx;
+                let color = if cand_score >= app.min_match_score {
+                    pal::ACCENT_GOOD
+                } else if cand_score >= app.min_match_score * 0.7 {
+                    pal::ACCENT_WARN
+                } else {
+                    pal::ACCENT_BAD
+                };
+                let label =
+                    RichText::new(format!("{:.0}% @{}", cand_score, cand_start + 1))
+                        .color(color)
+                        .monospace()
+                        .small();
+                if ui.selectable_label(is_current, label).clicked() {
+                    app.candidate_index = idx;
+                    app.scroll_to_match = true;
+                    app.recompute_match();
+                }
+            }
+        });
+    }
     ui.add(Separator::default());
 
     let len = app.file_lines.len();
@@ -2167,7 +2254,10 @@ fn render_file_panel(
                 app.load_hunk();
                 return;
             } else {
-                app.set_message(StatusMessage::info("No previous hunk matching >= 60%"));
+                app.set_message(StatusMessage::info(format!(
+                    "No previous hunk matching >= {:.0}%",
+                    app.min_match_score
+                )));
             }
         } else {
             app.current_hunk -= 1;
@@ -2189,7 +2279,10 @@ fn render_file_panel(
                 app.load_hunk();
                 return;
             } else {
-                app.set_message(StatusMessage::info("No next hunk matching >= 60%"));
+                app.set_message(StatusMessage::info(format!(
+                    "No next hunk matching >= {:.0}%",
+                    app.min_match_score
+                )));
             }
         } else {
             app.current_hunk += 1;

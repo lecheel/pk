@@ -111,6 +111,7 @@ pub struct MergeApp {
     pub repo_receiver: mpsc::Receiver<Result<Vec<RepoInfo>, String>>,
     pub concat_server_enabled: bool,
     pub ignore_comments: bool,
+    pub min_match_score: f32,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
@@ -226,6 +227,7 @@ impl MergeApp {
             repo_receiver: rx,
             concat_server_enabled: config.concat_server_enabled,
             ignore_comments: config.ignore_comments,
+            min_match_score: config.min_match_score,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -282,7 +284,7 @@ impl MergeApp {
             }
             let best =
                 crate::diff::find_best_match(&hunk.search, &self.file_lines, self.ignore_comments);
-            best.score >= 60.0
+            best.score > 0.0
         } else {
             false
         }
@@ -320,7 +322,10 @@ impl MergeApp {
                 self.current_hunk = idx;
                 self.load_hunk();
             } else {
-                self.set_message(StatusMessage::warning("No hunks have match score >= 60%"));
+                self.set_message(StatusMessage::warning(format!(
+                    "No hunks have match score >= {:.0}%",
+                    self.min_match_score
+                )));
             }
         }
     }
@@ -634,6 +639,7 @@ impl MergeApp {
             active_repo_id: self.active_repo_id.clone(),
             concat_server_enabled: self.concat_server_enabled,
             ignore_comments: self.ignore_comments,
+            min_match_score: self.min_match_score,
         };
         config.save();
     }

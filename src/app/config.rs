@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -10,6 +10,11 @@ pub struct AppConfig {
     pub concat_server_enabled: bool,
     #[serde(default)]
     pub ignore_comments: bool,
+    #[serde(default = "default_min_match_score")]
+    pub min_match_score: f32,
+}
+fn default_min_match_score() -> f32 {
+    60.0
 }
 impl Default for AppConfig {
     fn default() -> Self {
@@ -19,6 +24,7 @@ impl Default for AppConfig {
             active_repo_id: None,
             concat_server_enabled: true,
             ignore_comments: false,
+            min_match_score: default_min_match_score(),
         }
     }
 }
