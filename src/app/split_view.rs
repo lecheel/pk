@@ -1108,12 +1108,15 @@ fn render_search_panel(
 
             let (hdr_rect, _) =
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::hover());
+            let has_anchor = !app.file_anchors.is_empty();
             let (hdr_bg, hdr_text, hdr_color) = if hunk.replace.is_empty() {
                 (Color32::from_rgb(45, 20, 20), "DELETE →", pal::TEXT_DELETE)
+            } else if has_anchor {
+                (Color32::from_rgb(50, 40, 12), "REPLACE ⚓ →", pal::TEXT_ANCHOR)
             } else {
                 (Color32::from_rgb(22, 44, 28), "REPLACE →", pal::TEXT_INSERT)
             };
-            ui.painter().rect_filled(hdr_rect, 0.0, hdr_bg);
+            ui.painter().rect_filled(hdr_rect, 4.0, hdr_bg);
             ui.painter().text(
                 Pos2::new(hdr_rect.left() + 8.0, hdr_rect.center().y),
                 Align2::LEFT_CENTER,
@@ -1285,6 +1288,8 @@ fn render_search_panel(
                         .map_or(false, |(s, e)| line_idx >= s && line_idx <= e);
                     let replace_bg = if is_replace_selected {
                         Color32::from_rgb(55, 40, 85)
+                    } else if !app.file_anchors.is_empty() {
+                        Color32::from_rgba_premultiplied(45, 38, 15, 60)
                     } else {
                         pal::BG_INSERT
                     };
@@ -1295,6 +1300,8 @@ fn render_search_panel(
                         0.0,
                         if is_replace_selected {
                             Color32::from_rgb(140, 100, 220)
+                        } else if !app.file_anchors.is_empty() {
+                            pal::BAR_ANCHOR
                         } else {
                             pal::BAR_MATCH
                         },
@@ -1321,6 +1328,8 @@ fn render_search_panel(
                         row_font.clone(),
                         if is_applied {
                             pal::TEXT_DIM
+                        } else if !app.file_anchors.is_empty() {
+                            pal::TEXT_ANCHOR
                         } else {
                             Color32::from_rgb(155, 235, 165)
                         },
