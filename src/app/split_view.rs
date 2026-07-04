@@ -147,7 +147,10 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                                     app.show_git_diff_side = true;
                                     app.refresh_git_changed_files();
                                 }
-                                "Git Log" => app.show_git_log_window = true,
+                                "Git Log" => {
+                                    app.show_git_log_window = true;
+                                    app.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&app.base_dir));
+                                }
                                 _ => {}
                             }
                         }
@@ -1995,7 +1998,6 @@ fn apply_git_diff_vim_cmd(
             app.file_lines.insert(new_fl, String::new());
             app.cursor_line = Some(new_fl);
             app.insert_cursor = 0;
-            app.git_diff_insert_mode = true;
             app.recompute_match();
             app.refresh_git_diff_side_rows();
             app.set_message(StatusMessage::info("Opened new line below"));
@@ -2008,7 +2010,6 @@ fn apply_git_diff_vim_cmd(
             app.file_lines.insert(new_fl, String::new());
             app.cursor_line = Some(new_fl);
             app.insert_cursor = 0;
-            app.git_diff_insert_mode = true;
             app.recompute_match();
             app.refresh_git_diff_side_rows();
             app.set_message(StatusMessage::info("Opened new line above"));

@@ -606,7 +606,8 @@ impl MergeApp {
         self.git_diff_rows = diff_rows;
         self.git_hunks =
             super::git_ops::group_git_hunks(&self.git_diff_rows, self.file_lines.len());
-        self.git_log_entries = super::git_ops::get_git_log(repo_root);
+        // Avoid executing synchronous get_git_log commands here as this is called frequently on keystrokes.
+        // It is loaded on initialization, repo switch, and opening the Git Log tab instead.
     }
     /// Recompute the HEAD-vs-working diff shown in the diff-side panel.
     /// Called after any in-place edit made from that panel (dd/yy/p/insert/revert)
