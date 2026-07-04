@@ -351,6 +351,27 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     } else {
         render_file_panel(app, &mut right_ui, &mr, row_h, char_w, right_w, &row_font);
     }
+    if let (Some(src), Some(dst)) = (app.anchor_link_source, app.anchor_link_target) {
+        let painter = ui.ctx().layer_painter(LayerId::new(
+            Order::Foreground,
+            Id::new("anchor_link_overlay"),
+        ));
+        let stroke = Stroke::new(2.0, pal::BAR_ANCHOR);
+        let mid_x = (src.x + dst.x) / 2.0;
+        let c1 = Pos2::new(mid_x, src.y);
+        let c2 = Pos2::new(mid_x, dst.y);
+        painter.add(Shape::CubicBezier(
+            epaint::CubicBezierShape::from_points_stroke(
+                [src, c1, c2, dst],
+                false,
+                Color32::TRANSPARENT,
+                stroke,
+            ),
+        ));
+        let dot_stroke = Stroke::NONE;
+        painter.circle(src, 3.0, pal::BAR_ANCHOR, dot_stroke);
+        painter.circle(dst, 3.0, pal::BAR_ANCHOR, dot_stroke);
+    }
 }
 
 impl MergeApp {
@@ -1038,7 +1059,8 @@ fn render_search_panel(
                             app.scroll_to_match = true;
                             app.set_message(StatusMessage::info(format!(
                                 "🔍 Searched '{}': {} matches. Press n/N to cycle.",
-                                q, app.search_matches.len()
+                                q,
+                                app.search_matches.len()
                             )));
                         } else {
                             app.search_matches.clear();
@@ -1112,7 +1134,11 @@ fn render_search_panel(
             let (hdr_bg, hdr_text, hdr_color) = if hunk.replace.is_empty() {
                 (Color32::from_rgb(45, 20, 20), "DELETE →", pal::TEXT_DELETE)
             } else if has_anchor {
-                (Color32::from_rgb(50, 40, 12), "REPLACE ⚓ →", pal::TEXT_ANCHOR)
+                (
+                    Color32::from_rgb(50, 40, 12),
+                    "REPLACE ⚓ →",
+                    pal::TEXT_ANCHOR,
+                )
             } else {
                 (Color32::from_rgb(22, 44, 28), "REPLACE →", pal::TEXT_INSERT)
             };
@@ -1149,6 +1175,15 @@ fn render_search_panel(
             .fill(Color32::from_rgb(40, 90, 55))
             .min_size(btn_size);
             let resp = ui.put(btn_rect, btn);
+            if let Some((&id, _)) = app.file_anchors.iter().next() {
+                if id == 'a' {
+                    app.anchor_link_source = Some(btn_rect.right_center());
+                } else {
+                    app.anchor_link_source = None;
+                }
+            } else {
+                app.anchor_link_source = None;
+            }
             if resp.clicked() {
                 if let Some((&id, _)) = app.file_anchors.iter().next() {
                     apply_clicked_id = Some(id);
@@ -1259,7 +1294,8 @@ fn render_search_panel(
                                 app.scroll_to_match = true;
                                 app.set_message(StatusMessage::info(format!(
                                     "🔍 Searched '{}': {} matches. Press n/N to cycle.",
-                                    q, app.search_matches.len()
+                                    q,
+                                    app.search_matches.len()
                                 )));
                             } else {
                                 app.search_matches.clear();
@@ -3228,6 +3264,8 @@ fn render_file_panel(
     let mut adjust_end_by: i32 = 0;
     let mut local_drag_anchor = app.file_drag_anchor;
     let mut local_drag_selection = app.file_drag_selection;
+    let mut anchor_a_start_point: Option<Pos2> = None;
+    let mut anchor_a_end_point: Option<Pos2> = None;
     let pointer_pos = ui.input(|i| i.pointer.interact_pos());
     let primary_down = ui.input(|i| i.pointer.primary_down());
     let delete_file_indices: HashSet<usize> = app
@@ -3525,7 +3563,13 @@ fn render_file_panel(
                         2.0,
                         Color32::from_rgba_premultiplied(45, 38, 15, 230),
                     );
+                    if anchor.id == 'a' {
+                        app.anchor_link_target =
+                            Some(Pos2::new(right_box_rect.left(), rect.center().y));
+                    }
                     if is_range_anchor {
+                        anchor_a_start_point =
+                            Some(Pos2::new(right_box_rect.left(), rect.center().y));
                         let mut next_x = right_box_rect.left() + 8.0;
                         let btn_w = 18.0;
                         let btn_h = row_h - 6.0;
@@ -3625,6 +3669,7 @@ fn render_file_panel(
                         2.0,
                         Color32::from_rgba_premultiplied(45, 38, 15, 230),
                     );
+                    anchor_a_end_point = Some(Pos2::new(right_box_rect.left(), rect.center().y));
                     let mut next_x = right_box_rect.left() + 6.0;
                     let btn_w = 18.0;
                     let btn_h = row_h - 6.0;
@@ -3847,6 +3892,16 @@ fn render_file_panel(
                         }
                     }
                 });
+            }
+            if let (Some(p1), Some(p2)) = (anchor_a_start_point, anchor_a_end_point) {
+                let link_x = p1.x - 6.0;
+                let stroke = Stroke::new(2.0, pal::BAR_ANCHOR);
+                ui.painter()
+                    .line_segment([Pos2::new(link_x, p1.y), Pos2::new(link_x, p2.y)], stroke);
+                ui.painter()
+                    .line_segment([Pos2::new(link_x, p1.y), Pos2::new(p1.x, p1.y)], stroke);
+                ui.painter()
+                    .line_segment([Pos2::new(link_x, p2.y), Pos2::new(p2.x, p2.y)], stroke);
             }
             ui.add_space(row_h * 3.0);
         });

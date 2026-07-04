@@ -128,6 +128,8 @@ pub struct MergeApp {
     pub diff_side_left_drag_anchor: Option<usize>,
     pub diff_side_right_drag_anchor: Option<usize>,
     pub diff_side_insert_anchor: Option<usize>,
+    pub anchor_link_source: Option<Pos2>,
+    pub anchor_link_target: Option<Pos2>,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
@@ -259,6 +261,8 @@ impl MergeApp {
             diff_side_left_drag_anchor: None,
             diff_side_right_drag_anchor: None,
             diff_side_insert_anchor: None,
+            anchor_link_source: None,
+            anchor_link_target: None,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
