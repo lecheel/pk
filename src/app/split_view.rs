@@ -175,12 +175,18 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                 let file_header_text = if app.file_lines.is_empty() {
                     "FILE  ·  no file loaded".to_string()
                 } else {
+                    let match_info = if !app.file_search_query.is_empty() {
+                        format!("  ({} matches)", app.search_matches.len())
+                    } else {
+                        String::new()
+                    };
                     format!(
-                        "FILE  ·  {} lines  ·  match @ {}–{}{}",
+                        "FILE  ·  {} lines  ·  match @ {}–{}{}{}",
                         app.file_lines.len(),
                         mr.file_start + 1,
                         mr.file_end,
                         mark_label,
+                        match_info,
                     )
                 };
                 ui.label(
@@ -1030,6 +1036,10 @@ fn render_search_panel(
                             app.search_match_idx = 0;
                             app.cursor_line = Some(app.search_matches[0]);
                             app.scroll_to_match = true;
+                            app.set_message(StatusMessage::info(format!(
+                                "🔍 Searched '{}': {} matches. Press n/N to cycle.",
+                                q, app.search_matches.len()
+                            )));
                         } else {
                             app.search_matches.clear();
                             app.set_message(StatusMessage::warning(format!(
@@ -1245,7 +1255,8 @@ fn render_search_panel(
                                 app.cursor_line = Some(app.search_matches[0]);
                                 app.scroll_to_match = true;
                                 app.set_message(StatusMessage::info(format!(
-                                    "🔍 Searched REPLACE line in file. Press n/N to cycle."
+                                    "🔍 Searched '{}': {} matches. Press n/N to cycle.",
+                                    q, app.search_matches.len()
                                 )));
                             } else {
                                 app.search_matches.clear();
