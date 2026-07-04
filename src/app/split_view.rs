@@ -149,7 +149,9 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                                 }
                                 "Git Log" => {
                                     app.show_git_log_window = true;
-                                    app.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&app.base_dir));
+                                    app.git_log_entries = super::git_ops::get_git_log(
+                                        std::path::Path::new(&app.base_dir),
+                                    );
                                 }
                                 _ => {}
                             }
@@ -1207,7 +1209,7 @@ fn render_search_panel(
                         sel_btn_size,
                     );
                     let sel_btn = Button::new(
-                        RichText::new(format!("⚡ Apply sel {}-{}", lo + 1, hi + 1))
+                        RichText::new(format!("⚡Apply {}-{}", lo + 1, hi + 1))
                             .color(Color32::WHITE)
                             .strong()
                             .small()
@@ -1991,32 +1993,32 @@ fn apply_git_diff_vim_cmd(
                 }
             }
         }
-    VimCmd::OpenLineBelow => {
-        if let Some(fl) = row_to_file_line(app, cursor_row) {
-            app.save_history();
-            let new_fl = fl + 1;
-            app.file_lines.insert(new_fl, String::new());
-            app.cursor_line = Some(new_fl);
-            app.insert_cursor = 0;
-            app.recompute_match();
-            app.refresh_git_diff_side_rows();
-            app.set_message(StatusMessage::info("Opened new line below"));
+        VimCmd::OpenLineBelow => {
+            if let Some(fl) = row_to_file_line(app, cursor_row) {
+                app.save_history();
+                let new_fl = fl + 1;
+                app.file_lines.insert(new_fl, String::new());
+                app.cursor_line = Some(new_fl);
+                app.insert_cursor = 0;
+                app.recompute_match();
+                app.refresh_git_diff_side_rows();
+                app.set_message(StatusMessage::info("Opened new line below"));
+            }
         }
-    }
-    VimCmd::OpenLineAbove => {
-        if let Some(fl) = row_to_file_line(app, cursor_row) {
-            app.save_history();
-            let new_fl = fl;
-            app.file_lines.insert(new_fl, String::new());
-            app.cursor_line = Some(new_fl);
-            app.insert_cursor = 0;
-            app.recompute_match();
-            app.refresh_git_diff_side_rows();
-            app.set_message(StatusMessage::info("Opened new line above"));
+        VimCmd::OpenLineAbove => {
+            if let Some(fl) = row_to_file_line(app, cursor_row) {
+                app.save_history();
+                let new_fl = fl;
+                app.file_lines.insert(new_fl, String::new());
+                app.cursor_line = Some(new_fl);
+                app.insert_cursor = 0;
+                app.recompute_match();
+                app.refresh_git_diff_side_rows();
+                app.set_message(StatusMessage::info("Opened new line above"));
+            }
         }
+        VimCmd::RepeatLast | VimCmd::NextSearchMatch | VimCmd::PrevSearchMatch => {}
     }
-    VimCmd::RepeatLast | VimCmd::NextSearchMatch | VimCmd::PrevSearchMatch => {}
-}
 }
 fn handle_git_diff_insert_mode(app: &mut MergeApp, ui: &mut Ui) {
     let mut changed = false;
