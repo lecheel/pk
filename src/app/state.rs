@@ -1047,8 +1047,6 @@ impl eframe::App for MergeApp {
                         self.show_help = false;
                     } else if self.show_debug {
                         self.show_debug = false;
-                    } else if self.show_git_diff_side {
-                        self.show_git_diff_side = false;
                     } else if self.show_git_diff_window {
                         self.show_git_diff_window = false;
                     } else if self.show_git_status_window {

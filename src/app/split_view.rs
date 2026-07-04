@@ -1760,13 +1760,13 @@ fn render_git_diff_side_panel(
                         Pos2::new(right_rect.right() - anchor_btn_w - 2.0, rect.top() + 1.0),
                         Vec2::new(anchor_btn_w, rect.height() - 2.0),
                     );
-                    let anchor_btn = Button::new(
-                        RichText::new("⚓").small().monospace().color(if is_insert_anchor {
+                    let anchor_btn = Button::new(RichText::new("⚓").small().monospace().color(
+                        if is_insert_anchor {
                             Color32::from_rgb(255, 220, 120)
                         } else {
                             pal::TEXT_DIM
-                        }),
-                    )
+                        },
+                    ))
                     .fill(if is_insert_anchor {
                         Color32::from_rgb(70, 55, 15)
                     } else {
@@ -1988,10 +1988,37 @@ fn apply_git_diff_vim_cmd(
                 }
             }
         }
-        VimCmd::RepeatLast | VimCmd::NextSearchMatch | VimCmd::PrevSearchMatch => {}
+    VimCmd::OpenLineBelow => {
+        if let Some(fl) = row_to_file_line(app, cursor_row) {
+            app.save_history();
+            let new_fl = fl + 1;
+            app.file_lines.insert(new_fl, String::new());
+            app.cursor_line = Some(new_fl);
+            app.insert_cursor = 0;
+            app.git_diff_insert_mode = true;
+            app.recompute_match();
+            app.refresh_git_diff_side_rows();
+            app.set_message(StatusMessage::info("Opened new line below"));
+        }
     }
+    VimCmd::OpenLineAbove => {
+        if let Some(fl) = row_to_file_line(app, cursor_row) {
+            app.save_history();
+            let new_fl = fl;
+            app.file_lines.insert(new_fl, String::new());
+            app.cursor_line = Some(new_fl);
+            app.insert_cursor = 0;
+            app.git_diff_insert_mode = true;
+            app.recompute_match();
+            app.refresh_git_diff_side_rows();
+            app.set_message(StatusMessage::info("Opened new line above"));
+        }
+    }
+    VimCmd::RepeatLast | VimCmd::NextSearchMatch | VimCmd::PrevSearchMatch => {}
+}
 }
 fn handle_git_diff_insert_mode(app: &mut MergeApp, ui: &mut Ui) {
+    let mut changed = false;
     ui.input(|i| {
         if i.key_pressed(Key::Escape) {
             app.git_diff_insert_mode = false;
@@ -2019,8 +2046,7 @@ fn handle_git_diff_insert_mode(app: &mut MergeApp, ui: &mut Ui) {
             chars.remove(app.insert_cursor - 1);
             app.file_lines[cur] = chars.iter().collect();
             app.insert_cursor -= 1;
-            app.recompute_match();
-            app.update_git_statuses();
+            changed = true;
         }
         for event in i.events.clone() {
             if let Event::Text(txt) = event {
@@ -2041,14 +2067,16 @@ fn handle_git_diff_insert_mode(app: &mut MergeApp, ui: &mut Ui) {
                     }
                     app.file_lines[cur] = new_line;
                     app.insert_cursor += txt.chars().count();
-                    app.recompute_match();
-                    app.update_git_statuses();
+                    changed = true;
                 }
             }
         }
     });
-    // Live-refresh the diff view while typing so the correction is visible immediately.
-    app.refresh_git_diff_side_rows();
+    // Perform expensive recomputes only once per frame instead of per keystroke
+    if changed {
+        app.recompute_match();
+        app.refresh_git_diff_side_rows();
+    }
 }
 fn render_file_panel(
     app: &mut MergeApp,
@@ -3161,6 +3189,7 @@ fn render_file_panel(
     let mut set_cursor: Option<usize> = None;
     let mut set_del_start: Option<usize> = None;
     let mut set_del_end: Option<usize> = None;
+
     let mut clear_del = false;
     let mut perform_block_delete: Option<(usize, usize)> = None;
     let mut set_anchor_a_start: Option<usize> = None;

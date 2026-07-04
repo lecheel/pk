@@ -15,6 +15,8 @@ pub enum VimCmd {
     NextGitHunk,
     PrevGitHunk,
     RevertToHead,
+    OpenLineBelow,
+    OpenLineAbove,
 }
 
 /// Feed accumulated keystroke text into this. Returns the recognized
@@ -55,6 +57,12 @@ pub fn parse_vim_buffer(buf: &str) -> (Option<VimCmd>, bool) {
     if buf_t == "P" {
         return (Some(VimCmd::PasteAbove), true);
     }
+    if lower == "o" {
+        return (Some(VimCmd::OpenLineBelow), true);
+    }
+    if buf_t == "O" {
+        return (Some(VimCmd::OpenLineAbove), true);
+    }
     if lower.ends_with("dd") {
         let num_part = &lower[..lower.len() - 2];
         let n = if num_part.is_empty() {
@@ -81,6 +89,8 @@ pub fn parse_vim_buffer(buf: &str) -> (Option<VimCmd>, bool) {
             || c == 'y'
             || c == 'p'
             || c == 'P'
+            || c == 'o'
+            || c == 'O'
     });
     if !allowed {
         return (None, true);
