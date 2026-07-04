@@ -128,6 +128,7 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                 }
                 ui.add(Separator::default().vertical().spacing(12.0));
                 let has_unsaved = !app.history.is_empty();
+                let any_unsaved = has_unsaved || app.file_states.values().any(|f| !f.history.is_empty());
                 ui.add_enabled_ui(has_unsaved, |ui| {
                     if ui
                         .button(RichText::new("💾 Save").color(if has_unsaved {
@@ -142,7 +143,11 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                     }
                 });
                 if ui
-                    .button("💾 Save All")
+                    .button(RichText::new("💾 Save All").color(if any_unsaved {
+                        pal::ACCENT_GOOD
+                    } else {
+                        pal::TEXT_DIM
+                    }))
                     .on_hover_text("Save every modified file")
                     .clicked()
                 {

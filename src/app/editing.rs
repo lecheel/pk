@@ -294,6 +294,7 @@ impl MergeApp {
                 }
             }
         }
+        self.last_save_all_result = Some((saved, failed));
         if failed == 0 {
             self.set_message(StatusMessage::success(format!("Saved {} file(s)", saved)));
         } else {
