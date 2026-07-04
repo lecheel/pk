@@ -292,13 +292,23 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                 );
                 ui.add_space(4.0);
 
-                let prompt_text = "Please apply changes using this aider style format:
-// src/main.rs                
+                let prompt_text =
+                    "Please apply changes using this style format in single code block:
+```                
+// src/filename1
 <<<<<<< SEARCH
 [exact original lines (include enough context to be unique, avoid too thin blocks)]
 =======
 [modified lines]
->>>>>>> REPLACE";
+>>>>>>> REPLACE
+
+// src/filename2
+<<<<<<< SEARCH
+[exact original lines (include enough context to be unique, avoid too thin blocks)]
+=======
+[modified lines]
+>>>>>>> REPLACE
+```";
 
                 let do_copy = |ui: &Ui, app: &mut MergeApp| {
                     ui.ctx().copy_text(prompt_text.to_string());
