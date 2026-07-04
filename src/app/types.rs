@@ -89,12 +89,21 @@ impl FileAnchor {
         }
     }
     pub fn file_start(&self) -> usize {
-        self.line
+        self.line.min(self.end_line.unwrap_or(self.line))
     }
     pub fn file_end(&self) -> usize {
-        self.end_line.unwrap_or(self.line)
+        self.line.max(self.end_line.unwrap_or(self.line))
     }
     pub fn label(&self) -> String {
-        format!("m{}:{}", self.id, self.line + 1)
+        if self.end_line.is_some() {
+            format!(
+                "m{}:{}-{}",
+                self.id,
+                self.file_start() + 1,
+                self.file_end() + 1
+            )
+        } else {
+            format!("m{}:{}", self.id, self.line + 1)
+        }
     }
 }

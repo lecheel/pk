@@ -20,26 +20,19 @@ impl MergeApp {
 
         let (file_start, file_end) = if let Some(id) = anchor_id {
             if let Some(anchor) = self.file_anchors.get(&id) {
-                let start = anchor.line;
+                let start = anchor.file_start();
                 let end = if id == 'a' {
-                    // For 'a', default to auto-match end if no explicit end_line is set
-                    anchor.end_line.unwrap_or(
+                    if anchor.end_line.is_some() {
+                        anchor.file_end()
+                    } else {
                         self.match_result
                             .as_ref()
                             .map(|mr| mr.file_end.saturating_sub(1))
-                            .unwrap_or(start),
-                    )
+                            .unwrap_or(start)
+                    }
                 } else {
-                    anchor.end_line.unwrap_or(start)
+                    anchor.file_end()
                 };
-                println!(
-                    "[DEBUG apply_merge] Anchor {} found: start={}, end={}. Returning ({}, {})",
-                    id,
-                    start,
-                    end,
-                    start,
-                    end + 1
-                );
                 (start, end + 1)
             } else {
                 self.set_message(StatusMessage::error(format!("Marker {} not found", id)));

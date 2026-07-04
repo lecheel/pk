@@ -474,19 +474,49 @@ impl MergeApp {
     }
 
     pub fn set_mark_a(&mut self, line: usize) {
+        if let Some(anchor) = self.file_anchors.get(&'a') {
+            if let Some(end) = anchor.end_line {
+                let s = line.min(end);
+                let e = line.max(end);
+                self.file_anchors.insert(
+                    'a',
+                    FileAnchor {
+                        id: 'a',
+                        line: s,
+                        end_line: Some(e),
+                    },
+                );
+                self.scroll_to_match = true;
+                self.set_message(StatusMessage::info(format!(
+                    "⚓ ma range adjusted: lines {}-{}",
+                    s + 1,
+                    e + 1
+                )));
+                return;
+            }
+        }
         self.set_mark('a', line);
     }
-
     pub fn set_mark_b(&mut self, line: usize) {
         self.set_mark('b', line);
     }
-
     pub fn set_mark_a_end(&mut self, line: usize) {
-        if let Some(anchor) = self.file_anchors.get_mut(&'a') {
-            anchor.end_line = Some(line);
+        if let Some(anchor) = self.file_anchors.get(&'a') {
+            let s = line.min(anchor.line);
+            let e = line.max(anchor.line);
+            self.file_anchors.insert(
+                'a',
+                FileAnchor {
+                    id: 'a',
+                    line: s,
+                    end_line: Some(e),
+                },
+            );
+            self.scroll_to_match = true;
             self.set_message(StatusMessage::info(format!(
-                "⚓ mA range end set at line {}",
-                line + 1
+                "⚓ mA range adjusted: lines {}-{}",
+                s + 1,
+                e + 1
             )));
         } else {
             self.file_anchors.insert(
@@ -497,11 +527,12 @@ impl MergeApp {
                     end_line: Some(line),
                 },
             );
-            self.set_message(StatusMessage::warning(
-                "⚠ Set ma start first, but created mA end anyway",
-            ));
+            self.set_message(StatusMessage::info(format!(
+                "⚓ mA end set at line {}",
+                line + 1
+            )));
+            self.scroll_to_match = true;
         }
-        self.scroll_to_match = true;
     }
 
     pub fn clear_marks(&mut self) {
@@ -517,22 +548,16 @@ impl MergeApp {
             }
         }
         if let Some(a) = self.file_anchors.get(&'a') {
-            let start = a.line;
+            let start = a.file_start();
             let end = if let Some(b) = self.file_anchors.get(&'b') {
-                let mut e = a.line.max(b.line);
-                if let Some(a_end) = a.end_line {
-                    e = e.max(a_end);
-                }
-                if let Some(b_end) = b.end_line {
-                    e = e.max(b_end);
-                }
-                e
+                a.file_end().max(b.file_end())
             } else {
-                a.end_line.unwrap_or(
+                a.end_line.map_or(
                     self.match_result
                         .as_ref()
                         .map(|mr| mr.file_end.saturating_sub(1))
                         .unwrap_or(start),
+                    |_| a.file_end()
                 )
             };
             return Some((start, end + 1));
