@@ -2561,7 +2561,14 @@ fn render_file_panel(
                         if let Event::Text(txt) = event {
                             if txt.len() == 1 {
                                 let c = txt.chars().next().unwrap();
-                                if c == 'a' || c == 'A' {
+                                if c == 'a' {
+                                    if let Some(cur) = app.cursor_line {
+                                        app.set_mark_a(cur);
+                                    }
+                                } else if c == 'A' {
+                                    if let Some(cur) = app.cursor_line {
+                                        app.set_mark_a_end(cur);
+                                    }
                                 } else if c.is_ascii_alphabetic() {
                                     if let Some(cur) = app.cursor_line {
                                         app.set_mark(c, cur);
