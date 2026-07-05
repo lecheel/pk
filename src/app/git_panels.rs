@@ -11,6 +11,98 @@ pub fn render_git_log_panel(
     panel_w: f32,
 ) {
     let max_chars = ((panel_w - 90.0) / char_w).floor() as usize;
+    let mut move_delta: i32 = 0;
+    let mut copy_files = false;
+    let mut copy_diff = false;
+    if !ui.ctx().wants_keyboard_input() {
+        ui.input(|i| {
+            if i.key_pressed(Key::ArrowDown) || i.key_pressed(Key::J) {
+                move_delta = 1;
+            }
+            if i.key_pressed(Key::ArrowUp) || i.key_pressed(Key::K) {
+                move_delta = -1;
+            }
+            if i.key_pressed(Key::C) {
+                copy_files = true;
+            }
+            if i.key_pressed(Key::D) {
+                copy_diff = true;
+            }
+        });
+    }
+    let just_moved = move_delta != 0;
+    if just_moved && !app.git_log_entries.is_empty() {
+        let len = app.git_log_entries.len() as i32;
+        let cur = app.selected_git_log_entry.map(|i| i as i32).unwrap_or(-1);
+        let new_idx = (cur + move_delta).clamp(0, len - 1);
+        app.selected_git_log_entry = Some(new_idx as usize);
+    }
+    if copy_files || copy_diff {
+        let entry_clone = app
+            .selected_git_log_entry
+            .and_then(|idx| app.git_log_entries.get(idx))
+            .cloned();
+        if let Some(entry) = entry_clone {
+            if copy_files {
+                let mut content = String::new();
+                let mut copied_count = 0;
+                if let Ok(repo) = git2::Repository::discover(&app.base_dir) {
+                    if let Ok(oid) = git2::Oid::from_str(&entry.full_hash) {
+                        if let Ok(commit) = repo.find_commit(oid) {
+                            if let Ok(tree) = commit.tree() {
+                                for f in &entry.files_changed {
+                                    let file_text = tree
+                                        .get_path(std::path::Path::new(&f.path))
+                                        .ok()
+                                        .and_then(|entry| repo.find_blob(entry.id()).ok())
+                                        .map(|blob| {
+                                            String::from_utf8_lossy(blob.content()).to_string()
+                                        });
+                                    match file_text {
+                                        Some(text) => {
+                                            content.push_str(&format!(
+                                                "===== {} =====\n{}\n\n",
+                                                f.path, text
+                                            ));
+                                            copied_count += 1;
+                                        }
+                                        None => {
+                                            content.push_str(&format!(
+                                                "===== {} =====\n(file deleted or unreadable at this commit)\n\n",
+                                                f.path
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                ui.ctx().copy_text(content);
+                app.set_message(super::types::StatusMessage::success(format!(
+                    "Copied full content of {}/{} file(s) for {}",
+                    copied_count,
+                    entry.files_changed.len(),
+                    entry.hash
+                )));
+            }
+            if copy_diff {
+                let mut diff_text = String::new();
+                for f in &entry.files_changed {
+                    diff_text.push_str(&format!(
+                        "===== {} (+{} -{}) =====\n{}\n\n",
+                        f.path, f.additions, f.deletions, f.patch
+                    ));
+                }
+                ui.ctx().copy_text(diff_text);
+                app.set_message(super::types::StatusMessage::success(format!(
+                    "Copied diff of {} file(s) for {}",
+                    entry.files_changed.len(),
+                    entry.hash
+                )));
+            }
+        }
+    }
     ScrollArea::vertical()
         .id_source("git_log_scroll")
         .auto_shrink([false, false])
@@ -22,7 +114,7 @@ pub fn render_git_log_panel(
             ui.painter().text(
                 Pos2::new(rect.left() + 8.0, rect.center().y),
                 Align2::LEFT_CENTER,
-                "📜 GIT LOG  ·  press ESC to close",
+                "📜 GIT LOG  ·  ↑/↓ or j/k navigate  ·  c=copy files  d=copy diff  ·  ESC to close",
                 FontId::monospace(11.0),
                 Color32::from_rgb(180, 130, 230),
             );
@@ -44,6 +136,9 @@ pub fn render_git_log_panel(
                 let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
                 let is_hovered = resp.hovered();
                 let is_selected = app.selected_git_log_entry == Some(idx);
+                if is_selected && just_moved {
+                    ui.scroll_to_rect(rect, Some(Align::Center));
+                }
                 let bg = if is_selected {
                     Color32::from_rgba_premultiplied(70, 50, 100, 180)
                 } else if is_hovered {
