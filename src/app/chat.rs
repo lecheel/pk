@@ -96,7 +96,7 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let provider = app.current_chat_provider();
             ui.label(
-                RichText::new(format!("🤖 {} · {}", provider.name(), provider.model()))
+                RichText::new(format!("{} / {}", provider.name(), provider.model()))
                     .color(pal::TEXT_DIM)
                     .small(),
             );
@@ -215,7 +215,7 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
         }
 
         let send_btn = Button::new(
-            RichText::new("⏎ Send")
+            RichText::new("Send >>")
                 .color(Color32::WHITE)
                 .strong()
                 .size(11.0),
@@ -231,7 +231,15 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
         }
 
         if ui
-            .add(Button::new("✕").small().fill(Color32::from_rgb(60, 30, 30)))
+            .add(
+                Button::new(
+                    RichText::new("Clear")
+                        .color(Color32::WHITE)
+                        .size(11.0),
+                )
+                .small()
+                .fill(Color32::from_rgb(80, 40, 40)),
+            )
             .on_hover_text("Clear chat history")
             .clicked()
         {
@@ -422,21 +430,21 @@ pub fn render_llm_settings(app: &mut MergeApp, ui: &mut Ui) {
 
     render_provider_config(
         ui,
-        "💬 Chat Provider",
+        "Chat Provider:",
         &mut app.llm_config.chat_provider,
         &providers,
     );
     ui.add_space(12.0);
     render_provider_config(
         ui,
-        "📝 Commit Provider",
+        "Commit Provider:",
         &mut app.llm_config.commit_provider,
         &providers,
     );
     ui.add_space(12.0);
     render_provider_config(
         ui,
-        "⚡ Impl Provider",
+        "Impl Provider:",
         &mut app.llm_config.impl_provider,
         &providers,
     );
