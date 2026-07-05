@@ -1,8 +1,8 @@
+use super::chat::ChatMode;
 use super::palette::pal;
 use super::state::MergeApp;
 use eframe::egui::*;
-
-pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
+pub fn render_status_bar(app: &mut MergeApp, ctx: &Context) {
     TopBottomPanel::bottom("status")
         .frame(
             Frame::none()
@@ -98,6 +98,38 @@ pub fn render_status_bar(app: &MergeApp, ctx: &Context) {
                 if let Some(ref msg) = app.message {
                     ui.add(Separator::default().vertical());
                     ui.label(RichText::new(&msg.text).color(msg.color()).size(13.0));
+                }
+
+                if app.show_chat_window {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let provider = app.current_chat_provider();
+                        ui.label(
+                            RichText::new(format!("{} / {}", provider.name(), provider.model))
+                                .color(pal::TEXT_NORMAL)
+                                .monospace()
+                                .size(13.0),
+                        );
+                        ui.add(Separator::default().vertical());
+                        
+                        for mode in [ChatMode::Impl, ChatMode::Commit, ChatMode::Chat] {
+                            let is_active = app.chat_mode == mode;
+                            let rich_text = RichText::new(mode.short_label())
+                                .color(if is_active { mode.color() } else { pal::TEXT_DIM })
+                                .strong()
+                                .size(13.0);
+                            if ui.selectable_label(is_active, rich_text).clicked() {
+                                app.chat_mode = mode;
+                            }
+                            ui.label(RichText::new("·").color(pal::TEXT_DIM).size(13.0));
+                        }
+
+                        ui.label(
+                            RichText::new("Chat Tab:")
+                                .color(pal::TEXT_DIM)
+                                .monospace()
+                                .size(13.0),
+                        );
+                    });
                 }
             });
         });
