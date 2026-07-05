@@ -135,6 +135,7 @@ pub struct MergeApp {
     pub show_commit_prompt: bool,
     pub show_git_commit_window: bool,
     pub commit_message: String,
+    pub git_status_selected_path: Option<String>,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
@@ -273,6 +274,7 @@ impl MergeApp {
             show_git_commit_window: false,
             commit_message: String::new(),
             git_status_selected_idx: None,
+            git_status_selected_path: None,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -969,6 +971,7 @@ impl MergeApp {
         self.show_commit_prompt = false;
         self.commit_message.clear();
         self.show_git_commit_window = false;
+        self.git_status_selected_path = None;
         self.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
         self.set_message(StatusMessage::info(
             "Welcome! Open a .md file or paste a patch to begin.",
@@ -1055,12 +1058,15 @@ impl MergeApp {
 
         if let Some(s) = status {
             if s.is_index_new() || s.is_index_modified() || s.is_index_deleted() {
-                // Unstage
-                if let Ok(head) = repo.head() {
-                    if let Ok(tree) = head.peel_to_tree() {
-                        match repo
-                            .reset_default(Some(tree.as_object()), &[std::path::Path::new(path)])
-                        {
+                // Unstage: reset_default requires a commit-ish target (it peels
+                // whatever object it's given down to a commit internally), so
+                // pass the HEAD commit itself rather than its tree.
+                match repo.head().and_then(|head| head.peel_to_commit()) {
+                    Ok(commit) => {
+                        match repo.reset_default(
+                            Some(commit.as_object()),
+                            &[std::path::Path::new(path)],
+                        ) {
                             Ok(_) => {
                                 self.set_message(StatusMessage::info(format!("Unstaged {}", path)))
                             }
@@ -1068,6 +1074,30 @@ impl MergeApp {
                                 "Unstage failed: {}",
                                 e
                             ))),
+                        }
+                    }
+                    Err(e) => {
+                        // No HEAD commit yet (e.g. brand-new repo with no commits) —
+                        // there's nothing to reset back to, so just drop it from the index.
+                        if let Ok(mut index) = repo.index() {
+                            match index.remove_path(std::path::Path::new(path)) {
+                                Ok(_) => {
+                                    let _ = index.write();
+                                    self.set_message(StatusMessage::info(format!(
+                                        "Unstaged {}",
+                                        path
+                                    )));
+                                }
+                                Err(e2) => self.set_message(StatusMessage::error(format!(
+                                    "Unstage failed: {}",
+                                    e2
+                                ))),
+                            }
+                        } else {
+                            self.set_message(StatusMessage::error(format!(
+                                "Unstage failed: {}",
+                                e
+                            )));
                         }
                     }
                 }

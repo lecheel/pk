@@ -749,26 +749,22 @@ pub fn render_git_status_panel(
 
             if !ui.ctx().wants_keyboard_input() && !flat.is_empty() {
                 ui.input(|i| {
-                    if i.key_pressed(Key::ArrowDown) {
-                        app.git_status_selected_idx = Some(
-                            app.git_status_selected_idx
-                                .map(|x| x + 1)
-                                .unwrap_or(0)
-                                .min(flat.len().saturating_sub(1)),
-                        );
-                    }
-                    if i.key_pressed(Key::ArrowUp) {
-                        if let Some(idx) = &mut app.git_status_selected_idx {
-                            *idx = idx.saturating_sub(1);
-                        } else {
-                            app.git_status_selected_idx = Some(0);
-                        }
+                    if i.key_pressed(Key::ArrowDown) || i.key_pressed(Key::ArrowUp) {
+                        let cur_pos = app
+                            .git_status_selected_path
+                            .as_ref()
+                            .and_then(|p| flat.iter().position(|f| f == p));
+                        let going_down = i.key_pressed(Key::ArrowDown);
+                        let next_pos = match (cur_pos, going_down) {
+                            (Some(p), true) => (p + 1).min(flat.len() - 1),
+                            (Some(p), false) => p.saturating_sub(1),
+                            (None, _) => 0,
+                        };
+                        app.git_status_selected_path = flat.get(next_pos).cloned();
                     }
                     if i.key_pressed(Key::S) {
-                        if let Some(idx) = app.git_status_selected_idx {
-                            if let Some(path) = flat.get(idx) {
-                                app.toggle_stage_file(path);
-                            }
+                        if let Some(path) = app.git_status_selected_path.clone() {
+                            app.toggle_stage_file(&path);
                         }
                     }
                     if i.key_pressed(Key::Z) {
@@ -779,16 +775,12 @@ pub fn render_git_status_panel(
                     stage_all_and_open_commit(app);
                 }
             }
-
-            let mut idx_counter = 0usize;
-
             render_status_section(
                 app,
                 ui,
                 row_h,
                 &format!("  Stage Changes ({})", staged.len()),
                 &staged,
-                &mut idx_counter,
             );
             render_status_section(
                 app,
@@ -796,7 +788,6 @@ pub fn render_git_status_panel(
                 row_h,
                 &format!("  Unstage Changes ({})", unstaged.len()),
                 &unstaged,
-                &mut idx_counter,
             );
 
             ui.label(
@@ -817,9 +808,7 @@ pub fn render_git_status_panel(
                 );
             } else {
                 for path in &untracked {
-                    let idx = idx_counter;
-                    idx_counter += 1;
-                    let is_selected = app.git_status_selected_idx == Some(idx);
+                    let is_selected = app.git_status_selected_path.as_deref() == Some(path.as_str());
                     let desired = Vec2::new(ui.available_width(), row_h);
                     let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
                     let bg = if is_selected {
@@ -838,7 +827,7 @@ pub fn render_git_status_panel(
                         pal::TEXT_NORMAL,
                     );
                     if resp.clicked() {
-                        app.git_status_selected_idx = Some(idx);
+                        app.git_status_selected_path = Some(path.clone());
                         open_file_for_status_row(app, path);
                     }
                 }
@@ -935,10 +924,8 @@ pub fn render_git_status_panel(
                     stage_all_and_open_commit(app);
                 }
                 if ui.button("[s] Toggle staged").clicked() {
-                    if let Some(idx) = app.git_status_selected_idx {
-                        if let Some(path) = flat.get(idx) {
-                            app.toggle_stage_file(path);
-                        }
+                    if let Some(path) = app.git_status_selected_path.clone() {
+                        app.toggle_stage_file(&path);
                     }
                 }
                 if ui.button("[z] stash").clicked() {
@@ -954,7 +941,6 @@ fn render_status_section(
     row_h: f32,
     title: &str,
     items: &[(String, char, i32, i32)],
-    idx_counter: &mut usize,
 ) {
     ui.label(
         RichText::new(title)
@@ -974,14 +960,12 @@ fn render_status_section(
         );
     } else {
         for (path, status_char, additions, deletions) in items {
-            let idx = *idx_counter;
-            *idx_counter += 1;
+            let is_selected = app.git_status_selected_path.as_deref() == Some(path.as_str());
             let badge_color = match status_char {
                 'A' => Color32::from_rgb(40, 150, 60),
                 'D' => Color32::from_rgb(200, 40, 40),
                 _ => Color32::from_rgb(200, 160, 40),
             };
-            let is_selected = app.git_status_selected_idx == Some(idx);
             let desired = Vec2::new(ui.available_width(), row_h);
             let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
             let bg = if is_selected {
@@ -1021,7 +1005,7 @@ fn render_status_section(
                 pal::TEXT_NORMAL,
             );
             if resp.clicked() {
-                app.git_status_selected_idx = Some(idx);
+                app.git_status_selected_path = Some(path.clone());
                 open_file_for_status_row(app, path);
             }
         }
