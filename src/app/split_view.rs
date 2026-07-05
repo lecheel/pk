@@ -3261,10 +3261,8 @@ fn render_file_panel(
     let mut set_cursor: Option<usize> = None;
     let mut set_del_start: Option<usize> = None;
     let mut set_del_end: Option<usize> = None;
-
     let mut clear_del = false;
     let mut perform_block_delete: Option<(usize, usize)> = None;
-    let mut delete_drag_selection: Option<(usize, usize)> = None;
     let mut set_anchor_a_start: Option<usize> = None;
     let mut set_anchor_a_end: Option<usize> = None;
     let mut adjust_start_by: i32 = 0;
@@ -3287,7 +3285,10 @@ fn render_file_panel(
         .filter(|r| matches!(r.kind, RowKind::Equal))
         .filter_map(|r| r.file_idx)
         .collect();
-
+    // Action toolbar for the current drag selection (one-frame lag, same
+    // pattern as the diff-side HUD): reads app.file_drag_selection from the
+    // previous frame, since this frame's selection is only known once the
+    // row loop below runs.
     ScrollArea::both()
         .id_source("file_scroll")
         .auto_shrink([false, false])
@@ -3889,39 +3890,8 @@ fn render_file_panel(
                             let min = start.min(end);
                             let max = start.max(end);
                             let count = max - min + 1;
-                            if ui
-                                .button(format!("Delete Block ({} lines)", count))
-                                .clicked()
-                            {
+                            if ui.button(format!("Delete Block ({} lines)", count)).clicked() {
                                 perform_block_delete = Some((min, max));
-                                ui.close_menu();
-                            }
-                        }
-                    }
-                    if let Some((s, e)) = local_drag_selection {
-                        let (lo, hi) = (s.min(e), s.max(e));
-                        if i >= lo && i <= hi {
-                            let count = hi - lo + 1;
-                            ui.separator();
-                            if ui
-                                .button(
-                                    RichText::new(format!("🗑 Delete selection ({} lines)", count))
-                                        .color(pal::TEXT_DELETE),
-                                )
-                                .clicked()
-                            {
-                                delete_drag_selection = Some((lo, hi));
-                                ui.close_menu();
-                            }
-                            if ui
-                                .button(
-                                    RichText::new(format!("⚓ Set anchor ma ({} lines)", count))
-                                        .color(pal::TEXT_ANCHOR),
-                                )
-                                .clicked()
-                            {
-                                set_anchor_a_start = Some(lo);
-                                set_anchor_a_end = Some(hi);
                                 ui.close_menu();
                             }
                         }
@@ -3976,13 +3946,13 @@ fn render_file_panel(
     if let Some((min, max)) = perform_block_delete {
         app.delete_block_range(min, max);
     }
-    if let Some((min, max)) = delete_drag_selection {
-        app.delete_block_range(min, max);
-        app.file_drag_selection = None;
-        app.file_drag_anchor = None;
-    }
     if let Some(val) = set_anchor_a_start {
         app.set_mark_a(val);
+        local_drag_selection = None;
+        local_drag_anchor = None;
+    }
+    if let Some(val) = set_anchor_a_end {
+        app.set_mark_a_end(val);
     }
     if visual_delete {
         if let Some(start) = app.visual_start {
@@ -3993,9 +3963,6 @@ fn render_file_panel(
             app.is_visual_mode = false;
             app.visual_start = None;
         }
-    }
-    if let Some(val) = set_anchor_a_end {
-        app.set_mark_a_end(val);
     }
     if adjust_start_by != 0 || adjust_end_by != 0 {
         if !app.file_anchors.contains_key(&'a') {
