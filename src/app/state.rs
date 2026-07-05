@@ -1,14 +1,15 @@
+use super::chat::{ChatEntry, ChatMode};
 use super::clipboard_utils::get_clipboard_text;
 use super::config::AppConfig;
 use super::daemon::{self, RepoInfo};
 use super::git_ops::GitStatus;
+use super::llm::{LlmConfig, LlmProvider, LlmResponse};
 use super::matching::MergeMatching;
 use super::types::{Action, FileAnchor, FileState, StatusMessage};
 use crate::app::pal;
 use crate::diff::MatchResult;
 use crate::patch::PatchHunk;
 use eframe::egui::*;
-
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::mpsc;
 
@@ -136,7 +137,15 @@ pub struct MergeApp {
     pub show_git_commit_window: bool,
     pub commit_message: String,
     pub git_status_selected_path: Option<String>,
+    pub show_chat_window: bool,
+    pub chat_mode: ChatMode,
+    pub chat_history: Vec<ChatEntry>,
+    pub chat_input: String,
+    pub llm_config: LlmConfig,
+    pub llm_response_receiver: Option<mpsc::Receiver<LlmResponse>>,
+    pub is_llm_loading: bool,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MarkPending {
     WaitingKey,
@@ -275,6 +284,13 @@ impl MergeApp {
             commit_message: String::new(),
             git_status_selected_idx: None,
             git_status_selected_path: None,
+            show_chat_window: false,
+            chat_mode: ChatMode::Chat,
+            chat_history: Vec::new(),
+            chat_input: String::new(),
+            llm_config: config.llm_config.clone(),
+            llm_response_receiver: None,
+            is_llm_loading: false,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -972,11 +988,25 @@ impl MergeApp {
         self.commit_message.clear();
         self.show_git_commit_window = false;
         self.git_status_selected_path = None;
+        self.show_chat_window = false;
+        self.chat_mode = ChatMode::Chat;
+        self.chat_history.clear();
+        self.chat_input.clear();
+        self.llm_response_receiver = None;
+        self.is_llm_loading = false;
         self.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
         self.set_message(StatusMessage::info(
             "Welcome! Open a .md file or paste a patch to begin.",
         ));
     }
+    pub fn current_chat_provider(&self) -> &LlmProvider {
+        match self.chat_mode {
+            ChatMode::Chat => &self.llm_config.chat_provider,
+            ChatMode::Commit => &self.llm_config.commit_provider,
+            ChatMode::Impl => &self.llm_config.impl_provider,
+        }
+    }
+
     pub fn save_config(&self) {
         let config = AppConfig {
             format_on_save: self.format_on_save,
@@ -986,6 +1016,7 @@ impl MergeApp {
             ignore_comments: self.ignore_comments,
             min_match_score: self.min_match_score,
             min_match_floor: self.min_match_floor,
+            llm_config: self.llm_config.clone(),
         };
         config.save();
     }
@@ -1063,10 +1094,9 @@ impl MergeApp {
                 // pass the HEAD commit itself rather than its tree.
                 match repo.head().and_then(|head| head.peel_to_commit()) {
                     Ok(commit) => {
-                        match repo.reset_default(
-                            Some(commit.as_object()),
-                            &[std::path::Path::new(path)],
-                        ) {
+                        match repo
+                            .reset_default(Some(commit.as_object()), &[std::path::Path::new(path)])
+                        {
                             Ok(_) => {
                                 self.set_message(StatusMessage::info(format!("Unstaged {}", path)))
                             }
@@ -1366,12 +1396,24 @@ impl eframe::App for MergeApp {
             self.show_git_diff_side = false;
             self.show_git_status_window = false;
             self.show_git_log_window = !self.show_git_log_window;
+            self.show_chat_window = false;
             if self.show_git_log_window {
                 self.git_log_entries =
                     super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
             }
         }
-
+        if ctx.input(|i| i.key_pressed(Key::F9)) {
+            self.show_fmt_error = false;
+            self.show_settings = false;
+            self.show_repos_window = false;
+            self.show_debug = false;
+            self.show_git_diff_window = false;
+            self.show_git_diff_side = false;
+            self.show_git_status_window = false;
+            self.show_git_log_window = false;
+            self.show_git_commit_window = false;
+            self.show_chat_window = !self.show_chat_window;
+        }
         if !ctx.wants_keyboard_input() || self.is_searching {
             ctx.input(|i| {
                 if i.key_pressed(Key::Escape) {
@@ -1391,6 +1433,8 @@ impl eframe::App for MergeApp {
                         self.show_git_log_window = false;
                     } else if self.show_git_commit_window {
                         self.show_git_commit_window = false;
+                    } else if self.show_chat_window {
+                        self.show_chat_window = false;
                     } else if self.is_searching {
                         self.is_searching = false;
                         self.file_search_query.clear();

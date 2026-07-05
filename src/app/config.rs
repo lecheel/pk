@@ -1,7 +1,7 @@
+use super::llm::LlmConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub format_on_save: bool,
@@ -14,6 +14,8 @@ pub struct AppConfig {
     pub min_match_score: f32,
     #[serde(default = "default_min_match_floor")]
     pub min_match_floor: f32,
+    #[serde(default)]
+    pub llm_config: LlmConfig,
 }
 fn default_min_match_score() -> f32 {
     60.0
@@ -31,6 +33,7 @@ impl Default for AppConfig {
             ignore_comments: false,
             min_match_score: default_min_match_score(),
             min_match_floor: default_min_match_floor(),
+            llm_config: LlmConfig::default(),
         }
     }
 }

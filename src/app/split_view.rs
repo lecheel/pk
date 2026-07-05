@@ -1,3 +1,4 @@
+use super::chat::{self, ChatMode};
 use super::clipboard_utils::{get_clipboard_text, parse_clipboard_patch};
 use super::git_ops::GitStatus;
 use super::git_panels::{
@@ -78,6 +79,8 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         "Git Log"
                     } else if app.show_git_commit_window {
                         "Git Commit"
+                    } else if app.show_chat_window {
+                        "Chat"
                     } else {
                         "Search"
                     };
@@ -85,6 +88,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                     let show_repos = app.concat_server_enabled;
                     let all_tabs = [
                         ("🔍 Search", "Search", Color32::from_rgb(120, 180, 255)),
+                        ("🤖 Chat", "Chat", Color32::from_rgb(180, 140, 255)),
                         ("🌳 Status", "Git Status", Color32::from_rgb(120, 230, 160)),
                         ("📝 Diff", "Git Diff", Color32::from_rgb(235, 120, 120)),
                         (
@@ -141,6 +145,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                             app.show_git_diff_side = false;
                             app.show_git_log_window = false;
                             app.show_git_commit_window = false;
+                            app.show_chat_window = false;
                             match *tab_name {
                                 "Settings" => app.show_settings = true,
                                 "Repos" => app.show_repos_window = true,
@@ -159,6 +164,9 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                                     app.git_log_entries = super::git_ops::get_git_log(
                                         std::path::Path::new(&app.base_dir),
                                     );
+                                }
+                                "Chat" => {
+                                    app.show_chat_window = true;
                                 }
                                 _ => {}
                             }
@@ -226,6 +234,8 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
         render_repos_panel(app, &mut left_ui);
     } else if app.show_debug {
         render_debug_panel(app, &mut left_ui);
+    } else if app.show_chat_window {
+        chat::render_chat_panel(app, &mut left_ui, left_w);
     } else if app.show_git_commit_window {
         render_git_commit_panel(app, &mut left_ui, row_h, char_w, left_w);
     } else if app.show_git_status_window {
@@ -445,97 +455,106 @@ fn render_fmt_error_panel(app: &mut MergeApp, ui: &mut Ui) {
     });
 }
 fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
-    ui.add_space(8.0);
-    ui.heading("Diff Settings");
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        if ui
-            .checkbox(&mut app.ignore_comments, "Ignore Comments in LCS")
-            .changed()
-        {
-            app.save_config();
-            app.recompute_match();
-            app.update_git_statuses();
-        }
-    });
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.label("Min match score to auto-apply:");
-        if ui
-            .add(Slider::new(&mut app.min_match_score, 0.0..=100.0).suffix("%"))
-            .changed()
-        {
-            app.save_config();
-        }
-    });
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.label("Min match floor (hide below):");
-        if ui
-            .add(Slider::new(&mut app.min_match_floor, 0.0..=100.0).suffix("%"))
-            .changed()
-        {
-            app.save_config();
-            app.recompute_match();
-        }
-    });
-    ui.add_space(8.0);
-    ui.heading("Formatter Settings");
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.checkbox(&mut app.format_on_save, "Format on Save");
-    });
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.label("Command:");
-        ui.add(
-            TextEdit::singleline(&mut app.fmt_command)
-                .desired_width(ui.available_width() - 80.0)
-                .hint_text("rustfmt"),
-        );
-    });
-    ui.add_space(8.0);
-    ui.label(RichText::new("Examples:").color(pal::TEXT_DIM).small());
-    ui.label(
-        RichText::new("rustfmt")
-            .color(pal::TEXT_DIM)
-            .small()
-            .monospace(),
-    );
-    ui.label(
-        RichText::new("rustfmt --edition 2021")
-            .color(pal::TEXT_DIM)
-            .small()
-            .monospace(),
-    );
-    ui.label(
-        RichText::new("cargo fmt --")
-            .color(pal::TEXT_DIM)
-            .small()
-            .monospace(),
-    );
-
-    ui.add_space(16.0);
-    ui.heading("Daemon Settings");
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        if ui
-            .checkbox(&mut app.concat_server_enabled, "Enable Concat Server")
-            .changed()
-        {
-            app.save_config();
-            if app.concat_server_enabled {
-                app.set_message(StatusMessage::info(
-                    "Concat server enabled. Restart app to fetch repos.",
-                ));
-            } else {
-                app.set_message(StatusMessage::info(
-                    "Concat server disabled. Restart app to apply.",
-                ));
-            }
-        }
-    });
+    ScrollArea::vertical()
+        .id_source("settings_scroll")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            ui.add_space(8.0);
+            ui.heading("Diff Settings");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .checkbox(&mut app.ignore_comments, "Ignore Comments in LCS")
+                    .changed()
+                {
+                    app.save_config();
+                    app.recompute_match();
+                    app.update_git_statuses();
+                }
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label("Min match score to auto-apply:");
+                if ui
+                    .add(Slider::new(&mut app.min_match_score, 0.0..=100.0).suffix("%"))
+                    .changed()
+                {
+                    app.save_config();
+                }
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Min match floor (hide below):");
+                if ui
+                    .add(Slider::new(&mut app.min_match_floor, 0.0..=100.0).suffix("%"))
+                    .changed()
+                {
+                    app.save_config();
+                    app.recompute_match();
+                }
+            });
+            ui.add_space(8.0);
+            ui.heading("Formatter Settings");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut app.format_on_save, "Format on Save");
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Command:");
+                ui.add(
+                    TextEdit::singleline(&mut app.fmt_command)
+                        .desired_width(ui.available_width() - 80.0)
+                        .hint_text("rustfmt"),
+                );
+            });
+            ui.add_space(8.0);
+            ui.label(RichText::new("Examples:").color(pal::TEXT_DIM).small());
+            ui.label(
+                RichText::new("rustfmt")
+                    .color(pal::TEXT_DIM)
+                    .small()
+                    .monospace(),
+            );
+            ui.label(
+                RichText::new("rustfmt --edition 2021")
+                    .color(pal::TEXT_DIM)
+                    .small()
+                    .monospace(),
+            );
+            ui.label(
+                RichText::new("cargo fmt --")
+                    .color(pal::TEXT_DIM)
+                    .small()
+                    .monospace(),
+            );
+            ui.add_space(16.0);
+            ui.heading("Daemon Settings");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .checkbox(&mut app.concat_server_enabled, "Enable Concat Server")
+                    .changed()
+                {
+                    app.save_config();
+                    if app.concat_server_enabled {
+                        app.set_message(StatusMessage::info(
+                            "Concat server enabled. Restart app to fetch repos.",
+                        ));
+                    } else {
+                        app.set_message(StatusMessage::info(
+                            "Concat server disabled. Restart app to apply.",
+                        ));
+                    }
+                }
+            });
+            ui.add_space(16.0);
+            ui.separator();
+            chat::render_llm_settings(app, ui);
+        });
 }
+
+// src/app/split_view.rs - Ensure this function exists after render_settings_panel
 fn render_repos_panel(app: &mut MergeApp, ui: &mut Ui) {
     ui.add_space(8.0);
     ui.horizontal(|ui| {
@@ -630,6 +649,7 @@ fn render_repos_panel(app: &mut MergeApp, ui: &mut Ui) {
             });
     }
 }
+
 fn render_debug_panel(app: &mut MergeApp, ui: &mut Ui) {
     ui.add_space(8.0);
 
