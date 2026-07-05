@@ -146,6 +146,7 @@ pub struct MergeApp {
     pub is_llm_loading: bool,
     pub llm_start_time: Option<f64>,
     pub show_system_prompt: bool,
+    pub is_llm_for_commit: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -295,6 +296,7 @@ impl MergeApp {
             is_llm_loading: false,
             llm_start_time: None,
             show_system_prompt: false,
+            is_llm_for_commit: false,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -1000,6 +1002,7 @@ impl MergeApp {
         self.is_llm_loading = false;
         self.llm_start_time = None;
         self.show_system_prompt = false;
+        self.is_llm_for_commit = false;
         self.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
         self.set_message(StatusMessage::info(
             "Welcome! Open a .md file or paste a patch to begin.",
@@ -1358,6 +1361,33 @@ impl eframe::App for MergeApp {
             }
         }
 
+        if self.is_llm_loading && self.is_llm_for_commit {
+            if let Some(receiver) = self.llm_response_receiver.take() {
+                let mut done = false;
+                while let Ok(response) = receiver.try_recv() {
+                    match response {
+                        LlmResponse::Text(text) => {
+                            self.commit_message = text;
+                            self.set_message(StatusMessage::info("AI commit message generated."));
+                        }
+                        LlmResponse::Error(err) => {
+                            self.set_message(StatusMessage::error(format!("AI Commit failed: {}", err)));
+                            done = true;
+                        }
+                        LlmResponse::Done => {
+                            done = true;
+                        }
+			
+                    }
+                }
+                if !done {
+                    self.llm_response_receiver = Some(receiver);
+                } else {
+                    self.is_llm_loading = false;
+                    self.is_llm_for_commit = false;
+                }
+            }
+        }
         if self.message.is_some() {
             if self.message_until.is_none() {
                 self.message_until = Some(ctx.input(|i| i.time) + 6.0);

@@ -102,229 +102,230 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
     });
 
     ui.add(Separator::default());
-
-    // Check for LLM response before rendering
-    let receiver = app.llm_response_receiver.take();
-    if let Some(receiver) = receiver {
-        let mut done = false;
-        while let Ok(response) = receiver.try_recv() {
-            match response {
-                LlmResponse::Text(text) => {
-                    app.chat_history.push(ChatEntry {
-                        role: "assistant".to_string(),
-                        content: text,
-                        is_error: false,
-                    });
-                    done = true;
-                    app.is_llm_loading = false;
-                }
-                LlmResponse::Error(err) => {
-                    app.chat_history.push(ChatEntry {
-                        role: "error".to_string(),
-                        content: err,
-                        is_error: true,
-                    });
-                    done = true;
-                    app.is_llm_loading = false;
-                }
-                LlmResponse::Done => {
-                    done = true;
-                    app.is_llm_loading = false;
-                }
-            }
-        }
-        if !done {
-            app.llm_response_receiver = Some(receiver);
-        }
-    }
-
-    // Chat history (log-like buffer)
-    let available_height = ui.available_height() - 50.0;
-    ScrollArea::vertical()
-        .id_source("chat_history_scroll")
-        .auto_shrink([false, false])
-        .max_height(available_height.max(100.0))
-        .stick_to_bottom(true)
-        .show(ui, |ui| {
-            if app.chat_history.is_empty() {
-                ui.add_space(20.0);
-                ui.vertical_centered(|ui| {
-                    ui.label(RichText::new("🤖 LLM Chat").color(pal::TEXT_DIM).size(16.0));
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new("Type a message and press Enter to send")
-                            .color(pal::TEXT_DIM)
-                            .small(),
-                    );
-                    ui.add_space(4.0);
-                    let hint = match app.chat_mode {
-                        ChatMode::Chat => "Chat mode: General conversation with AI",
-                        ChatMode::Commit => {
-                            "Commit mode: Describe changes to generate commit message"
-                        }
-                        ChatMode::Impl => "Impl mode: Describe what to implement",
-                    };
-                    ui.label(RichText::new(hint).color(pal::TEXT_DIM).small().italics());
-                });
-            } else {
-                let max_chars = ((panel_w - 30.0) / char_w).floor() as usize;
-                for entry in &app.chat_history {
-                    render_chat_entry(ui, entry, max_chars, &row_font);
-                }
-            }
-
-            // Loading indicator
-            if app.is_llm_loading {
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    let dots = ".".repeat(((ui.input(|i| i.time) * 2.0).floor() as usize % 4) + 1);
-                    ui.label(
-                        RichText::new(format!("Thinking{}", dots))
-                            .color(pal::ACCENT_INFO)
-                            .italics(),
-                    );
-                });
-            }
-        });
-
-    ui.add(Separator::default());
-
-    // Input area - single line for Enter to submit
-    let mut submit = false;
-    ui.horizontal(|ui| {
-        let hint_text = match app.chat_mode {
-            ChatMode::Chat => "Message... (Enter to send)",
-            ChatMode::Commit => "Describe changes... (Enter to send)",
-            ChatMode::Impl => "Describe implementation... (Enter to send)",
-        };
-
-        let text_edit = TextEdit::singleline(&mut app.chat_input)
-            .font(FontId::monospace(11.0))
-            .desired_width(panel_w - 120.0)
-            .hint_text(hint_text)
-            .text_color(pal::TEXT_NORMAL);
-
-        let response = ui.add(text_edit);
-
-        // Handle Enter key for submit
-        if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift) {
-            submit = true;
-            response.request_focus();
-        }
-
-        let send_btn = Button::new(
-            RichText::new("Send >>")
-                .color(Color32::WHITE)
-                .strong()
-                .size(11.0),
-        )
-        .fill(if app.is_llm_loading {
-            Color32::from_gray(60)
-        } else {
-            Color32::from_rgb(40, 90, 55)
-        });
-
-        if ui.add(send_btn).clicked() {
-            submit = true;
-        }
-
-        if ui
-            .add(
-                Button::new(RichText::new("Clear").color(Color32::WHITE).size(11.0))
-                    .small()
-                    .fill(Color32::from_rgb(80, 40, 40)),
-            )
-            .on_hover_text("Clear chat history")
-            .clicked()
-        {
-            app.chat_history.clear();
-        }
-    });
-
-    if submit && !app.chat_input.trim().is_empty() && !app.is_llm_loading {
-        let input = app.chat_input.trim().to_string();
-        app.chat_input.clear();
-
-        // Add user message to history
-        app.chat_history.push(ChatEntry {
-            role: "user".to_string(),
-            content: input.clone(),
-            is_error: false,
-        });
-
-        // For commit mode, prepend diff info
-        let final_input = if app.chat_mode == ChatMode::Commit {
-            let mut context = String::new();
-            if !app.git_diff_rows.is_empty() {
-                context.push_str("Current staged/working changes:\n```\n");
-                for row in &app.git_diff_rows {
-                    match row.kind {
-                        crate::diff::RowKind::Equal => {
-                            if let Some(l) = &row.left {
-                                context.push_str(&format!(" {}\n", l));
-                            }
-                        }
-                        crate::diff::RowKind::Delete => {
-                            if let Some(l) = &row.left {
-                                context.push_str(&format!("-{}\n", l));
-                            }
-                        }
-                        crate::diff::RowKind::Insert => {
-                            if let Some(l) = &row.right {
-                                context.push_str(&format!("+{}\n", l));
-                            }
-                        }
+    if !app.is_llm_for_commit {
+        let receiver = app.llm_response_receiver.take();
+        if let Some(receiver) = receiver {
+            let mut done = false;
+            while let Ok(response) = receiver.try_recv() {
+                match response {
+                    LlmResponse::Text(text) => {
+                        app.chat_history.push(ChatEntry {
+                            role: "assistant".to_string(),
+                            content: text,
+                            is_error: false,
+                        });
+                        done = true;
+                        app.is_llm_loading = false;
+                    }
+                    LlmResponse::Error(err) => {
+                        app.chat_history.push(ChatEntry {
+                            role: "error".to_string(),
+                            content: err,
+                            is_error: true,
+                        });
+                        done = true;
+                        app.is_llm_loading = false;
+                    }
+                    LlmResponse::Done => {
+                        done = true;
+                        app.is_llm_loading = false;
                     }
                 }
-                context.push_str("```\n\n");
             }
-            context.push_str(&input);
-            context
-        } else if app.chat_mode == ChatMode::Impl {
-            let mut context = String::new();
-            if !app.file_lines.is_empty() {
-                context.push_str(&format!("Current file: {}\n\n", app.file_path));
-                // Include surrounding context around cursor
-                if let Some(cursor) = app.cursor_line {
-                    let start = cursor.saturating_sub(20);
-                    let end = (cursor + 20).min(app.file_lines.len());
-                    context.push_str("Context around cursor:\n```\n");
-                    for (i, line) in app.file_lines[start..end].iter().enumerate() {
-                        let line_num = start + i + 1;
-                        let marker = if line_num == cursor + 1 { ">>" } else { "  " };
-                        context.push_str(&format!("{} {}\n", marker, line));
+            if !done {
+                app.llm_response_receiver = Some(receiver);
+            }
+        }
+        let available_height = ui.available_height() - 50.0;
+        ScrollArea::vertical()
+            .id_source("chat_history_scroll")
+            .auto_shrink([false, false])
+            .max_height(available_height.max(100.0))
+            .stick_to_bottom(true)
+            .show(ui, |ui| {
+                if app.chat_history.is_empty() {
+                    ui.add_space(20.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new("🤖 LLM Chat").color(pal::TEXT_DIM).size(16.0));
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new("Type a message and press Enter to send")
+                                .color(pal::TEXT_DIM)
+                                .small(),
+                        );
+                        ui.add_space(4.0);
+                        let hint = match app.chat_mode {
+                            ChatMode::Chat => "Chat mode: General conversation with AI",
+                            ChatMode::Commit => {
+                                "Commit mode: Describe changes to generate commit message"
+                            }
+                            ChatMode::Impl => "Impl mode: Describe what to implement",
+                        };
+                        ui.label(RichText::new(hint).color(pal::TEXT_DIM).small().italics());
+                    });
+                } else {
+                    let max_chars = ((panel_w - 30.0) / char_w).floor() as usize;
+                    for entry in &app.chat_history {
+                        render_chat_entry(ui, entry, max_chars, &row_font);
+                    }
+                }
+
+                // Loading indicator
+                if app.is_llm_loading {
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        let dots =
+                            ".".repeat(((ui.input(|i| i.time) * 2.0).floor() as usize % 4) + 1);
+                        ui.label(
+                            RichText::new(format!("Thinking{}", dots))
+                                .color(pal::ACCENT_INFO)
+                                .italics(),
+                        );
+                    });
+                }
+            });
+
+        ui.add(Separator::default());
+
+        // Input area - single line for Enter to submit
+        let mut submit = false;
+        ui.horizontal(|ui| {
+            let hint_text = match app.chat_mode {
+                ChatMode::Chat => "Message... (Enter to send)",
+                ChatMode::Commit => "Describe changes... (Enter to send)",
+                ChatMode::Impl => "Describe implementation... (Enter to send)",
+            };
+
+            let text_edit = TextEdit::singleline(&mut app.chat_input)
+                .font(FontId::monospace(11.0))
+                .desired_width(panel_w - 120.0)
+                .hint_text(hint_text)
+                .text_color(pal::TEXT_NORMAL);
+
+            let response = ui.add(text_edit);
+
+            // Handle Enter key for submit
+            if response.lost_focus()
+                && ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift)
+            {
+                submit = true;
+                response.request_focus();
+            }
+
+            let send_btn = Button::new(
+                RichText::new("Send >>")
+                    .color(Color32::WHITE)
+                    .strong()
+                    .size(11.0),
+            )
+            .fill(if app.is_llm_loading {
+                Color32::from_gray(60)
+            } else {
+                Color32::from_rgb(40, 90, 55)
+            });
+
+            if ui.add(send_btn).clicked() {
+                submit = true;
+            }
+
+            if ui
+                .add(
+                    Button::new(RichText::new("Clear").color(Color32::WHITE).size(11.0))
+                        .small()
+                        .fill(Color32::from_rgb(80, 40, 40)),
+                )
+                .on_hover_text("Clear chat history")
+                .clicked()
+            {
+                app.chat_history.clear();
+            }
+        });
+
+        if submit && !app.chat_input.trim().is_empty() && !app.is_llm_loading {
+            let input = app.chat_input.trim().to_string();
+            app.chat_input.clear();
+
+            // Add user message to history
+            app.chat_history.push(ChatEntry {
+                role: "user".to_string(),
+                content: input.clone(),
+                is_error: false,
+            });
+
+            // For commit mode, prepend diff info
+            let final_input = if app.chat_mode == ChatMode::Commit {
+                let mut context = String::new();
+                if !app.git_diff_rows.is_empty() {
+                    context.push_str("Current staged/working changes:\n```\n");
+                    for row in &app.git_diff_rows {
+                        match row.kind {
+                            crate::diff::RowKind::Equal => {
+                                if let Some(l) = &row.left {
+                                    context.push_str(&format!(" {}\n", l));
+                                }
+                            }
+                            crate::diff::RowKind::Delete => {
+                                if let Some(l) = &row.left {
+                                    context.push_str(&format!("-{}\n", l));
+                                }
+                            }
+                            crate::diff::RowKind::Insert => {
+                                if let Some(l) = &row.right {
+                                    context.push_str(&format!("+{}\n", l));
+                                }
+                            }
+                        }
                     }
                     context.push_str("```\n\n");
                 }
-            }
-            context.push_str(&input);
-            context
-        } else {
-            input
-        };
+                context.push_str(&input);
+                context
+            } else if app.chat_mode == ChatMode::Impl {
+                let mut context = String::new();
+                if !app.file_lines.is_empty() {
+                    context.push_str(&format!("Current file: {}\n\n", app.file_path));
+                    // Include surrounding context around cursor
+                    if let Some(cursor) = app.cursor_line {
+                        let start = cursor.saturating_sub(20);
+                        let end = (cursor + 20).min(app.file_lines.len());
+                        context.push_str("Context around cursor:\n```\n");
+                        for (i, line) in app.file_lines[start..end].iter().enumerate() {
+                            let line_num = start + i + 1;
+                            let marker = if line_num == cursor + 1 { ">>" } else { "  " };
+                            context.push_str(&format!("{} {}\n", marker, line));
+                        }
+                        context.push_str("```\n\n");
+                    }
+                }
+                context.push_str(&input);
+                context
+            } else {
+                input
+            };
 
-        // Build messages from history (exclude errors, include last user message with context)
-        let mut messages: Vec<ChatMessage> = app
-            .chat_history
-            .iter()
-            .filter(|e| e.role == "user" || e.role == "assistant")
-            .map(|e| ChatMessage {
-                role: e.role.clone(),
-                content: e.content.clone(),
-            })
-            .collect();
+            // Build messages from history (exclude errors, include last user message with context)
+            let mut messages: Vec<ChatMessage> = app
+                .chat_history
+                .iter()
+                .filter(|e| e.role == "user" || e.role == "assistant")
+                .map(|e| ChatMessage {
+                    role: e.role.clone(),
+                    content: e.content.clone(),
+                })
+                .collect();
 
-        // Replace the last user message with the context-enriched version
-        if let Some(last) = messages.last_mut() {
-            if last.role == "user" {
-                last.content = final_input;
+            // Replace the last user message with the context-enriched version
+            if let Some(last) = messages.last_mut() {
+                if last.role == "user" {
+                    last.content = final_input;
+                }
             }
-        }
 
             let provider = app.current_chat_provider().clone();
             let system_prompt = app.active_system_prompt();
             app.llm_response_receiver = Some(llm::send_to_llm(provider, messages, system_prompt));
-        app.is_llm_loading = true;
+            app.is_llm_loading = true;
+        }
     }
 }
 
@@ -442,46 +443,50 @@ pub fn render_llm_settings(app: &mut MergeApp, ui: &mut Ui) {
         &providers,
     );
 
-        ui.add_space(16.0);
-        ui.separator();
-        ui.add_space(8.0);
-        ui.heading("Custom System Prompts");
-        ui.add_space(4.0);
-        ui.label(RichText::new("Leave empty to use built-in defaults.").color(pal::TEXT_DIM).small());
-        ui.add_space(8.0);
-        
-        ui.label(RichText::new("Chat Prompt:").strong());
-        ui.add(
-            TextEdit::multiline(&mut app.llm_config.chat_system_prompt)
-                .desired_rows(3)
-                .hint_text("Default: Helpful assistant...")
-                .font(FontId::monospace(10.0)),
-        );
-        ui.add_space(8.0);
+    ui.add_space(16.0);
+    ui.separator();
+    ui.add_space(8.0);
+    ui.heading("Custom System Prompts");
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new("Leave empty to use built-in defaults.")
+            .color(pal::TEXT_DIM)
+            .small(),
+    );
+    ui.add_space(8.0);
 
-        ui.label(RichText::new("Commit Prompt:").strong());
-        ui.add(
-            TextEdit::multiline(&mut app.llm_config.commit_system_prompt)
-                .desired_rows(3)
-                .hint_text("Default: Generate conventional commit message...")
-                .font(FontId::monospace(10.0)),
-        );
-        ui.add_space(8.0);
+    ui.label(RichText::new("Chat Prompt:").strong());
+    ui.add(
+        TextEdit::multiline(&mut app.llm_config.chat_system_prompt)
+            .desired_rows(3)
+            .hint_text("Default: Helpful assistant...")
+            .font(FontId::monospace(10.0)),
+    );
+    ui.add_space(8.0);
 
-        ui.label(RichText::new("Impl Prompt:").strong());
-        ui.add(
-            TextEdit::multiline(&mut app.llm_config.impl_system_prompt)
-                .desired_rows(3)
-                .hint_text("Default: Code implementation assistant...")
-                .font(FontId::monospace(10.0)),
-        );
-        
-        ui.add_space(16.0);
-        if ui.button("💾 Save LLM Config").clicked() {
-            app.save_config();
-            app.set_message(super::types::StatusMessage::success("LLM config saved"));
-        }
+    ui.label(RichText::new("Commit Prompt:").strong());
+    ui.add(
+        TextEdit::multiline(&mut app.llm_config.commit_system_prompt)
+            .desired_rows(3)
+            .hint_text("Default: Generate conventional commit message...")
+            .font(FontId::monospace(10.0)),
+    );
+    ui.add_space(8.0);
+
+    ui.label(RichText::new("Impl Prompt:").strong());
+    ui.add(
+        TextEdit::multiline(&mut app.llm_config.impl_system_prompt)
+            .desired_rows(3)
+            .hint_text("Default: Code implementation assistant...")
+            .font(FontId::monospace(10.0)),
+    );
+
+    ui.add_space(16.0);
+    if ui.button("💾 Save LLM Config").clicked() {
+        app.save_config();
+        app.set_message(super::types::StatusMessage::success("LLM config saved"));
     }
+}
 
 fn render_provider_config(
     ui: &mut Ui,

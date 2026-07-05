@@ -1,3 +1,4 @@
+use super::llm::{self, ChatMessage};
 use super::matching::MergeMatching;
 use super::palette::pal;
 use super::state::MergeApp;
@@ -1121,6 +1122,69 @@ pub fn render_git_commit_panel(
         }
         if ui.button("🗑 Clear").clicked() {
             app.commit_message.clear();
+        }
+        let ai_btn = Button::new("AI Commit")
+            .fill(if app.is_llm_loading { Color32::from_gray(60) } else { Color32::from_rgb(40, 90, 55) });
+        if ui.add_enabled(!app.is_llm_loading, ai_btn).clicked() {
+            let recent_commits = app.git_log_entries.iter().take(5).map(|e| format!("- {}", e.message)).collect::<Vec<String>>().join("\n");
+            
+            let diff = std::process::Command::new("git")
+                .args(["diff", "--staged"])
+                .current_dir(&app.base_dir)
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                .unwrap_or_default();
+
+            let diff = if diff.trim().is_empty() {
+                std::process::Command::new("git")
+                    .args(["diff"])
+                    .current_dir(&app.base_dir)
+                    .output()
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                    .unwrap_or_default()
+            } else {
+                diff
+            };
+
+            let (system_prompt, user_msg) = if app.llm_config.commit_system_prompt.is_empty() {
+                let prompt = format!(
+                    "Generate a git commit message following this structure no explanation just the core:\n\
+1. First line: conventional commit format (type: concise description) (use semantic types like feat, fix, docs, style, refactor, perf, test, chore, etc.).\n\
+2. Optional bullet points if necessary:\n\
+   - Keep the second line blank\n\
+   - Keep them short and direct\n\
+   - Focus on what changed\n\
+   - Avoid overly formal or fluffy language\n\
+Examples:\n\
+feat: add user auth system\n\
+<empty line>\n\
+- Add JWT tokens for API auth\n\
+- Handle token refresh for long sessions\n\
+fix: resolve memory leak in worker pool\n\
+- Clean up idle connections\n\
+- Add timeout for stale workers\n\
+Simple change example:\n\
+fix: typo in README.md\n\
+Your message must be based on the provided git diff, with a bit of styling from recent commits.\n\
+Recent commits for reference:\n{}\n\
+Git diff:\n{}", recent_commits, diff
+                );
+                (Some(super::chat::ChatMode::Commit.system_prompt()), prompt)
+            } else {
+                let prompt = format!("Recent commits for reference:\n{}\n\nGit diff:\n{}", recent_commits, diff);
+                (Some(app.llm_config.commit_system_prompt.clone()), prompt)
+            };
+
+            let messages = vec![ChatMessage {
+                role: "user".to_string(),
+                content: user_msg,
+            }];
+            let provider = app.llm_config.commit_provider.clone();
+            app.llm_response_receiver = Some(llm::send_to_llm(provider, messages, system_prompt));
+            app.is_llm_loading = true;
+            app.is_llm_for_commit = true;
         }
     });
     ui.add_space(10.0);
