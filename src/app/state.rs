@@ -881,6 +881,86 @@ impl MergeApp {
         }
     }
 
+    pub fn go_home(&mut self) {
+        self.patch_text.clear();
+        self.hunks.clear();
+        self.current_hunk = 0;
+        self.file_text.clear();
+        self.file_lines.clear();
+        self.file_path.clear();
+        self.base_dir = self.start_pwd.clone();
+        self.match_result = None;
+        self.search_rows.clear();
+        self.file_search_query.clear();
+        self.search_matches.clear();
+        self.search_match_idx = 0;
+        self.is_searching = false;
+        self.candidate_index = 0;
+        self.scroll_to_match = false;
+        self.cursor_line = None;
+        self.cursor_col = 0;
+        self.applied_hunks.clear();
+        self.merged_range = None;
+        self.history.clear();
+        self.vim_buffer.clear();
+        self.yanked_line = None;
+        self.d_pending = false;
+        self.last_action = None;
+        self.show_manual_paste = false;
+        self.manual_paste_text.clear();
+        self.initial_patch_path = None;
+        self.file_states.clear();
+        self.show_help = false;
+        self.show_debug = false;
+        self.left_selection = None;
+        self.right_selection = None;
+        self.right_drag_anchor = None;
+        self.file_drag_selection = None;
+        self.file_drag_anchor = None;
+        self.file_anchors.clear();
+        self.mark_pending = None;
+        self.git_statuses.clear();
+        self.git_diff_rows.clear();
+        self.git_hunks.clear();
+        self.show_git_diff_window = false;
+        self.show_git_diff_side = false;
+        self.show_git_status_window = false;
+        self.show_git_log_window = false;
+        self.show_repos_window = false;
+        self.show_settings = false;
+        self.show_fmt_error = false;
+        self.fmt_error = None;
+        self.filter_low_matches = false;
+        self.sync_anchors.clear();
+        self.pending_sync = None;
+        self.pending_line_actions.clear();
+        self.del_start = None;
+        self.del_end = None;
+        self.is_visual_mode = false;
+        self.visual_start = None;
+        self.is_insert_mode = false;
+        self.insert_cursor = 0;
+        self.git_changed_files.clear();
+        self.git_changed_file_idx = 0;
+        self.git_diff_cursor = None;
+        self.git_diff_vim_buffer.clear();
+        self.git_diff_scroll_to_cursor = false;
+        self.git_diff_insert_mode = false;
+        self.diff_side_hunk_idx = 0;
+        self.diff_side_scroll_target = None;
+        self.diff_side_left_selection = None;
+        self.diff_side_right_selection = None;
+        self.diff_side_left_drag_anchor = None;
+        self.diff_side_right_drag_anchor = None;
+        self.diff_side_insert_anchor = None;
+        self.anchor_link_source = None;
+        self.anchor_link_target = None;
+        self.git_log_entries =
+            super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
+        self.set_message(StatusMessage::info(
+            "Welcome! Open a .md file or paste a patch to begin.",
+        ));
+    }
     pub fn save_config(&self) {
         let config = AppConfig {
             format_on_save: self.format_on_save,

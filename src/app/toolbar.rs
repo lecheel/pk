@@ -22,6 +22,13 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                         .strong()
                         .monospace(),
                 );
+                if ui
+                    .button(RichText::new("🏠").size(14.0))
+                    .on_hover_text("Home — reset to blank start state")
+                    .clicked()
+                {
+                    app.go_home();
+                }
                 ui.add(Separator::default().vertical().spacing(12.0));
                 if ui.button("Open Patch…").clicked() {
                     if let Some(path) = rfd::FileDialog::new()
