@@ -110,11 +110,15 @@ pub fn render_status_bar(app: &mut MergeApp, ctx: &Context) {
                                 .size(13.0),
                         );
                         ui.add(Separator::default().vertical());
-                        
+
                         for mode in [ChatMode::Impl, ChatMode::Commit, ChatMode::Chat] {
                             let is_active = app.chat_mode == mode;
                             let rich_text = RichText::new(mode.short_label())
-                                .color(if is_active { mode.color() } else { pal::TEXT_DIM })
+                                .color(if is_active {
+                                    mode.color()
+                                } else {
+                                    pal::TEXT_DIM
+                                })
                                 .strong()
                                 .size(13.0);
                             if ui.selectable_label(is_active, rich_text).clicked() {
@@ -125,6 +129,28 @@ pub fn render_status_bar(app: &mut MergeApp, ctx: &Context) {
 
                         ui.label(
                             RichText::new("Chat Tab:")
+                                .color(pal::TEXT_DIM)
+                                .monospace()
+                                .size(13.0),
+                        );
+                    });
+                }
+
+                if app.show_git_diff_side {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new("l: next hunk  L: prev hunk")
+                                .color(pal::TEXT_DIM)
+                                .monospace()
+                                .size(13.0),
+                        );
+                    });
+                }
+
+                if app.show_git_status_window {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new("c: stage all & commit  s: toggle staged  z: stash")
                                 .color(pal::TEXT_DIM)
                                 .monospace()
                                 .size(13.0),

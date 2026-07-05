@@ -1371,13 +1371,15 @@ impl eframe::App for MergeApp {
                             self.set_message(StatusMessage::info("AI commit message generated."));
                         }
                         LlmResponse::Error(err) => {
-                            self.set_message(StatusMessage::error(format!("AI Commit failed: {}", err)));
+                            self.set_message(StatusMessage::error(format!(
+                                "AI Commit failed: {}",
+                                err
+                            )));
                             done = true;
                         }
                         LlmResponse::Done => {
                             done = true;
                         }
-			
                     }
                 }
                 if !done {
