@@ -801,12 +801,7 @@ pub fn render_git_status_panel(
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
             ui.painter().rect_filled(sep_rect, 0.0, pal::SEPARATOR);
             if untracked.is_empty() {
-                ui.label(
-                    RichText::new("    (none)")
-                        .color(pal::TEXT_DIM)
-                        .monospace()
-                        .small(),
-                );
+                ui.label(RichText::new("    (none)").color(pal::TEXT_DIM).monospace());
             } else {
                 for path in &untracked {
                     let is_selected =
@@ -851,8 +846,7 @@ pub fn render_git_status_panel(
                     ui.label(
                         RichText::new("    (no branches)")
                             .color(pal::TEXT_DIM)
-                            .monospace()
-                            .small(),
+                            .monospace(),
                     );
                 } else {
                     for b in &branches {
@@ -874,9 +868,7 @@ pub fn render_git_status_panel(
                                 name_text
                             });
                             ui.label(
-                                RichText::new(format_relative_time(b.time))
-                                    .color(pal::TEXT_DIM)
-                                    .small(),
+                                RichText::new(format_relative_time(b.time)).color(pal::TEXT_DIM),
                             );
                         });
                     }
@@ -899,19 +891,13 @@ pub fn render_git_status_panel(
                 Vec::new()
             };
             if stashes.is_empty() {
-                ui.label(
-                    RichText::new("    (none)")
-                        .color(pal::TEXT_DIM)
-                        .monospace()
-                        .small(),
-                );
+                ui.label(RichText::new("    (none)").color(pal::TEXT_DIM).monospace());
             } else {
                 for s in &stashes {
                     ui.label(
                         RichText::new(format!("    {}", s))
                             .color(pal::TEXT_NORMAL)
-                            .monospace()
-                            .small(),
+                            .monospace(),
                     );
                 }
             }
@@ -954,12 +940,7 @@ fn render_status_section(
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
     ui.painter().rect_filled(sep_rect, 0.0, pal::SEPARATOR);
     if items.is_empty() {
-        ui.label(
-            RichText::new("    (none)")
-                .color(pal::TEXT_DIM)
-                .monospace()
-                .small(),
-        );
+        ui.label(RichText::new("    (none)").color(pal::TEXT_DIM).monospace());
     } else {
         for (path, status_char, additions, deletions) in items {
             let is_selected = app.git_status_selected_path.as_deref() == Some(path.as_str());
@@ -1084,8 +1065,7 @@ pub fn render_git_commit_panel(
                 "📝 Staged files to commit ({}):",
                 staged_files.len()
             ))
-            .color(pal::TEXT_DIM)
-            .small(),
+            .color(pal::TEXT_DIM),
         );
         ui.add_space(2.0);
         ScrollArea::vertical()
@@ -1097,19 +1077,14 @@ pub fn render_git_commit_panel(
                     ui.label(
                         RichText::new(format!("• {}", path))
                             .color(pal::TEXT_NORMAL)
-                            .monospace()
-                            .small(),
+                            .monospace(),
                     );
                 }
             });
         ui.add_space(8.0);
     }
 
-    ui.label(
-        RichText::new("Commit message:")
-            .color(pal::TEXT_DIM)
-            .small(),
-    );
+    ui.label(RichText::new("Commit message:").color(pal::TEXT_DIM));
     ui.add_space(2.0);
     ScrollArea::vertical()
         .id_source("git_commit_tab_msg_scroll")
@@ -1197,11 +1172,7 @@ Git diff:\n{}", recent_commits, diff
     ui.add_space(10.0);
     ui.separator();
     ui.add_space(6.0);
-    ui.label(
-        RichText::new("Recent commits:")
-            .color(pal::TEXT_DIM)
-            .small(),
-    );
+    ui.label(RichText::new("Recent commits:").color(pal::TEXT_DIM));
     ui.add_space(2.0);
     ScrollArea::vertical()
         .id_source("git_commit_tab_log_scroll")
@@ -1212,14 +1183,12 @@ Git diff:\n{}", recent_commits, diff
                     ui.label(
                         RichText::new(&entry.hash)
                             .color(Color32::from_rgb(200, 150, 250))
-                            .monospace()
-                            .small(),
+                            .monospace(),
                     );
                     ui.label(
                         RichText::new(MergeApp::truncate_owned(&entry.message, 60))
                             .color(pal::TEXT_NORMAL)
-                            .monospace()
-                            .small(),
+                            .monospace(),
                     );
                 });
             }
