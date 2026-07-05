@@ -1,3 +1,6 @@
+mod app_actions;
+mod app_init;
+mod app_loop;
 mod aux_panels;
 mod chat;
 mod clipboard_utils;
@@ -6,6 +9,7 @@ mod constants;
 mod daemon;
 mod editing;
 mod file_panel;
+mod git_actions;
 mod git_diff_side;
 mod git_ops;
 mod git_panels;
