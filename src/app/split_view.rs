@@ -235,6 +235,52 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
     } else if app.show_debug {
         render_debug_panel(app, &mut left_ui);
     } else if app.show_chat_window {
+        if app.show_system_prompt {
+            if let Some(prompt) = app.chat_mode.system_prompt() {
+                let mode_color = app.chat_mode.color();
+                let mode_label = app.chat_mode.short_label();
+                let mut close_prompt = false;
+                Frame::none()
+                    .fill(Color32::from_rgb(20, 28, 40))
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(50, 70, 100)))
+                    .rounding(4.0)
+                    .inner_margin(Margin::symmetric(10.0, 6.0))
+                    .show(&mut left_ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(format!("🤖 {} System Prompt:", mode_label))
+                                    .color(mode_color)
+                                    .strong()
+                                    .monospace()
+                                    .size(11.0),
+                            );
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.add(Button::new(RichText::new("✕").color(pal::TEXT_DIM).small()).frame(false)).clicked() {
+                                    close_prompt = true;
+                                }
+                            });
+                        });
+                        ui.add_space(2.0);
+                        ScrollArea::vertical()
+                            .id_source("left_panel_prompt_scroll")
+                            .max_height(120.0)
+                            .show(ui, |ui| {
+                                ui.label(
+                                    RichText::new(&prompt)
+                                        .color(pal::TEXT_NORMAL)
+                                        .monospace()
+                                        .size(11.0),
+                                );
+                            });
+                    });
+                left_ui.add(Separator::default());
+                if close_prompt {
+                    app.show_system_prompt = false;
+                }
+            } else {
+                app.show_system_prompt = false;
+            }
+        }
         chat::render_chat_panel(app, &mut left_ui, left_w);
     } else if app.show_git_commit_window {
         render_git_commit_panel(app, &mut left_ui, row_h, char_w, left_w);

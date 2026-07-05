@@ -144,6 +144,7 @@ pub struct MergeApp {
     pub llm_config: LlmConfig,
     pub llm_response_receiver: Option<mpsc::Receiver<LlmResponse>>,
     pub is_llm_loading: bool,
+    pub show_system_prompt: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -291,6 +292,7 @@ impl MergeApp {
             llm_config: config.llm_config.clone(),
             llm_response_receiver: None,
             is_llm_loading: false,
+            show_system_prompt: false,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -994,6 +996,7 @@ impl MergeApp {
         self.chat_input.clear();
         self.llm_response_receiver = None;
         self.is_llm_loading = false;
+        self.show_system_prompt = false;
         self.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
         self.set_message(StatusMessage::info(
             "Welcome! Open a .md file or paste a patch to begin.",

@@ -135,7 +135,8 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                 }
                 ui.add(Separator::default().vertical().spacing(12.0));
                 let has_unsaved = !app.history.is_empty();
-                let any_unsaved = has_unsaved || app.file_states.values().any(|f| !f.history.is_empty());
+                let any_unsaved =
+                    has_unsaved || app.file_states.values().any(|f| !f.history.is_empty());
                 ui.add_enabled_ui(has_unsaved, |ui| {
                     if ui
                         .button(RichText::new("💾 Save").color(if has_unsaved {
@@ -173,6 +174,39 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                 }
                 if ui.button("?").on_hover_text("Keyboard shortcuts").clicked() {
                     app.show_help = !app.show_help;
+                }
+                ui.add(Separator::default().vertical().spacing(12.0));
+                let has_prompt = app.chat_mode.system_prompt().is_some();
+                let prompt_btn_color = if app.show_system_prompt {
+                    app.chat_mode.color()
+                } else if has_prompt {
+                    pal::TEXT_DIM
+                } else {
+                    Color32::from_gray(40)
+                };
+                if ui
+                    .button(
+                        RichText::new(format!("🤖 {}", app.chat_mode.short_label()))
+                            .color(prompt_btn_color)
+                            .size(12.0),
+                    )
+                    .on_hover_text(if has_prompt {
+                        format!(
+                            "Show/hide {} system prompt (current LLM instruction context)",
+                            app.chat_mode.short_label()
+                        )
+                    } else {
+                        "No system prompt for Chat mode — switch to Commit or Impl".to_string()
+                    })
+                    .clicked()
+                {
+                    if has_prompt {
+                        app.show_system_prompt = !app.show_system_prompt;
+                    } else {
+                        app.set_message(StatusMessage::info(
+                            "No system prompt in Chat mode. Try Commit or Impl mode.",
+                        ));
+                    }
                 }
             });
         });
