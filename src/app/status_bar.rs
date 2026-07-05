@@ -157,6 +157,17 @@ pub fn render_status_bar(app: &mut MergeApp, ctx: &Context) {
                         );
                     });
                 }
+
+                if app.show_git_log_window {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new("c: copy files  d: copy diff")
+                                .color(pal::TEXT_DIM)
+                                .monospace()
+                                .size(13.0),
+                        );
+                    });
+                }
             });
         });
 }

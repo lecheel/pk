@@ -115,7 +115,7 @@ pub fn render_git_log_panel(
             ui.painter().text(
                 Pos2::new(rect.left() + 8.0, rect.center().y),
                 Align2::LEFT_CENTER,
-                "📜 GIT LOG  ·  ↑/↓ or j/k navigate  ·  c=copy files  d=copy diff  ·  ESC to close",
+                "📜 GIT LOG",
                 FontId::monospace(11.0),
                 Color32::from_rgb(180, 130, 230),
             );
