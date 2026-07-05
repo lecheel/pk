@@ -296,7 +296,7 @@ impl MergeApp {
 
         if !loaded_patch {
             app.set_message(StatusMessage::info(
-                "Welcome! Open a .md file or paste a patch to begin.",
+                "Welcome! Open a .md file or paste a patch to begin. (F1 git status) (F4 git log)",
             ));
         }
         app.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&app.base_dir));
@@ -959,7 +959,7 @@ impl MergeApp {
         self.anchor_link_target = None;
         self.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
         self.set_message(StatusMessage::info(
-            "Welcome! Open a .md file or paste a patch to begin.",
+            "Welcome! Open a .md file or paste a patch to begin. (F1 git status) (F4 git log)",
         ));
     }
     pub fn save_config(&self) {
