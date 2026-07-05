@@ -1016,14 +1016,27 @@ fn render_status_section(
 fn stage_all_and_open_commit(app: &mut MergeApp) {
     if let Ok(repo) = git2::Repository::discover(&app.base_dir) {
         if let Ok(mut index) = repo.index() {
-            let _ = index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None);
+            let mut opts = git2::StatusOptions::new();
+            opts.include_untracked(true);
+            if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
+                for entry in statuses.iter() {
+                    if let Some(path) = entry.path() {
+                        let status = entry.status();
+                        // Skip untracked files (wt_new and not index_new)
+                        let is_untracked = status.is_wt_new() && !status.is_index_new();
+                        if !is_untracked {
+                            let _ = index.add_path(std::path::Path::new(path));
+                        }
+                    }
+                }
+            }
             let _ = index.write();
         }
     }
     app.show_git_status_window = false;
     app.show_git_commit_window = true;
     app.set_message(super::types::StatusMessage::info(
-        "Staged all changes — write your commit message",
+        "Staged all tracked changes — write your commit message",
     ));
 }
 
@@ -1042,6 +1055,47 @@ pub fn render_git_commit_panel(
             .monospace(),
     );
     ui.add_space(8.0);
+    
+    let mut staged_files: Vec<String> = Vec::new();
+    if let Ok(repo) = git2::Repository::discover(&app.base_dir) {
+        let mut opts = git2::StatusOptions::new();
+        opts.include_untracked(false);
+        if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
+            for entry in statuses.iter() {
+                if let Some(path) = entry.path() {
+                    let status = entry.status();
+                    if status.is_index_new() || status.is_index_modified() || status.is_index_deleted() || status.is_index_renamed() {
+                        staged_files.push(path.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    if !staged_files.is_empty() {
+        ui.label(
+            RichText::new(format!("📝 Staged files to commit ({}):", staged_files.len()))
+                .color(pal::TEXT_DIM)
+                .small(),
+        );
+        ui.add_space(2.0);
+        ScrollArea::vertical()
+            .id_source("git_commit_files_scroll")
+            .max_height(120.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                for path in &staged_files {
+                    ui.label(
+                        RichText::new(format!("• {}", path))
+                            .color(pal::TEXT_NORMAL)
+                            .monospace()
+                            .small(),
+                    );
+                }
+            });
+        ui.add_space(8.0);
+    }
+
     ui.label(
         RichText::new("Commit message:")
             .color(pal::TEXT_DIM)
