@@ -1147,6 +1147,20 @@ impl eframe::App for MergeApp {
             self.show_git_log_window = false;
             self.show_git_status_window = !self.show_git_status_window;
         }
+        if ctx.input(|i| i.key_pressed(Key::F7)) {
+            self.show_fmt_error = false;
+            self.show_settings = false;
+            self.show_repos_window = false;
+            self.show_debug = false;
+            self.show_git_diff_window = false;
+            self.show_git_diff_side = false;
+            self.show_git_status_window = false;
+            self.show_git_log_window = !self.show_git_log_window;
+            if self.show_git_log_window {
+                self.git_log_entries =
+                    super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
+            }
+        }
 
         if !ctx.wants_keyboard_input() || self.is_searching {
             ctx.input(|i| {
