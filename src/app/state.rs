@@ -133,6 +133,7 @@ pub struct MergeApp {
     pub anchor_link_target: Option<Pos2>,
     pub git_status_selected_idx: Option<usize>,
     pub show_commit_prompt: bool,
+    pub show_git_commit_window: bool,
     pub commit_message: String,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -269,6 +270,7 @@ impl MergeApp {
             anchor_link_source: None,
             anchor_link_target: None,
             show_commit_prompt: false,
+            show_git_commit_window: false,
             commit_message: String::new(),
             git_status_selected_idx: None,
         };
@@ -966,6 +968,7 @@ impl MergeApp {
         self.git_status_selected_idx = None;
         self.show_commit_prompt = false;
         self.commit_message.clear();
+        self.show_git_commit_window = false;
         self.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
         self.set_message(StatusMessage::info(
             "Welcome! Open a .md file or paste a patch to begin.",
@@ -1321,6 +1324,7 @@ impl eframe::App for MergeApp {
             self.show_git_diff_window = false;
             self.show_git_diff_side = false;
             self.show_git_log_window = false;
+            self.show_git_commit_window = false;
             self.show_git_status_window = !self.show_git_status_window;
         }
         if ctx.input(|i| i.key_pressed(Key::F4)) {
@@ -1355,6 +1359,8 @@ impl eframe::App for MergeApp {
                         self.show_git_status_window = false;
                     } else if self.show_git_log_window {
                         self.show_git_log_window = false;
+                    } else if self.show_git_commit_window {
+                        self.show_git_commit_window = false;
                     } else if self.is_searching {
                         self.is_searching = false;
                         self.file_search_query.clear();

@@ -1,8 +1,8 @@
 use super::clipboard_utils::{get_clipboard_text, parse_clipboard_patch};
 use super::git_ops::GitStatus;
 use super::git_panels::{
-    render_git_commit_detail_panel, render_git_diff_panel, render_git_log_panel,
-    render_git_status_panel,
+    render_git_commit_detail_panel, render_git_commit_panel, render_git_diff_panel,
+    render_git_log_panel, render_git_status_panel,
 };
 use super::matching::MergeMatching;
 use super::palette::pal;
@@ -76,6 +76,8 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         "Git Diff"
                     } else if app.show_git_log_window {
                         "Git Log"
+                    } else if app.show_git_commit_window {
+                        "Git Commit"
                     } else {
                         "Search"
                     };
@@ -90,6 +92,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                             "Git Diff Side",
                             Color32::from_rgb(100, 210, 220),
                         ),
+                        ("💾 Commit", "Git Commit", Color32::from_rgb(230, 200, 120)),
                         ("📜 Log", "Git Log", Color32::from_rgb(180, 130, 230)),
                         ("📂 Repos", "Repos", Color32::from_rgb(120, 230, 160)),
                         ("⚙ Config", "Settings", Color32::from_rgb(120, 180, 255)),
@@ -137,6 +140,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                             app.show_git_diff_window = false;
                             app.show_git_diff_side = false;
                             app.show_git_log_window = false;
+                            app.show_git_commit_window = false;
                             match *tab_name {
                                 "Settings" => app.show_settings = true,
                                 "Repos" => app.show_repos_window = true,
@@ -146,6 +150,9 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                                 "Git Diff Side" => {
                                     app.show_git_diff_side = true;
                                     app.refresh_git_changed_files();
+                                }
+                                "Git Commit" => {
+                                    app.show_git_commit_window = true;
                                 }
                                 "Git Log" => {
                                     app.show_git_log_window = true;
@@ -219,6 +226,8 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
         render_repos_panel(app, &mut left_ui);
     } else if app.show_debug {
         render_debug_panel(app, &mut left_ui);
+    } else if app.show_git_commit_window {
+        render_git_commit_panel(app, &mut left_ui, row_h, char_w, left_w);
     } else if app.show_git_status_window {
         render_git_status_panel(app, &mut left_ui, row_h, char_w, left_w);
     } else if app.show_git_diff_window {
@@ -3890,7 +3899,10 @@ fn render_file_panel(
                             let min = start.min(end);
                             let max = start.max(end);
                             let count = max - min + 1;
-                            if ui.button(format!("Delete Block ({} lines)", count)).clicked() {
+                            if ui
+                                .button(format!("Delete Block ({} lines)", count))
+                                .clicked()
+                            {
                                 perform_block_delete = Some((min, max));
                                 ui.close_menu();
                             }
