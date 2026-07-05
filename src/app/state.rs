@@ -3,7 +3,7 @@ use super::clipboard_utils::get_clipboard_text;
 use super::config::AppConfig;
 use super::daemon::{self, RepoInfo};
 use super::git_ops::GitStatus;
-use super::llm::{LlmConfig, LlmProvider, LlmResponse};
+use super::llm::{LlmConfig, LlmResponse};
 use super::matching::MergeMatching;
 use super::types::{Action, FileAnchor, FileState, StatusMessage};
 use crate::app::pal;
@@ -999,7 +999,7 @@ impl MergeApp {
             "Welcome! Open a .md file or paste a patch to begin.",
         ));
     }
-    pub fn current_chat_provider(&self) -> &LlmProvider {
+    pub fn current_chat_provider(&self) -> &super::llm::LlmProvider {
         match self.chat_mode {
             ChatMode::Chat => &self.llm_config.chat_provider,
             ChatMode::Commit => &self.llm_config.commit_provider,

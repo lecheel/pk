@@ -1,99 +1,119 @@
-// src/app/llm.rs
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::mpsc;
+use std::time::Duration;
+
+fn default_api_type() -> String {
+    "ollama".to_string()
+}
+fn default_num_ctx() -> u64 {
+    4096
+}
+fn default_timeout() -> u64 {
+    120
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum LlmProvider {
-    OpenAi {
-        api_key: String,
-        model: String,
-        base_url: Option<String>,
-    },
-    Anthropic {
-        api_key: String,
-        model: String,
-    },
-    Ollama {
-        base_url: String,
-        model: String,
-    },
+pub struct LlmProvider {
+    #[serde(default = "default_api_type")]
+    pub api_type: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default = "default_num_ctx")]
+    pub num_ctx: u64,
+    #[serde(default = "default_timeout")]
+    pub timeout_secs: u64,
 }
 
 impl Default for LlmProvider {
     fn default() -> Self {
-        LlmProvider::Ollama {
-            base_url: "http://localhost:11434".to_string(),
-            model: "llama3".to_string(),
+        Self {
+            api_type: "ollama".to_string(),
+            base_url: "http://localhost:8080".to_string(),
+            model: "default".to_string(),
+            api_key: None,
+            num_ctx: 4096,
+            timeout_secs: 120,
         }
     }
 }
 
 impl LlmProvider {
+    pub fn preset_ollama() -> Self {
+        Self {
+            api_type: "ollama".to_string(),
+            base_url: "http://localhost:8080".to_string(),
+            model: "default".to_string(),
+            api_key: None,
+            num_ctx: 4096,
+            timeout_secs: 120,
+        }
+    }
+
+    pub fn preset_openai() -> Self {
+        Self {
+            api_type: "openai".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            model: "gpt-4o-mini".to_string(),
+            api_key: None,
+            num_ctx: 4096,
+            timeout_secs: 120,
+        }
+    }
+
+    pub fn preset_anthropic() -> Self {
+        Self {
+            api_type: "anthropic".to_string(),
+            base_url: "https://api.anthropic.com".to_string(),
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            api_key: None,
+            num_ctx: 4096,
+            timeout_secs: 120,
+        }
+    }
+
     pub fn name(&self) -> &str {
-        match self {
-            LlmProvider::OpenAi { .. } => "OpenAI",
-            LlmProvider::Anthropic { .. } => "Anthropic",
-            LlmProvider::Ollama { .. } => "Ollama",
-        }
-    }
-
-    pub fn model(&self) -> &str {
-        match self {
-            LlmProvider::OpenAi { model, .. } => model,
-            LlmProvider::Anthropic { model, .. } => model,
-            LlmProvider::Ollama { model, .. } => model,
-        }
-    }
-
-    pub fn set_model(&mut self, model: &str) {
-        match self {
-            LlmProvider::OpenAi { model: m, .. } => *m = model.to_string(),
-            LlmProvider::Anthropic { model: m, .. } => *m = model.to_string(),
-            LlmProvider::Ollama { model: m, .. } => *m = model.to_string(),
+        match self.api_type.as_str() {
+            "openai" => "OpenAI",
+            "anthropic" => "Anthropic",
+            _ => "Ollama",
         }
     }
 
     pub fn variant_index(&self) -> usize {
-        match self {
-            LlmProvider::OpenAi { .. } => 0,
-            LlmProvider::Anthropic { .. } => 1,
-            LlmProvider::Ollama { .. } => 2,
+        match self.api_type.as_str() {
+            "openai" => 0,
+            "anthropic" => 1,
+            _ => 2,
         }
     }
 
     pub fn set_variant(&mut self, idx: usize) {
-        let model = self.model().to_string();
+        let model = self.model.clone();
+        let api_key = self.api_key.clone();
         *self = match idx {
-            0 => LlmProvider::OpenAi {
-                api_key: String::new(),
-                model,
-                base_url: None,
-            },
-            1 => LlmProvider::Anthropic {
-                api_key: String::new(),
-                model,
-            },
-            _ => LlmProvider::Ollama {
-                base_url: "http://localhost:11434".to_string(),
-                model,
-            },
+            0 => {
+                let mut p = Self::preset_openai();
+                p.model = model;
+                p.api_key = api_key;
+                p
+            }
+            1 => {
+                let mut p = Self::preset_anthropic();
+                p.model = model;
+                p.api_key = api_key;
+                p
+            }
+            _ => {
+                let mut p = Self::preset_ollama();
+                p.model = model;
+                p
+            }
         };
-    }
-
-    pub fn api_key_mut(&mut self) -> Option<&mut String> {
-        match self {
-            LlmProvider::OpenAi { api_key, .. } => Some(api_key),
-            LlmProvider::Anthropic { api_key, .. } => Some(api_key),
-            LlmProvider::Ollama { .. } => None,
-        }
-    }
-
-    pub fn base_url_mut(&mut self) -> Option<&mut String> {
-        match self {
-            LlmProvider::OpenAi { base_url, .. } => base_url.as_mut(),
-            LlmProvider::Ollama { base_url, .. } => Some(base_url),
-            LlmProvider::Anthropic { .. } => None,
-        }
     }
 }
 
@@ -137,19 +157,12 @@ pub fn send_to_llm(
 ) -> mpsc::Receiver<LlmResponse> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = match &provider {
-            LlmProvider::OpenAi {
-                api_key,
-                model,
-                base_url,
-            } => call_openai(api_key, model, base_url.as_deref(), messages, system_prompt),
-            LlmProvider::Anthropic { api_key, model } => {
-                call_anthropic(api_key, model, messages, system_prompt)
-            }
-            LlmProvider::Ollama { base_url, model } => {
-                call_ollama(base_url, model, messages, system_prompt)
-            }
+        let result = match provider.api_type.as_str() {
+            "anthropic" => call_anthropic(&provider, messages, system_prompt),
+            "openai" => call_openai(&provider, messages, system_prompt),
+            _ => call_ollama(&provider, messages, system_prompt),
         };
+
         match result {
             Ok(text) => {
                 let _ = tx.send(LlmResponse::Text(text));
@@ -164,158 +177,156 @@ pub fn send_to_llm(
 }
 
 fn call_openai(
-    api_key: &str,
-    model: &str,
-    base_url: Option<&str>,
+    provider: &LlmProvider,
     messages: Vec<ChatMessage>,
     system_prompt: Option<String>,
 ) -> Result<String, String> {
-    if api_key.is_empty() {
-        return Err("OpenAI API key not set".to_string());
-    }
-    let url = base_url
-        .unwrap_or("https://api.openai.com/v1")
-        .trim_end_matches('/')
-        .to_string()
-        + "/chat/completions";
+    let base = provider.base_url.trim_end_matches('/');
+    let url = if base.ends_with("/v1") {
+        format!("{}/chat/completions", base)
+    } else {
+        format!("{}/v1/chat/completions", base)
+    };
 
-    let mut all_messages = Vec::new();
+    let mut json_messages = Vec::new();
     if let Some(sys) = system_prompt {
-        all_messages.push(ChatMessage {
-            role: "system".to_string(),
-            content: sys,
-        });
+        json_messages.push(json!({"role": "system", "content": sys}));
     }
-    all_messages.extend(messages);
+    for msg in &messages {
+        json_messages.push(json!({"role": msg.role, "content": msg.content}));
+    }
 
-    let body = serde_json::json!({
-        "model": model,
-        "messages": all_messages,
-        "max_tokens": 4096,
+    let mut body = json!({
+        "model": provider.model,
+        "messages": json_messages,
+        "stream": false,
     });
+    body["options"] = json!({ "num_ctx": provider.num_ctx });
 
-    send_openai_compatible_request(&url, &format!("Bearer {}", api_key), &body)
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(provider.timeout_secs))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let mut req = client.post(&url).json(&body);
+    if let Some(ref key) = provider.api_key {
+        req = req.bearer_auth(key);
+    }
+
+    let resp = req.send().map_err(|e| format!("Request failed: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        return Err(format!("OpenAI API error {}: {}", status, text));
+    }
+
+    let data: serde_json::Value = resp.json().map_err(|e| format!("Failed to parse response: {}", e))?;
+    data["choices"][0]["message"]["content"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "No content in response".to_string())
 }
 
 fn call_anthropic(
-    api_key: &str,
-    model: &str,
+    provider: &LlmProvider,
     messages: Vec<ChatMessage>,
     system_prompt: Option<String>,
 ) -> Result<String, String> {
-    if api_key.is_empty() {
-        return Err("Anthropic API key not set".to_string());
-    }
-    let url = "https://api.anthropic.com/v1/messages".to_string();
+    let base = provider.base_url.trim_end_matches('/');
+    let url = if base.ends_with("/v1") {
+        format!("{}/messages", base)
+    } else {
+        format!("{}/v1/messages", base)
+    };
 
-    let mut body = serde_json::json!({
-        "model": model,
-        "messages": messages,
+    let mut json_messages = Vec::new();
+    for msg in &messages {
+        json_messages.push(json!({"role": msg.role, "content": msg.content}));
+    }
+
+    let mut body = json!({
+        "model": provider.model,
         "max_tokens": 4096,
+        "messages": json_messages,
+        "stream": false
     });
 
     if let Some(sys) = system_prompt {
-        body["system"] = serde_json::json!(sys);
+        body["system"] = json!(sys);
     }
 
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(provider.timeout_secs))
         .build()
-    {
-        Ok(c) => c,
-        Err(e) => return Err(format!("Failed to create HTTP client: {}", e)),
-    };
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-    let resp = match client
-        .post(&url)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-    {
-        Ok(r) => r,
-        Err(e) => return Err(format!("Request failed: {}", e)),
-    };
+    let mut req = client.post(&url).json(&body);
+    if let Some(ref key) = provider.api_key {
+        req = req
+            .header("x-api-key", key)
+            .header("anthropic-version", "2023-06-01");
+    }
 
+    let resp = req.send().map_err(|e| format!("Request failed: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().unwrap_or_default();
         return Err(format!("Anthropic API error {}: {}", status, text));
     }
 
-    let json: serde_json::Value = match resp.json() {
-        Ok(j) => j,
-        Err(e) => return Err(format!("Failed to parse response: {}", e)),
-    };
-
-    json["content"]
+    let data: serde_json::Value = resp.json().map_err(|e| format!("Failed to parse response: {}", e))?;
+    
+    data["content"]
         .as_array()
-        .and_then(|arr| arr.first())
-        .and_then(|block| block["text"].as_str())
+        .and_then(|arr| arr.iter().find(|b| b["type"].as_str() == Some("text")))
+        .and_then(|b| b["text"].as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| "No content in response".to_string())
 }
 
 fn call_ollama(
-    base_url: &str,
-    model: &str,
+    provider: &LlmProvider,
     messages: Vec<ChatMessage>,
     system_prompt: Option<String>,
 ) -> Result<String, String> {
-    let url = base_url.trim_end_matches('/').to_string() + "/api/chat";
+    // llama.cpp uses OpenAI-compatible endpoint at /v1/chat/completions
+    let base = provider.base_url.trim_end_matches('/');
+    let url = if base.ends_with("/v1") {
+        format!("{}/chat/completions", base)
+    } else {
+        format!("{}/v1/chat/completions", base)
+    };
 
-    let mut body = serde_json::json!({
-        "model": model,
-        "messages": messages,
+    let mut json_messages = Vec::new();
+    if let Some(sys) = system_prompt {
+        json_messages.push(json!({"role": "system", "content": sys}));
+    }
+    for msg in &messages {
+        json_messages.push(json!({"role": msg.role, "content": msg.content}));
+    }
+
+    let mut body = json!({
+        "model": provider.model,
+        "messages": json_messages,
         "stream": false,
     });
+    body["options"] = json!({ "num_ctx": provider.num_ctx });
 
-    if let Some(sys) = system_prompt {
-        body["system"] = serde_json::json!(sys);
-    }
-
-    send_openai_compatible_request(&url, "", &body)
-}
-
-fn send_openai_compatible_request(
-    url: &str,
-    auth_header: &str,
-    body: &serde_json::Value,
-) -> Result<String, String> {
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(provider.timeout_secs))
         .build()
-    {
-        Ok(c) => c,
-        Err(e) => return Err(format!("Failed to create HTTP client: {}", e)),
-    };
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-    let mut req = client.post(url).header("content-type", "application/json");
-
-    if !auth_header.is_empty() {
-        req = req.header("authorization", auth_header);
-    }
-
-    let resp = match req.json(body).send() {
-        Ok(r) => r,
-        Err(e) => return Err(format!("Request failed: {}", e)),
-    };
-
+    let resp = client.post(&url).json(&body).send().map_err(|e| format!("Request failed: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().unwrap_or_default();
-        return Err(format!("API error {}: {}", status, text));
+        return Err(format!("Ollama/llama.cpp API error {}: {}", status, text));
     }
 
-    let json: serde_json::Value = match resp.json() {
-        Ok(j) => j,
-        Err(e) => return Err(format!("Failed to parse response: {}", e)),
-    };
-
-    json["choices"][0]["message"]["content"]
+    let data: serde_json::Value = resp.json().map_err(|e| format!("Failed to parse response: {}", e))?;
+    data["choices"][0]["message"]["content"]
         .as_str()
         .map(|s| s.to_string())
-        .or_else(|| json["message"]["content"].as_str().map(|s| s.to_string()))
         .ok_or_else(|| "No content in response".to_string())
 }

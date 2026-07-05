@@ -96,7 +96,7 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let provider = app.current_chat_provider();
             ui.label(
-                RichText::new(format!("{} / {}", provider.name(), provider.model()))
+                RichText::new(format!("{} / {}", provider.name(), provider.model))
                     .color(pal::TEXT_DIM)
                     .small(),
             );
@@ -232,13 +232,9 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
 
         if ui
             .add(
-                Button::new(
-                    RichText::new("Clear")
-                        .color(Color32::WHITE)
-                        .size(11.0),
-                )
-                .small()
-                .fill(Color32::from_rgb(80, 40, 40)),
+                Button::new(RichText::new("Clear").color(Color32::WHITE).size(11.0))
+                    .small()
+                    .fill(Color32::from_rgb(80, 40, 40)),
             )
             .on_hover_text("Clear chat history")
             .clicked()
@@ -466,7 +462,7 @@ fn render_provider_config(
     ui.add_space(4.0);
 
     ui.horizontal(|ui| {
-        ui.label("Provider:");
+        ui.label("Type:");
         for (i, name) in provider_names.iter().enumerate() {
             let is_active = provider.variant_index() == i;
             if ui.selectable_label(is_active, *name).clicked() {
@@ -477,40 +473,39 @@ fn render_provider_config(
 
     ui.horizontal(|ui| {
         ui.label("Model:");
-        let mut model = provider.model().to_string();
-        if ui
-            .add(
-                TextEdit::singleline(&mut model)
-                    .desired_width(200.0)
-                    .font(FontId::monospace(10.0)),
-            )
-            .changed()
-        {
-            provider.set_model(&model);
-        }
+        ui.add(
+            TextEdit::singleline(&mut provider.model)
+                .desired_width(200.0)
+                .font(FontId::monospace(10.0)),
+        );
     });
 
-    if let Some(api_key) = provider.api_key_mut() {
-        ui.horizontal(|ui| {
-            ui.label("API Key:");
-            ui.add(
-                TextEdit::singleline(api_key)
-                    .desired_width(300.0)
-                    .password(true)
-                    .font(FontId::monospace(10.0)),
-            );
-        });
-    }
+    ui.horizontal(|ui| {
+        ui.label("URL:");
+        ui.add(
+            TextEdit::singleline(&mut provider.base_url)
+                .desired_width(300.0)
+                .hint_text("http://localhost:11434")
+                .font(FontId::monospace(10.0)),
+        );
+    });
 
-    if let Some(base_url) = provider.base_url_mut() {
-        ui.horizontal(|ui| {
-            ui.label("Base URL:");
-            ui.add(
-                TextEdit::singleline(base_url)
-                    .desired_width(300.0)
-                    .hint_text("http://localhost:11434")
-                    .font(FontId::monospace(10.0)),
-            );
-        });
-    }
+    ui.horizontal(|ui| {
+        ui.label("Key: ");
+        let mut key_str = provider.api_key.clone().unwrap_or_default();
+        let resp = ui.add(
+            TextEdit::singleline(&mut key_str)
+                .desired_width(300.0)
+                .password(true)
+                .hint_text("sk-... (leave empty for Ollama)")
+                .font(FontId::monospace(10.0)),
+        );
+        if resp.changed() {
+            provider.api_key = if key_str.is_empty() {
+                None
+            } else {
+                Some(key_str)
+            };
+        }
+    });
 }
