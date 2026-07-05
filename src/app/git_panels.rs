@@ -44,7 +44,6 @@ pub fn render_git_log_panel(
                 let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
                 let is_hovered = resp.hovered();
                 let is_selected = app.selected_git_log_entry == Some(idx);
-
                 let bg = if is_selected {
                     Color32::from_rgba_premultiplied(70, 50, 100, 180)
                 } else if is_hovered {
@@ -54,30 +53,29 @@ pub fn render_git_log_panel(
                 };
                 ui.painter().rect_filled(rect, 0.0, bg);
 
-                let status_bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
-                ui.painter().rect_filled(
-                    status_bar,
-                    0.0,
-                    if is_selected {
-                        pal::BAR_CURSOR
-                    } else {
-                        Color32::from_rgb(150, 100, 200)
-                    },
+                let node_x = rect.left() + 12.0;
+                ui.painter().line_segment(
+                    [Pos2::new(node_x, rect.top()), Pos2::new(node_x, rect.bottom())],
+                    Stroke::new(1.0, Color32::from_rgb(100, 80, 120)),
+                );
+                ui.painter().circle(
+                    Pos2::new(node_x, rect.center().y),
+                    5.0,
+                    if is_selected { pal::BAR_CURSOR } else { Color32::from_rgb(180, 130, 230) },
+                    Stroke::new(1.5, Color32::WHITE),
                 );
 
                 if resp.clicked() {
                     app.selected_git_log_entry = Some(idx);
                 }
-
                 ui.painter().text(
-                    Pos2::new(rect.left() + 8.0, rect.center().y),
+                    Pos2::new(rect.left() + 24.0, rect.center().y),
                     Align2::LEFT_CENTER,
                     &entry.hash,
                     FontId::monospace(10.5),
                     Color32::from_rgb(200, 150, 250),
                 );
-
-                let author_x = rect.left() + 60.0;
+                let author_x = rect.left() + 75.0;
                 let display_author = MergeApp::truncate_owned(&entry.author, 15);
                 ui.painter().text(
                     Pos2::new(author_x, rect.center().y),
@@ -86,10 +84,9 @@ pub fn render_git_log_panel(
                     FontId::monospace(10.0),
                     pal::TEXT_DIM,
                 );
-
-                let msg_x = rect.left() + 160.0;
+                let msg_x = rect.left() + 175.0;
                 let display_msg =
-                    MergeApp::truncate_owned(&entry.message, max_chars.saturating_sub(20));
+                    MergeApp::truncate_owned(&entry.message, max_chars.saturating_sub(22));
                 ui.painter().text(
                     Pos2::new(msg_x, rect.center().y),
                     Align2::LEFT_CENTER,
@@ -191,13 +188,56 @@ pub fn render_git_commit_detail_panel(app: &mut MergeApp, ui: &mut Ui) {
                     .strong()
                     .monospace(),
             );
-            ui.add_space(2.0);
-
+            ui.add_space(4.0);
             for file in &entry.files_changed {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("•").color(pal::TEXT_DIM).monospace());
-                    ui.label(RichText::new(file).color(pal::TEXT_NORMAL).monospace());
+                    let badge_color = match file.status {
+                        'A' => Color32::from_rgb(40, 150, 60),
+                        'D' => Color32::from_rgb(200, 40, 40),
+                        _ => Color32::from_rgb(200, 160, 40),
+                    };
+                    ui.label(
+                        RichText::new(format!("[{}]", file.status))
+                            .color(badge_color)
+                            .monospace()
+                            .strong(),
+                    );
+                    ui.label(
+                        RichText::new(format!("+{} -{}", file.additions, file.deletions))
+                            .color(pal::TEXT_DIM)
+                            .monospace()
+                            .size(10.0),
+                    );
+                    ui.label(
+                        RichText::new(&file.path)
+                            .color(pal::TEXT_NORMAL)
+                            .monospace(),
+                    );
                 });
+                ui.add_space(2.0);
+                Frame::none()
+                    .fill(pal::BG_PANEL)
+                    .inner_margin(Margin::symmetric(8.0, 4.0))
+                    .show(ui, |ui| {
+                        for line in file.patch.lines() {
+                            let color = if line.starts_with('+') {
+                                pal::TEXT_INSERT
+                            } else if line.starts_with('-') {
+                                pal::TEXT_DELETE
+                            } else if line.starts_with('@') {
+                                Color32::from_rgb(100, 160, 230)
+                            } else {
+                                pal::TEXT_NORMAL
+                            };
+                            ui.label(
+                                RichText::new(line)
+                                    .color(color)
+                                    .monospace()
+                                    .size(10.0),
+                            );
+                        }
+                    });
+                ui.add_space(6.0);
             }
         });
 }

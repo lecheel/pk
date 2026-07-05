@@ -1,6 +1,8 @@
 //--+ file:///src/app/git_ops.rs
 use crate::diff::{diff_patch, RowKind};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GitStatus {
@@ -17,6 +19,15 @@ pub struct GitDiffHunk {
 }
 
 #[derive(Clone, Debug)]
+pub struct GitLogFileChange {
+    pub path: String,
+    pub status: char,
+    pub additions: usize,
+    pub deletions: usize,
+    pub patch: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct GitLogEntry {
     pub hash: String,
     pub full_hash: String,
@@ -25,7 +36,7 @@ pub struct GitLogEntry {
     pub time: String,
     pub message: String,
     pub body: String,
-    pub files_changed: Vec<String>,
+    pub files_changed: Vec<GitLogFileChange>,
 }
 
 pub fn get_git_log(base_dir: &std::path::Path) -> Vec<GitLogEntry> {
@@ -54,27 +65,67 @@ pub fn get_git_log(base_dir: &std::path::Path) -> Vec<GitLogEntry> {
                 let message = commit.summary().unwrap_or("").to_string();
                 let body = commit.message().unwrap_or("").to_string();
 
-                let mut files_changed = Vec::new();
+                let files_changed_rc = Rc::new(RefCell::new(Vec::new()));
                 if let Ok(tree) = commit.tree() {
                     let parent_tree = commit.parents().next().and_then(|p| p.tree().ok());
                     if let Ok(diff) =
                         repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
                     {
+                        let fc_clone1 = files_changed_rc.clone();
+                        let fc_clone2 = files_changed_rc.clone();
+                        let fc_clone3 = files_changed_rc.clone();
                         let _ = diff.foreach(
-                            &mut |d, _| {
+                            &mut move |d, _| {
                                 let path = d.new_file().path().or_else(|| d.old_file().path());
                                 if let Some(p) = path {
-                                    files_changed.push(p.display().to_string());
+                                    let status = match d.status() {
+                                        git2::Delta::Added => 'A',
+                                        git2::Delta::Deleted => 'D',
+                                        git2::Delta::Modified => 'M',
+                                        _ => 'M',
+                                    };
+                                    fc_clone1.borrow_mut().push(GitLogFileChange {
+                                        path: p.display().to_string(),
+                                        status,
+                                        additions: 0,
+                                        deletions: 0,
+                                        patch: String::new(),
+                                    });
                                 }
                                 true
                             },
                             None,
-                            None,
-                            None,
+                            Some(&mut move |_, h| {
+                                let mut fc_ref = fc_clone2.borrow_mut();
+                                if let Some(fc) = fc_ref.last_mut() {
+                                    fc.patch.push_str(&format!(
+                                        "@@ -{},{} +{},{} @@\n",
+                                        h.old_start(),
+                                        h.old_lines(),
+                                        h.new_start(),
+                                        h.new_lines()
+                                    ));
+                                }
+                                true
+                            }),
+                            Some(&mut move |_, _, line| {
+                                let mut fc_ref = fc_clone3.borrow_mut();
+                                if let Some(fc) = fc_ref.last_mut() {
+                                    let origin = line.origin();
+                                    if origin == '+' {
+                                        fc.additions += 1;
+                                    } else if origin == '-' {
+                                        fc.deletions += 1;
+                                    }
+                                    let content = String::from_utf8_lossy(line.content());
+                                    fc.patch.push_str(&format!("{}{}", origin, content));
+                                }
+                                true
+                            }),
                         );
                     }
                 }
-
+                let files_changed = files_changed_rc.borrow().clone();
                 log.push(GitLogEntry {
                     hash,
                     full_hash,
