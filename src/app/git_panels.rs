@@ -396,11 +396,13 @@ pub fn render_git_status_panel(
                                     }),
                                 );
                             }
+                            let is_staged = status.is_index_new() || status.is_index_modified() || status.is_index_deleted();
                             file_statuses.push((
                                 path.to_string(),
                                 status_char,
                                 additions,
                                 deletions,
+                                is_staged,
                             ));
                         }
                     }
@@ -416,7 +418,55 @@ pub fn render_git_status_panel(
                 });
                 return;
             }
-            for (path, status_char, additions, deletions) in file_statuses {
+
+            ui.horizontal(|ui| {
+                if ui.button("Stage/Unstage (s)").clicked() {
+                    if let Some(idx) = app.git_status_selected_idx {
+                        if let Some((path, _, _, _, _)) = file_statuses.get(idx) {
+                            app.toggle_stage_file(path);
+                        }
+                    }
+                }
+                if ui.button("Commit (c)").clicked() {
+                    app.show_commit_prompt = true;
+                }
+                if ui.button("Stash (z)").clicked() {
+                    app.stash_changes();
+                }
+            });
+            ui.add_space(4.0);
+
+            if !ui.ctx().wants_keyboard_input() && !file_statuses.is_empty() {
+                ui.input(|i| {
+                    if i.key_pressed(Key::ArrowDown) {
+                        if let Some(idx) = &mut app.git_status_selected_idx {
+                            *idx = (*idx + 1).min(file_statuses.len().saturating_sub(1));
+                        } else {
+                            app.git_status_selected_idx = Some(0);
+                        }
+                    }
+                    if i.key_pressed(Key::ArrowUp) {
+                        if let Some(idx) = &mut app.git_status_selected_idx {
+                            *idx = idx.saturating_sub(1);
+                        }
+                    }
+                    if i.key_pressed(Key::S) {
+                        if let Some(idx) = app.git_status_selected_idx {
+                            if let Some((path, _, _, _, _)) = file_statuses.get(idx) {
+                                app.toggle_stage_file(path);
+                            }
+                        }
+                    }
+                    if i.key_pressed(Key::C) {
+                        app.show_commit_prompt = true;
+                    }
+                    if i.key_pressed(Key::Z) {
+                        app.stash_changes();
+                    }
+                });
+            }
+
+            for (idx, (path, status_char, additions, deletions, is_staged)) in file_statuses.iter().enumerate() {
                 let (base_bg, badge_color, prefix) = match status_char {
                     'A' => (pal::BG_INSERT, Color32::from_rgb(40, 150, 60), "A"),
                     'D' => (pal::BG_DELETE, Color32::from_rgb(200, 40, 40), "D"),
@@ -429,43 +479,56 @@ pub fn render_git_status_panel(
                 let desired = Vec2::new(ui.available_width(), row_h);
                 let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
                 let is_hovered = resp.hovered();
-                let bg = if is_hovered {
+                let is_selected = app.git_status_selected_idx == Some(idx);
+                let bg = if is_selected {
+                    Color32::from_rgba_premultiplied(50, 60, 70, 200)
+                } else if is_hovered {
                     Color32::from_rgba_premultiplied(50, 50, 60, 150)
                 } else {
                     base_bg
                 };
                 ui.painter().rect_filled(rect, 0.0, bg);
-                let status_bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
+
+                let stage_color = if *is_staged { pal::ACCENT_GOOD } else { pal::TEXT_DIM };
+                ui.painter().text(
+                    Pos2::new(rect.left() + 4.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    if *is_staged { "S" } else { " " },
+                    FontId::monospace(10.5),
+                    stage_color,
+                );
+
+                let status_bar = Rect::from_min_size(Pos2::new(rect.left() + 14.0, rect.min.y), Vec2::new(2.0, rect.height()));
                 ui.painter().rect_filled(status_bar, 0.0, badge_color);
                 ui.painter().text(
-                    Pos2::new(rect.left() + 8.0, rect.center().y),
+                    Pos2::new(rect.left() + 20.0, rect.center().y),
                     Align2::LEFT_CENTER,
                     format!("[{}]", prefix),
                     FontId::monospace(10.5),
                     badge_color,
                 );
                 let mut stats_str = String::new();
-                if additions > 0 {
+                if *additions > 0 {
                     stats_str.push_str(&format!("+{} ", additions));
                 }
-                if deletions > 0 {
+                if *deletions > 0 {
                     stats_str.push_str(&format!("-{} ", deletions));
                 }
                 ui.painter().text(
-                    Pos2::new(rect.left() + 40.0, rect.center().y),
+                    Pos2::new(rect.left() + 52.0, rect.center().y),
                     Align2::LEFT_CENTER,
                     &stats_str,
                     FontId::monospace(10.0),
-                    if additions > 0 && deletions > 0 {
+                    if *additions > 0 && *deletions > 0 {
                         pal::TEXT_DIM
-                    } else if additions > 0 {
+                    } else if *additions > 0 {
                         pal::TEXT_INSERT
                     } else {
                         pal::TEXT_DELETE
                     },
                 );
-                let path_x = rect.left() + 100.0;
-                let display = MergeApp::truncate_owned(&path, max_chars);
+                let path_x = rect.left() + 112.0;
+                let display = MergeApp::truncate_owned(path, max_chars);
                 ui.painter().text(
                     Pos2::new(path_x, rect.center().y),
                     Align2::LEFT_CENTER,
@@ -474,16 +537,17 @@ pub fn render_git_status_panel(
                     pal::TEXT_NORMAL,
                 );
                 if resp.clicked() {
+                    app.git_status_selected_idx = Some(idx);
                     if let Some(pos) = app
                         .hunks
                         .iter()
-                        .position(|h| h.filename == path || path.contains(&h.filename))
+                        .position(|h| h.filename == *path || path.contains(&h.filename))
                     {
                         app.current_hunk = pos;
                         app.load_hunk();
                     } else {
                         let target_path = std::path::Path::new(&app.base_dir)
-                            .join(&path)
+                            .join(path)
                             .display()
                             .to_string();
                         if target_path != app.file_path {
