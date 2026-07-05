@@ -180,36 +180,76 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
             .inner_margin(Margin::symmetric(8.0, 3.0))
             .show(ui, |ui| {
                 ui.set_min_width(right_w);
-                let mark_label = if app.file_anchors.is_empty() {
-                    String::new()
-                } else {
-                    let labels: Vec<String> =
-                        app.file_anchors.values().map(|f| f.label()).collect();
-                    format!("  ·  {}", labels.join("  "))
-                };
-                let file_header_text = if app.file_lines.is_empty() {
-                    "FILE  ·  no file loaded".to_string()
-                } else {
-                    let match_info = if !app.file_search_query.is_empty() {
-                        format!("  ({} matches)", app.search_matches.len())
-                    } else {
+                ui.horizontal(|ui| {
+                    let mark_label = if app.file_anchors.is_empty() {
                         String::new()
+                    } else {
+                        let labels: Vec<String> =
+                            app.file_anchors.values().map(|f| f.label()).collect();
+                        format!("  ·  {}", labels.join("  "))
                     };
-                    format!(
-                        "FILE  ·  {} lines  ·  match @ {}–{}{}{}",
-                        app.file_lines.len(),
-                        mr.file_start + 1,
-                        mr.file_end,
-                        mark_label,
-                        match_info,
-                    )
-                };
-                ui.label(
-                    RichText::new(file_header_text)
-                        .color(Color32::from_rgb(120, 220, 160))
-                        .strong()
-                        .monospace(),
-                );
+                    let file_header_text = if app.file_lines.is_empty() {
+                        "FILE  ·  no file loaded".to_string()
+                    } else {
+                        let match_info = if !app.file_search_query.is_empty() {
+                            format!("  ({} matches)", app.search_matches.len())
+                        } else {
+                            String::new()
+                        };
+                        format!(
+                            "FILE  ·  {} lines  ·  match @ {}–{}{}{}",
+                            app.file_lines.len(),
+                            mr.file_start + 1,
+                            mr.file_end,
+                            mark_label,
+                            match_info,
+                        )
+                    };
+
+                    let right_reserved = if app.is_llm_loading { 150.0 } else { 0.0 };
+                    let available = ui.available_width().max(right_reserved) - right_reserved;
+
+                    // Allocate space for the left side so it doesn't push the right side off-screen
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(available, ui.available_height()),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ui.label(
+                                RichText::new(file_header_text)
+                                    .color(Color32::from_rgb(120, 220, 160))
+                                    .strong()
+                                    .monospace(),
+                            );
+                        },
+                    );
+
+                    if app.is_llm_loading {
+                        if app.llm_start_time.is_none() {
+                            app.llm_start_time = Some(ui.ctx().input(|i| i.time));
+                        }
+                        let elapsed =
+                            ui.ctx().input(|i| i.time) - app.llm_start_time.unwrap_or_default();
+
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(right_reserved, ui.available_height()),
+                            Layout::right_to_left(Align::Center),
+                            |ui| {
+                                if ui.button("⏹ Cancel").clicked() {
+                                    app.cancel_llm();
+                                }
+                                ui.label(
+                                    RichText::new(format!("{:.1}s", elapsed))
+                                        .color(pal::TEXT_DIM)
+                                        .small(),
+                                );
+                                ui.spinner();
+                            },
+                        );
+                        ui.ctx().request_repaint();
+                    } else {
+                        app.llm_start_time = None;
+                    }
+                });
             });
     });
     ui.add(Separator::default());
@@ -236,7 +276,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
         render_debug_panel(app, &mut left_ui);
     } else if app.show_chat_window {
         if app.show_system_prompt {
-            if let Some(prompt) = app.chat_mode.system_prompt() {
+            if let Some(prompt) = app.active_system_prompt() {
                 let mode_color = app.chat_mode.color();
                 let mode_label = app.chat_mode.short_label();
                 let mut close_prompt = false;
@@ -255,7 +295,15 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                                     .size(11.0),
                             );
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.add(Button::new(RichText::new("✕").color(pal::TEXT_DIM).small()).frame(false)).clicked() {
+                                if ui
+                                    .add(
+                                        Button::new(
+                                            RichText::new("✕").color(pal::TEXT_DIM).small(),
+                                        )
+                                        .frame(false),
+                                    )
+                                    .clicked()
+                                {
                                     close_prompt = true;
                                 }
                             });
@@ -597,6 +645,62 @@ fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
             ui.add_space(16.0);
             ui.separator();
             chat::render_llm_settings(app, ui);
+
+            ui.add_space(16.0);
+            ui.separator();
+            ui.add_space(8.0);
+            ui.heading("Context Window & Timeout");
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(
+                    "Configure num_ctx (context tokens) and request timeout per provider.",
+                )
+                .color(pal::TEXT_DIM)
+                .small(),
+            );
+            ui.add_space(8.0);
+
+            let mut changed = false;
+            let providers: [(&str, &mut super::llm::LlmProvider); 3] = [
+                ("Chat", &mut app.llm_config.chat_provider),
+                ("Commit", &mut app.llm_config.commit_provider),
+                ("Impl", &mut app.llm_config.impl_provider),
+            ];
+            for (label, provider) in providers {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("{} ({}):", label, provider.name())).strong());
+                });
+                ui.horizontal(|ui| {
+                    ui.label("num_ctx:");
+                    let mut ctx = provider.num_ctx;
+                    let resp = ui.add(
+                        Slider::new(&mut ctx, 256..=131072)
+                            .logarithmic(true)
+                            .text("tokens"),
+                    );
+                    if resp.changed() {
+                        provider.num_ctx = ctx;
+                        changed = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("timeout (s):");
+                    let mut secs = provider.timeout_secs;
+                    let resp = ui.add(
+                        Slider::new(&mut secs, 30..=3600)
+                            .text("secs")
+                            .clamp_to_range(true),
+                    );
+                    if resp.changed() {
+                        provider.timeout_secs = secs;
+                        changed = true;
+                    }
+                });
+            }
+            if changed {
+                app.save_config();
+            }
         });
 }
 

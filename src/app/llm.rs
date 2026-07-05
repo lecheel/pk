@@ -10,7 +10,7 @@ fn default_num_ctx() -> u64 {
     4096
 }
 fn default_timeout() -> u64 {
-    120
+    360
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -37,7 +37,7 @@ impl Default for LlmProvider {
             model: "default".to_string(),
             api_key: None,
             num_ctx: 4096,
-            timeout_secs: 120,
+            timeout_secs: 360,
         }
     }
 }
@@ -49,8 +49,8 @@ impl LlmProvider {
             base_url: "http://localhost:8080".to_string(),
             model: "default".to_string(),
             api_key: None,
-            num_ctx: 4096,
-            timeout_secs: 120,
+            num_ctx: 512,
+            timeout_secs: 360,
         }
     }
 
@@ -61,7 +61,7 @@ impl LlmProvider {
             model: "gpt-4o-mini".to_string(),
             api_key: None,
             num_ctx: 4096,
-            timeout_secs: 120,
+            timeout_secs: 360,
         }
     }
 
@@ -72,7 +72,7 @@ impl LlmProvider {
             model: "claude-3-5-sonnet-20241022".to_string(),
             api_key: None,
             num_ctx: 4096,
-            timeout_secs: 120,
+            timeout_secs: 360,
         }
     }
 
@@ -119,12 +119,15 @@ impl LlmProvider {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
-    #[serde(default)]
     pub chat_provider: LlmProvider,
-    #[serde(default)]
     pub commit_provider: LlmProvider,
-    #[serde(default)]
     pub impl_provider: LlmProvider,
+    #[serde(default)]
+    pub chat_system_prompt: String,
+    #[serde(default)]
+    pub commit_system_prompt: String,
+    #[serde(default)]
+    pub impl_system_prompt: String,
 }
 
 impl Default for LlmConfig {
@@ -133,6 +136,9 @@ impl Default for LlmConfig {
             chat_provider: LlmProvider::default(),
             commit_provider: LlmProvider::default(),
             impl_provider: LlmProvider::default(),
+            chat_system_prompt: String::new(),
+            commit_system_prompt: String::new(),
+            impl_system_prompt: String::new(),
         }
     }
 }
@@ -220,7 +226,9 @@ fn call_openai(
         return Err(format!("OpenAI API error {}: {}", status, text));
     }
 
-    let data: serde_json::Value = resp.json().map_err(|e| format!("Failed to parse response: {}", e))?;
+    let data: serde_json::Value = resp
+        .json()
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
     data["choices"][0]["message"]["content"]
         .as_str()
         .map(|s| s.to_string())
@@ -274,8 +282,10 @@ fn call_anthropic(
         return Err(format!("Anthropic API error {}: {}", status, text));
     }
 
-    let data: serde_json::Value = resp.json().map_err(|e| format!("Failed to parse response: {}", e))?;
-    
+    let data: serde_json::Value = resp
+        .json()
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
     data["content"]
         .as_array()
         .and_then(|arr| arr.iter().find(|b| b["type"].as_str() == Some("text")))
@@ -317,14 +327,20 @@ fn call_ollama(
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-    let resp = client.post(&url).json(&body).send().map_err(|e| format!("Request failed: {}", e))?;
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .map_err(|e| format!("Request failed: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().unwrap_or_default();
         return Err(format!("Ollama/llama.cpp API error {}: {}", status, text));
     }
 
-    let data: serde_json::Value = resp.json().map_err(|e| format!("Failed to parse response: {}", e))?;
+    let data: serde_json::Value = resp
+        .json()
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
     data["choices"][0]["message"]["content"]
         .as_str()
         .map(|s| s.to_string())

@@ -36,20 +36,18 @@ impl ChatMode {
         }
     }
 
-    pub fn system_prompt(&self) -> Option<String> {
+    pub fn system_prompt(&self) -> String {
         match self {
-            ChatMode::Chat => None,
-            ChatMode::Commit => Some(
-                "You are a helpful assistant that generates concise, meaningful git commit messages. \
+            ChatMode::Chat => "You are a helpful and concise AI assistant embedded in a code editor. \
+                 Help the user with programming tasks, answer questions, and provide clear explanations."
+                .to_string(),
+            ChatMode::Commit => "You are a helpful assistant that generates concise, meaningful git commit messages. \
                  Only output the commit message, nothing else. Use conventional commit format if appropriate."
-                    .to_string(),
-            ),
-            ChatMode::Impl => Some(
-                "You are a code implementation assistant. When given a description or partial code, \
+                .to_string(),
+            ChatMode::Impl => "You are a code implementation assistant. When given a description or partial code, \
                  provide complete implementation in the appropriate language. Use the same style as \
                  the surrounding code. Output only the code, no explanations."
-                    .to_string(),
-            ),
+                .to_string(),
         }
     }
 }
@@ -323,10 +321,9 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
             }
         }
 
-        let provider = app.current_chat_provider().clone();
-        let system_prompt = app.chat_mode.system_prompt();
-
-        app.llm_response_receiver = Some(llm::send_to_llm(provider, messages, system_prompt));
+            let provider = app.current_chat_provider().clone();
+            let system_prompt = app.active_system_prompt();
+            app.llm_response_receiver = Some(llm::send_to_llm(provider, messages, system_prompt));
         app.is_llm_loading = true;
     }
 }
@@ -445,12 +442,46 @@ pub fn render_llm_settings(app: &mut MergeApp, ui: &mut Ui) {
         &providers,
     );
 
-    ui.add_space(16.0);
-    if ui.button("💾 Save LLM Config").clicked() {
-        app.save_config();
-        app.set_message(super::types::StatusMessage::success("LLM config saved"));
+        ui.add_space(16.0);
+        ui.separator();
+        ui.add_space(8.0);
+        ui.heading("Custom System Prompts");
+        ui.add_space(4.0);
+        ui.label(RichText::new("Leave empty to use built-in defaults.").color(pal::TEXT_DIM).small());
+        ui.add_space(8.0);
+        
+        ui.label(RichText::new("Chat Prompt:").strong());
+        ui.add(
+            TextEdit::multiline(&mut app.llm_config.chat_system_prompt)
+                .desired_rows(3)
+                .hint_text("Default: Helpful assistant...")
+                .font(FontId::monospace(10.0)),
+        );
+        ui.add_space(8.0);
+
+        ui.label(RichText::new("Commit Prompt:").strong());
+        ui.add(
+            TextEdit::multiline(&mut app.llm_config.commit_system_prompt)
+                .desired_rows(3)
+                .hint_text("Default: Generate conventional commit message...")
+                .font(FontId::monospace(10.0)),
+        );
+        ui.add_space(8.0);
+
+        ui.label(RichText::new("Impl Prompt:").strong());
+        ui.add(
+            TextEdit::multiline(&mut app.llm_config.impl_system_prompt)
+                .desired_rows(3)
+                .hint_text("Default: Code implementation assistant...")
+                .font(FontId::monospace(10.0)),
+        );
+        
+        ui.add_space(16.0);
+        if ui.button("💾 Save LLM Config").clicked() {
+            app.save_config();
+            app.set_message(super::types::StatusMessage::success("LLM config saved"));
+        }
     }
-}
 
 fn render_provider_config(
     ui: &mut Ui,

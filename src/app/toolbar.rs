@@ -176,7 +176,7 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                     app.show_help = !app.show_help;
                 }
                 ui.add(Separator::default().vertical().spacing(12.0));
-                let has_prompt = app.chat_mode.system_prompt().is_some();
+                let has_prompt = app.active_system_prompt().is_some();
                 let prompt_btn_color = if app.show_system_prompt {
                     app.chat_mode.color()
                 } else if has_prompt {

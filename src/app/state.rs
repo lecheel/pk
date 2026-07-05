@@ -144,6 +144,7 @@ pub struct MergeApp {
     pub llm_config: LlmConfig,
     pub llm_response_receiver: Option<mpsc::Receiver<LlmResponse>>,
     pub is_llm_loading: bool,
+    pub llm_start_time: Option<f64>,
     pub show_system_prompt: bool,
 }
 
@@ -292,6 +293,7 @@ impl MergeApp {
             llm_config: config.llm_config.clone(),
             llm_response_receiver: None,
             is_llm_loading: false,
+            llm_start_time: None,
             show_system_prompt: false,
         };
         let mut loaded_patch = false;
@@ -996,6 +998,7 @@ impl MergeApp {
         self.chat_input.clear();
         self.llm_response_receiver = None;
         self.is_llm_loading = false;
+        self.llm_start_time = None;
         self.show_system_prompt = false;
         self.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
         self.set_message(StatusMessage::info(
@@ -1009,7 +1012,28 @@ impl MergeApp {
             ChatMode::Impl => &self.llm_config.impl_provider,
         }
     }
+    pub fn active_system_prompt(&self) -> Option<String> {
+        let default = self.chat_mode.system_prompt();
+        let custom = match self.chat_mode {
+            ChatMode::Chat => &self.llm_config.chat_system_prompt,
+            ChatMode::Commit => &self.llm_config.commit_system_prompt,
+            ChatMode::Impl => &self.llm_config.impl_system_prompt,
+        };
+        if custom.is_empty() {
+            Some(default)
+        } else {
+            Some(custom.clone())
+        }
+    }
 
+    pub fn cancel_llm(&mut self) {
+        if self.is_llm_loading {
+            self.is_llm_loading = false;
+            self.llm_start_time = None;
+            self.llm_response_receiver = None;
+            self.set_message(StatusMessage::info("LLM request cancelled."));
+        }
+    }
     pub fn save_config(&self) {
         let config = AppConfig {
             format_on_save: self.format_on_save,
