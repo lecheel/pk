@@ -1392,20 +1392,16 @@ fn render_search_panel(
     }
     if apply_clicked {
         app.apply_merge(None, None);
-        app.jump_to_diff_side_after_merge();
     }
     if let Some(id) = apply_clicked_id {
         app.apply_merge(None, Some(id));
-        app.jump_to_diff_side_after_merge();
     }
     if let Some(ln) = apply_clicked_line {
         app.apply_merge(Some(ln), None);
-        app.jump_to_diff_side_after_merge();
     }
     if let Some((target_line, range)) = apply_selection {
         app.apply_merge_partial(Some(target_line), None, range);
         app.right_selection = None;
-        app.jump_to_diff_side_after_merge();
     }
 }
 fn render_git_diff_side_panel(
@@ -3268,6 +3264,7 @@ fn render_file_panel(
 
     let mut clear_del = false;
     let mut perform_block_delete: Option<(usize, usize)> = None;
+    let mut delete_drag_selection: Option<(usize, usize)> = None;
     let mut set_anchor_a_start: Option<usize> = None;
     let mut set_anchor_a_end: Option<usize> = None;
     let mut adjust_start_by: i32 = 0;
@@ -3901,6 +3898,34 @@ fn render_file_panel(
                             }
                         }
                     }
+                    if let Some((s, e)) = local_drag_selection {
+                        let (lo, hi) = (s.min(e), s.max(e));
+                        if i >= lo && i <= hi {
+                            let count = hi - lo + 1;
+                            ui.separator();
+                            if ui
+                                .button(
+                                    RichText::new(format!("🗑 Delete selection ({} lines)", count))
+                                        .color(pal::TEXT_DELETE),
+                                )
+                                .clicked()
+                            {
+                                delete_drag_selection = Some((lo, hi));
+                                ui.close_menu();
+                            }
+                            if ui
+                                .button(
+                                    RichText::new(format!("⚓ Set anchor ma ({} lines)", count))
+                                        .color(pal::TEXT_ANCHOR),
+                                )
+                                .clicked()
+                            {
+                                set_anchor_a_start = Some(lo);
+                                set_anchor_a_end = Some(hi);
+                                ui.close_menu();
+                            }
+                        }
+                    }
                 });
             }
             if let (Some(p1), Some(p2)) = (anchor_a_start_point, anchor_a_end_point) {
@@ -3950,6 +3975,11 @@ fn render_file_panel(
     }
     if let Some((min, max)) = perform_block_delete {
         app.delete_block_range(min, max);
+    }
+    if let Some((min, max)) = delete_drag_selection {
+        app.delete_block_range(min, max);
+        app.file_drag_selection = None;
+        app.file_drag_anchor = None;
     }
     if let Some(val) = set_anchor_a_start {
         app.set_mark_a(val);
