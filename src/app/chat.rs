@@ -146,7 +146,7 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
                 if app.chat_history.is_empty() {
                     ui.add_space(20.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("🤖 LLM Chat").color(pal::TEXT_DIM).size(16.0));
+                        ui.label(RichText::new("💬 LLM Chat").color(pal::TEXT_DIM).size(16.0));
                         ui.add_space(8.0);
                         ui.label(
                             RichText::new("Type a message and press Enter to send")

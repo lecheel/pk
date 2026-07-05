@@ -91,19 +91,17 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                     let show_repos = app.concat_server_enabled;
                     let all_tabs = [
                         ("🔍 Search", "Search", Color32::from_rgb(120, 180, 255)),
-                        ("🌳 Status", "Git Status", Color32::from_rgb(120, 230, 160)),
-                        ("📝 Diff", "Git Diff", Color32::from_rgb(235, 120, 120)),
+                        ("Status(F1)", "Git Status", Color32::from_rgb(120, 230, 160)),
+                        ("Diff(F2)", "Git Diff", Color32::from_rgb(235, 120, 120)),
                         (
-                            "🔀 Diff Side",
+                            "Diff Side(F3)",
                             "Git Diff Side",
                             Color32::from_rgb(100, 210, 220),
                         ),
-                        ("💾 Commit", "Git Commit", Color32::from_rgb(230, 200, 120)),
-                        ("📜 Log", "Git Log", Color32::from_rgb(180, 130, 230)),
-                        ("📂 Repos", "Repos", Color32::from_rgb(120, 230, 160)),
-                        ("⚙ Config", "Settings", Color32::from_rgb(120, 180, 255)),
-                        ("🤖 Chat", "Chat", Color32::from_rgb(180, 140, 255)),
-                        ("🐞 Debug", "Debug", Color32::from_rgb(220, 180, 50)),
+                        ("Log(F4)", "Git Log", Color32::from_rgb(180, 130, 230)),
+                        ("Commit", "Git Commit", Color32::from_rgb(230, 200, 120)),
+                        ("Repos", "Repos", Color32::from_rgb(120, 230, 160)),
+                        ("Chat(F9)", "Chat", Color32::from_rgb(180, 140, 255)),
                     ];
                     let tabs: Vec<(&str, &str, Color32)> = all_tabs
                         .iter()
