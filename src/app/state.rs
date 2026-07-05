@@ -563,7 +563,7 @@ impl MergeApp {
                         .as_ref()
                         .map(|mr| mr.file_end.saturating_sub(1))
                         .unwrap_or(start),
-                    |_| a.file_end()
+                    |_| a.file_end(),
                 )
             };
             return Some((start, end + 1));
@@ -720,7 +720,9 @@ impl MergeApp {
             .map(|n| n - 1)
             .collect();
         if to_delete.is_empty() {
-            self.set_message(StatusMessage::warning("Nothing to delete in that selection"));
+            self.set_message(StatusMessage::warning(
+                "Nothing to delete in that selection",
+            ));
             return;
         }
         self.save_history();
@@ -955,8 +957,7 @@ impl MergeApp {
         self.diff_side_insert_anchor = None;
         self.anchor_link_source = None;
         self.anchor_link_target = None;
-        self.git_log_entries =
-            super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
+        self.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
         self.set_message(StatusMessage::info(
             "Welcome! Open a .md file or paste a patch to begin.",
         ));
@@ -1104,7 +1105,7 @@ impl eframe::App for MergeApp {
             }
         }
 
-        if ctx.input(|i| i.key_pressed(Key::F4)) {
+        if ctx.input(|i| i.key_pressed(Key::F2)) {
             self.show_fmt_error = false;
             self.show_settings = false;
             self.show_repos_window = false;
@@ -1114,7 +1115,7 @@ impl eframe::App for MergeApp {
             self.show_git_log_window = false;
             self.show_git_diff_window = !self.show_git_diff_window;
         }
-        if ctx.input(|i| i.key_pressed(Key::F5)) {
+        if ctx.input(|i| i.key_pressed(Key::F3)) {
             self.show_fmt_error = false;
             self.show_settings = false;
             self.show_repos_window = false;
@@ -1127,7 +1128,7 @@ impl eframe::App for MergeApp {
                 self.refresh_git_changed_files();
             }
         }
-        if ctx.input(|i| i.key_pressed(Key::F3)) {
+        if ctx.input(|i| i.key_pressed(Key::F10)) {
             self.show_fmt_error = false;
             self.show_settings = false;
             self.show_repos_window = false;
@@ -1147,7 +1148,7 @@ impl eframe::App for MergeApp {
             self.show_git_log_window = false;
             self.show_git_status_window = !self.show_git_status_window;
         }
-        if ctx.input(|i| i.key_pressed(Key::F7)) {
+        if ctx.input(|i| i.key_pressed(Key::F4)) {
             self.show_fmt_error = false;
             self.show_settings = false;
             self.show_repos_window = false;
