@@ -577,7 +577,7 @@ fn get_branch_list(repo: &git2::Repository) -> Vec<BranchInfo> {
         }
     }
     branches.sort_by(|a, b| b.time.cmp(&a.time));
-    branches
+    branches.into_iter().take(7).collect()
 }
 
 fn get_stash_list(repo: &mut git2::Repository) -> Vec<String> {
@@ -809,7 +809,8 @@ pub fn render_git_status_panel(
                 );
             } else {
                 for path in &untracked {
-                    let is_selected = app.git_status_selected_path.as_deref() == Some(path.as_str());
+                    let is_selected =
+                        app.git_status_selected_path.as_deref() == Some(path.as_str());
                     let desired = Vec2::new(ui.available_width(), row_h);
                     let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
                     let bg = if is_selected {
@@ -1056,7 +1057,7 @@ pub fn render_git_commit_panel(
             .monospace(),
     );
     ui.add_space(8.0);
-    
+
     let mut staged_files: Vec<String> = Vec::new();
     if let Ok(repo) = git2::Repository::discover(&app.base_dir) {
         let mut opts = git2::StatusOptions::new();
@@ -1065,7 +1066,11 @@ pub fn render_git_commit_panel(
             for entry in statuses.iter() {
                 if let Some(path) = entry.path() {
                     let status = entry.status();
-                    if status.is_index_new() || status.is_index_modified() || status.is_index_deleted() || status.is_index_renamed() {
+                    if status.is_index_new()
+                        || status.is_index_modified()
+                        || status.is_index_deleted()
+                        || status.is_index_renamed()
+                    {
                         staged_files.push(path.to_string());
                     }
                 }
@@ -1075,9 +1080,12 @@ pub fn render_git_commit_panel(
 
     if !staged_files.is_empty() {
         ui.label(
-            RichText::new(format!("📝 Staged files to commit ({}):", staged_files.len()))
-                .color(pal::TEXT_DIM)
-                .small(),
+            RichText::new(format!(
+                "📝 Staged files to commit ({}):",
+                staged_files.len()
+            ))
+            .color(pal::TEXT_DIM)
+            .small(),
         );
         ui.add_space(2.0);
         ScrollArea::vertical()
@@ -1127,7 +1135,6 @@ pub fn render_git_commit_panel(
             .fill(if app.is_llm_loading { Color32::from_gray(60) } else { Color32::from_rgb(40, 90, 55) });
         if ui.add_enabled(!app.is_llm_loading, ai_btn).clicked() {
             let recent_commits = app.git_log_entries.iter().take(5).map(|e| format!("- {}", e.message)).collect::<Vec<String>>().join("\n");
-            
             let diff = std::process::Command::new("git")
                 .args(["diff", "--staged"])
                 .current_dir(&app.base_dir)

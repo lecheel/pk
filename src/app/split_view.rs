@@ -88,7 +88,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                     let show_repos = app.concat_server_enabled;
                     let all_tabs = [
                         ("🔍 Search", "Search", Color32::from_rgb(120, 180, 255)),
-                        ("🤖 Chat", "Chat", Color32::from_rgb(180, 140, 255)),
                         ("🌳 Status", "Git Status", Color32::from_rgb(120, 230, 160)),
                         ("📝 Diff", "Git Diff", Color32::from_rgb(235, 120, 120)),
                         (
@@ -100,6 +99,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         ("📜 Log", "Git Log", Color32::from_rgb(180, 130, 230)),
                         ("📂 Repos", "Repos", Color32::from_rgb(120, 230, 160)),
                         ("⚙ Config", "Settings", Color32::from_rgb(120, 180, 255)),
+                        ("🤖 Chat", "Chat", Color32::from_rgb(180, 140, 255)),
                         ("🐞 Debug", "Debug", Color32::from_rgb(220, 180, 50)),
                     ];
                     let tabs: Vec<(&str, &str, Color32)> = all_tabs
