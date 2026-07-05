@@ -428,6 +428,29 @@ impl MergeApp {
     }
 
     /// Checks if a line contains a function signature declaration
+    /// After applying a hunk, switch to the diff-side view and put the
+    /// cursor on the first changed row so the result is immediately
+    /// inspectable and correctable, instead of leaving the user to
+    /// discover a bad merge later via git status.
+    pub fn jump_to_diff_side_after_merge(&mut self) {
+        self.refresh_git_diff_side_rows();
+        self.show_git_diff_side = true;
+        self.show_settings = false;
+        self.show_repos_window = false;
+        self.show_debug = false;
+        self.show_git_status_window = false;
+        self.show_git_diff_window = false;
+        self.show_git_log_window = false;
+        let first_change = self
+            .git_diff_rows
+            .iter()
+            .position(|r| !matches!(r.kind, RowKind::Equal));
+        self.git_diff_cursor = first_change;
+        self.git_diff_scroll_to_cursor = true;
+        self.diff_side_scroll_target = first_change;
+    }
+
+    /// Checks if a line contains a function signature declaration
     fn is_fn_line(&self, line: &str) -> bool {
         let trimmed = line.trim();
         if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("*") {
