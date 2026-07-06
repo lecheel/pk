@@ -244,9 +244,16 @@ pub fn render_file_panel(
                 if can_apply {
                     ui.add_enabled_ui(can_apply, |ui| {
                         let btn_text = if is_applied {
-                            "✓ Applied".to_string()
+                            "Applied".to_string()
                         } else {
-                            format!("⚡ Apply @ {}", apply_line)
+                            let (search_len, replace_len) = app
+                                .current_hunk()
+                                .map(|h| (h.search.len(), h.replace.len()))
+                                .unwrap_or((0, 0));
+                            format!(
+                                "⚡ Apply @ {} ({} -> {} ln)",
+                                apply_line, search_len, replace_len
+                            )
                         };
                         let btn = Button::new(RichText::new(&btn_text).strong().monospace()).fill(
                             if can_apply {
