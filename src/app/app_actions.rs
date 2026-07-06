@@ -447,6 +447,7 @@ impl MergeApp {
             ignore_comments: self.ignore_comments,
             min_match_score: self.min_match_score,
             min_match_floor: self.min_match_floor,
+            short_search_display: self.short_search_display,
             llm_config: self.llm_config.clone(),
             rustconcat_api_url: self.rustconcat_api_url.clone(),
             impl_tools: self.impl_tools.clone(),

@@ -121,6 +121,7 @@ impl MergeApp {
             ignore_comments: config.ignore_comments,
             min_match_score: config.min_match_score,
             min_match_floor: config.min_match_floor,
+            short_search_display: config.short_search_display,
             diff_side_hunk_idx: 0,
             diff_side_scroll_target: None,
             git_changed_files: Vec::new(),

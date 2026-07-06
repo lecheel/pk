@@ -180,6 +180,16 @@ pub fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
                     app.update_git_statuses();
                 }
             });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .checkbox(&mut app.short_search_display, "Short Search/Replace Display")
+                    .on_hover_text("Truncate search and replace blocks to first and last 10 lines when long")
+                    .changed()
+                {
+                    app.save_config();
+                }
+            });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.label("Min match score to auto-apply:");

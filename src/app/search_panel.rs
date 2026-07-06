@@ -240,110 +240,131 @@ pub fn render_search_panel(
                 .filter(|r| matches!(r.kind, RowKind::Equal | RowKind::Delete))
                 .map(|r| r.file_idx)
                 .collect();
-
-            for (line_idx, line) in hunk.search.iter().enumerate() {
-                let file_idx = search_file_map.get(line_idx).copied().flatten();
-                let is_matched = file_idx.is_some();
-                let (base_bg, prefix_color, prefix) = if is_matched {
-                    (pal::BG_MATCH, pal::TEXT_INSERT, "= ")
-                } else {
-                    (pal::BG_DELETE, pal::TEXT_DELETE, "- ")
-                };
-                let is_selected = app
-                    .left_selection
-                    .map_or(false, |(s, e)| line_idx >= s && line_idx <= e);
-                let bg = if is_selected {
-                    Color32::from_rgb(50, 50, 70)
-                } else {
-                    base_bg
-                };
-                let desired = Vec2::new(ui.available_width(), row_h);
-                let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
-                if resp.clicked() {
-                    set_selection = Some((line_idx, line_idx));
+            let show_truncated_search = app.short_search_display && hunk.search.len() > 20;
+            let total_search = hunk.search.len();
+            let render_search_ranges = if show_truncated_search {
+                vec![(0, 10), (total_search - 10, total_search)]
+            } else {
+                vec![(0, total_search)]
+            };
+            for (range_idx, &(start, end)) in render_search_ranges.iter().enumerate() {
+                if range_idx > 0 && show_truncated_search {
+                    let desired = Vec2::new(ui.available_width(), row_h);
+                    let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                    ui.painter().rect_filled(rect, 0.0, pal::BG_BASE);
+                    let text = format!("... ({}) ...", total_search - 20);
+                    ui.painter().text(
+                        Pos2::new(rect.left() + 4.0 + lnum_w + 6.0 + 2.0 * char_w, rect.center().y),
+                        Align2::LEFT_CENTER,
+                        &text,
+                        row_font.clone(),
+                        pal::TEXT_DIM,
+                    );
                 }
-                if resp.double_clicked() {
-                    let q = line.trim().to_string();
-                    app.file_search_query = q.clone();
-                    let q_lower = q.to_lowercase();
-                    if q_lower.is_empty() {
-                        app.search_matches.clear();
+                for line_idx in start..end {
+                    let line = &hunk.search[line_idx];
+                    let file_idx = search_file_map.get(line_idx).copied().flatten();
+                    let is_matched = file_idx.is_some();
+                    let (base_bg, prefix_color, prefix) = if is_matched {
+                        (pal::BG_MATCH, pal::TEXT_INSERT, "= ")
                     } else {
-                        app.search_matches = app
-                            .file_lines
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, l)| l.to_lowercase().contains(&q_lower))
-                            .map(|(i, _)| i)
-                            .collect();
-                        if !app.search_matches.is_empty() {
-                            app.search_match_idx = 0;
-                            app.cursor_line = Some(app.search_matches[0]);
-                            app.scroll_to_match = true;
-                            app.set_message(StatusMessage::info(format!(
-                                "🔍 Searched '{}': {} matches. Press n/N to cycle.",
-                                q,
-                                app.search_matches.len()
-                            )));
-                        } else {
+                        (pal::BG_DELETE, pal::TEXT_DELETE, "- ")
+                    };
+                    let is_selected = app
+                        .left_selection
+                        .map_or(false, |(s, e)| line_idx >= s && line_idx <= e);
+                    let bg = if is_selected {
+                        Color32::from_rgb(50, 50, 70)
+                    } else {
+                        base_bg
+                    };
+                    let desired = Vec2::new(ui.available_width(), row_h);
+                    let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+                    if resp.clicked() {
+                        set_selection = Some((line_idx, line_idx));
+                    }
+                    if resp.double_clicked() {
+                        let q = line.trim().to_string();
+                        app.file_search_query = q.clone();
+                        let q_lower = q.to_lowercase();
+                        if q_lower.is_empty() {
                             app.search_matches.clear();
-                            app.set_message(StatusMessage::warning(format!(
-                                "No matches found for '{}'",
-                                q
-                            )));
+                        } else {
+                            app.search_matches = app
+                                .file_lines
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, l)| l.to_lowercase().contains(&q_lower))
+                                .map(|(i, _)| i)
+                                .collect();
+                            if !app.search_matches.is_empty() {
+                                app.search_match_idx = 0;
+                                app.cursor_line = Some(app.search_matches[0]);
+                                app.scroll_to_match = true;
+                                app.set_message(StatusMessage::info(format!(
+                                    "🔍 Searched '{}': {} matches. Press n/N to cycle.",
+                                    q,
+                                    app.search_matches.len()
+                                )));
+                            } else {
+                                app.search_matches.clear();
+                                app.set_message(StatusMessage::warning(format!(
+                                    "No matches found for '{}'",
+                                    q
+                                )));
+                            }
                         }
                     }
+                    ui.painter().rect_filled(rect, 0.0, bg);
+                    let bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
+                    ui.painter().rect_filled(
+                        bar,
+                        0.0,
+                        if is_matched {
+                            pal::BAR_MATCH
+                        } else {
+                            pal::TEXT_DELETE
+                        },
+                    );
+                    let num_text = if let Some(fi) = file_idx {
+                        format!("{:>4}", fi + 1)
+                    } else {
+                        format!("{:>4}", line_idx + 1)
+                    };
+                    let lnum_x = rect.left() + 4.0;
+                    let prefix_x = lnum_x + lnum_w + 6.0;
+                    let text_x = prefix_x + 2.0 * char_w;
+                    ui.painter().text(
+                        Pos2::new(lnum_x, rect.center().y),
+                        Align2::LEFT_CENTER,
+                        &num_text,
+                        row_font.clone(),
+                        if is_matched {
+                            pal::TEXT_LNUM_ACTIVE
+                        } else {
+                            pal::TEXT_DIM
+                        },
+                    );
+                    ui.painter().text(
+                        Pos2::new(prefix_x, rect.center().y),
+                        Align2::LEFT_CENTER,
+                        prefix,
+                        row_font.clone(),
+                        prefix_color,
+                    );
+                    let display = MergeApp::truncate_owned(line, max_chars);
+                    ui.painter().text(
+                        Pos2::new(text_x, rect.center().y),
+                        Align2::LEFT_CENTER,
+                        &display,
+                        row_font.clone(),
+                        if is_applied {
+                            pal::TEXT_DIM
+                        } else {
+                            pal::TEXT_NORMAL
+                        },
+                    );
                 }
-                ui.painter().rect_filled(rect, 0.0, bg);
-                let bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
-                ui.painter().rect_filled(
-                    bar,
-                    0.0,
-                    if is_matched {
-                        pal::BAR_MATCH
-                    } else {
-                        pal::TEXT_DELETE
-                    },
-                );
-                let num_text = if let Some(fi) = file_idx {
-                    format!("{:>4}", fi + 1)
-                } else {
-                    format!("{:>4}", line_idx + 1)
-                };
-                let lnum_x = rect.left() + 4.0;
-                let prefix_x = lnum_x + lnum_w + 6.0;
-                let text_x = prefix_x + 2.0 * char_w;
-
-                ui.painter().text(
-                    Pos2::new(lnum_x, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    &num_text,
-                    row_font.clone(),
-                    if is_matched {
-                        pal::TEXT_LNUM_ACTIVE
-                    } else {
-                        pal::TEXT_DIM
-                    },
-                );
-                ui.painter().text(
-                    Pos2::new(prefix_x, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    prefix,
-                    row_font.clone(),
-                    prefix_color,
-                );
-                let display = MergeApp::truncate_owned(line, max_chars);
-                ui.painter().text(
-                    Pos2::new(text_x, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    &display,
-                    row_font.clone(),
-                    if is_applied {
-                        pal::TEXT_DIM
-                    } else {
-                        pal::TEXT_NORMAL
-                    },
-                );
             }
             ui.add_space(4.0);
             let (sep_rect, _) =
@@ -491,108 +512,131 @@ pub fn render_search_panel(
                         apply_selection = Some((cur_ln, (lo, hi)));
                     }
                 }
-                for (line_idx, line) in hunk.replace.iter().enumerate() {
-                    let desired = Vec2::new(ui.available_width(), row_h);
-                    let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
-                    let lnum_x = rect.left() + 4.0;
-                    let prefix_x = lnum_x + lnum_w + 6.0;
-                    let text_x = prefix_x + 2.0 * char_w;
-                    if resp.double_clicked() {
-                        let q = line.trim().to_string();
-                        app.file_search_query = q.clone();
-                        let q_lower = q.to_lowercase();
-                        if q_lower.is_empty() {
-                            app.search_matches.clear();
-                        } else {
-                            app.search_matches = app
-                                .file_lines
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, l)| l.to_lowercase().contains(&q_lower))
-                                .map(|(i, _)| i)
-                                .collect();
-                            if !app.search_matches.is_empty() {
-                                app.search_match_idx = 0;
-                                app.cursor_line = Some(app.search_matches[0]);
-                                app.scroll_to_match = true;
-                                app.set_message(StatusMessage::info(format!(
-                                    "🔍 Searched '{}': {} matches. Press n/N to cycle.",
-                                    q,
-                                    app.search_matches.len()
-                                )));
-                            } else {
+                let show_truncated_replace = app.short_search_display && hunk.replace.len() > 20;
+                let total_replace = hunk.replace.len();
+                let render_replace_ranges = if show_truncated_replace {
+                    vec![(0, 10), (total_replace - 10, total_replace)]
+                } else {
+                    vec![(0, total_replace)]
+                };
+                for (range_idx, &(start, end)) in render_replace_ranges.iter().enumerate() {
+                    if range_idx > 0 && show_truncated_replace {
+                        let desired = Vec2::new(ui.available_width(), row_h);
+                        let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                        ui.painter().rect_filled(rect, 0.0, pal::BG_BASE);
+                        let text = format!("... ({}) ...", total_replace - 20);
+                        ui.painter().text(
+                            Pos2::new(rect.left() + 4.0 + lnum_w + 6.0 + 2.0 * char_w, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            &text,
+                            row_font.clone(),
+                            pal::TEXT_DIM,
+                        );
+                    }
+                    for line_idx in start..end {
+                        let line = &hunk.replace[line_idx];
+                        let desired = Vec2::new(ui.available_width(), row_h);
+                        let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+                        let lnum_x = rect.left() + 4.0;
+                        let prefix_x = lnum_x + lnum_w + 6.0;
+                        let text_x = prefix_x + 2.0 * char_w;
+                        if resp.double_clicked() {
+                            let q = line.trim().to_string();
+                            app.file_search_query = q.clone();
+                            let q_lower = q.to_lowercase();
+                            if q_lower.is_empty() {
                                 app.search_matches.clear();
-                                app.set_message(StatusMessage::warning(format!(
-                                    "No matches found for '{}'",
-                                    q
-                                )));
-                            }
-                        }
-                    }
-                    if primary_down {
-                        if let Some(pos) = pointer_pos {
-                            if rect.contains(pos) {
-                                if app.right_drag_anchor.is_none() {
-                                    app.right_drag_anchor = Some(line_idx);
+                            } else {
+                                app.search_matches = app
+                                    .file_lines
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, l)| l.to_lowercase().contains(&q_lower))
+                                    .map(|(i, _)| i)
+                                    .collect();
+                                if !app.search_matches.is_empty() {
+                                    app.search_match_idx = 0;
+                                    app.cursor_line = Some(app.search_matches[0]);
+                                    app.scroll_to_match = true;
+                                    app.set_message(StatusMessage::info(format!(
+                                        "🔍 Searched '{}': {} matches. Press n/N to cycle.",
+                                        q,
+                                        app.search_matches.len()
+                                    )));
+                                } else {
+                                    app.search_matches.clear();
+                                    app.set_message(StatusMessage::warning(format!(
+                                        "No matches found for '{}'",
+                                        q
+                                    )));
                                 }
-                                let anchor = app.right_drag_anchor.unwrap();
-                                let lo = anchor.min(line_idx);
-                                let hi = anchor.max(line_idx);
-                                app.right_selection = Some((lo, hi));
                             }
                         }
+                        if primary_down {
+                            if let Some(pos) = pointer_pos {
+                                if rect.contains(pos) {
+                                    if app.right_drag_anchor.is_none() {
+                                        app.right_drag_anchor = Some(line_idx);
+                                    }
+                                    let anchor = app.right_drag_anchor.unwrap();
+                                    let lo = anchor.min(line_idx);
+                                    let hi = anchor.max(line_idx);
+                                    app.right_selection = Some((lo, hi));
+                                }
+                            }
+                        }
+                        let is_replace_selected = app
+                            .right_selection
+                            .map_or(false, |(s, e)| line_idx >= s && line_idx <= e);
+                        let replace_bg = if is_replace_selected {
+                            Color32::from_rgb(55, 40, 85)
+                        } else if !app.file_anchors.is_empty() {
+                            Color32::from_rgba_premultiplied(45, 38, 15, 60)
+                        } else {
+                            pal::BG_INSERT
+                        };
+                        ui.painter().rect_filled(rect, 0.0, replace_bg);
+                        let bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
+                        ui.painter().rect_filled(
+                            bar,
+                            0.0,
+                            if is_replace_selected {
+                                Color32::from_rgb(140, 100, 220)
+                            } else if !app.file_anchors.is_empty() {
+                                pal::BAR_ANCHOR
+                            } else {
+                                pal::BAR_MATCH
+                        },
+                        );
+                        ui.painter().text(
+                            Pos2::new(lnum_x, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            format!("{:>4}", line_idx + 1),
+                            row_font.clone(),
+                            pal::TEXT_DIM,
+                        );
+                        ui.painter().text(
+                            Pos2::new(prefix_x, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            "+ ",
+                            row_font.clone(),
+                            pal::TEXT_INSERT,
+                        );
+                        let display = MergeApp::truncate_owned(line, max_chars);
+                        ui.painter().text(
+                            Pos2::new(text_x, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            &display,
+                            row_font.clone(),
+                            if is_applied {
+                                pal::TEXT_DIM
+                            } else if !app.file_anchors.is_empty() {
+                                pal::TEXT_ANCHOR
+                            } else {
+                                Color32::from_rgb(155, 235, 165)
+                            },
+                        );
                     }
-                    let is_replace_selected = app
-                        .right_selection
-                        .map_or(false, |(s, e)| line_idx >= s && line_idx <= e);
-                    let replace_bg = if is_replace_selected {
-                        Color32::from_rgb(55, 40, 85)
-                    } else if !app.file_anchors.is_empty() {
-                        Color32::from_rgba_premultiplied(45, 38, 15, 60)
-                    } else {
-                        pal::BG_INSERT
-                    };
-                    ui.painter().rect_filled(rect, 0.0, replace_bg);
-                    let bar = Rect::from_min_size(rect.min, Vec2::new(2.0, rect.height()));
-                    ui.painter().rect_filled(
-                        bar,
-                        0.0,
-                        if is_replace_selected {
-                            Color32::from_rgb(140, 100, 220)
-                        } else if !app.file_anchors.is_empty() {
-                            pal::BAR_ANCHOR
-                        } else {
-                            pal::BAR_MATCH
-                        },
-                    );
-                    ui.painter().text(
-                        Pos2::new(lnum_x, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        format!("{:>4}", line_idx + 1),
-                        row_font.clone(),
-                        pal::TEXT_DIM,
-                    );
-                    ui.painter().text(
-                        Pos2::new(prefix_x, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        "+ ",
-                        row_font.clone(),
-                        pal::TEXT_INSERT,
-                    );
-                    let display = MergeApp::truncate_owned(line, max_chars);
-                    ui.painter().text(
-                        Pos2::new(text_x, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        &display,
-                        row_font.clone(),
-                        if is_applied {
-                            pal::TEXT_DIM
-                        } else if !app.file_anchors.is_empty() {
-                            pal::TEXT_ANCHOR
-                        } else {
-                            Color32::from_rgb(155, 235, 165)
-                        },
-                    );
                 }
                 if !primary_down {
                     app.right_drag_anchor = None;
