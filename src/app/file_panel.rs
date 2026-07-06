@@ -274,12 +274,15 @@ pub fn render_file_panel(
                     app.show_git_status_window = !app.show_git_status_window;
                 }
                 if ui
-                    .selectable_label(app.show_git_diff_window, "📝 Git Diff (F4)")
+                    .selectable_label(app.show_git_diff_window, "📝 Git Diff (F2)")
                     .clicked()
                 {
                     app.show_git_diff_window = !app.show_git_diff_window;
                 }
-                if ui.selectable_label(app.show_debug, "🐞 Debug").clicked() {
+                if ui
+                    .selectable_label(app.show_debug, "🐞 Debug (F10)")
+                    .clicked()
+                {
                     app.show_debug = !app.show_debug;
                 }
             });
