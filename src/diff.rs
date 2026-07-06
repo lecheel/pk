@@ -53,7 +53,6 @@ pub fn diff_patch(
 fn is_comment_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     trimmed.starts_with("//")
-        || trimmed.starts_with("#")
         || trimmed.starts_with("--")
         || trimmed.starts_with("/*")
         || trimmed.starts_with("*")
