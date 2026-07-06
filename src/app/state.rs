@@ -152,6 +152,7 @@ pub struct MergeApp {
     pub impl_skeleton: String,
     pub impl_files: String,
     pub impl_hashes: String,
+    pub daemon_sync_warning: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

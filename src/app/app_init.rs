@@ -156,6 +156,7 @@ impl MergeApp {
             impl_skeleton: String::new(),
             impl_files: String::new(),
             impl_hashes: String::new(),
+            daemon_sync_warning: None,
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {

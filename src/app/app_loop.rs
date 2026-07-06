@@ -8,6 +8,12 @@ use eframe::egui::*;
 
 impl eframe::App for MergeApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        if !self.file_path.is_empty() && std::path::Path::new(&self.file_path).is_dir() {
+            self.file_path.clear();
+            self.set_message(StatusMessage::warning(
+                "Path was a directory, cleared file path to prevent read/write errors.",
+            ));
+        }
         self.tick_impl_workflow(ctx);
         if ctx.input(|i| i.key_pressed(Key::Q) && i.modifiers.alt) {
             self.quit_requested = true;
@@ -40,7 +46,47 @@ impl eframe::App for MergeApp {
                 }
             }
         }
+        self.daemon_sync_warning = None;
+        if self.concat_server_enabled {
+            if let Some(daemon_repo) = super::daemon::get_active_repo() {
+                let daemon_path = if daemon_repo.contains('/') || daemon_repo.contains('\\') {
+                    daemon_repo
+                } else {
+                    self.available_repos
+                        .iter()
+                        .find(|r| r.id == daemon_repo)
+                        .map(|r| r.source_path.clone())
+                        .unwrap_or_default()
+                };
 
+                if !daemon_path.is_empty() {
+                    let norm_base = std::fs::canonicalize(&self.base_dir)
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| self.base_dir.trim_end_matches('/').to_string());
+                    let norm_daemon = std::fs::canonicalize(&daemon_path)
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| daemon_path.trim_end_matches('/').to_string());
+
+                    if norm_base != norm_daemon {
+                        self.daemon_sync_warning = Some(format!(
+                            "⚠️ Daemon mismatch: {} ≠ {}",
+                            norm_daemon, norm_base
+                        ));
+                    }
+                }
+            }
+        }
+        if self.daemon_sync_warning.is_none() && !self.file_path.is_empty() {
+            let norm_base = std::fs::canonicalize(&self.base_dir)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| self.base_dir.trim_end_matches('/').to_string());
+            let norm_file = std::fs::canonicalize(&self.file_path)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| self.file_path.clone());
+            if !norm_file.starts_with(&norm_base) {
+                self.daemon_sync_warning = Some(format!("! File repo no sync '{}' !", norm_base));
+            }
+        }
         if self.commit_ai_session.is_loading {
             if let Some(receiver) = self.commit_ai_session.receiver.take() {
                 let mut done = false;
@@ -238,8 +284,7 @@ impl eframe::App for MergeApp {
                         );
                         ui.label(
                             RichText::new("ESC to exit · Type to insert · Backspace to delete")
-                                .color(pal::TEXT_DIM)
-                                .small(),
+                                .color(pal::TEXT_DIM),
                         );
                     });
                 });
@@ -274,9 +319,7 @@ impl eframe::App for MergeApp {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
                             ui.label(
-                                RichText::new("ENTER search · ESC cancel")
-                                    .color(pal::TEXT_DIM)
-                                    .small(),
+                                RichText::new("ENTER search · ESC cancel").color(pal::TEXT_DIM),
                             );
                         });
                     });
@@ -303,8 +346,7 @@ impl eframe::App for MergeApp {
                                 "→ press any letter (a, b, c...) to set marker  ·  ESC cancel",
                             )
                             .color(pal::TEXT_NORMAL)
-                            .monospace()
-                            .small(),
+                            .monospace(),
                         );
                         if !self.file_anchors.is_empty() {
                             let labels: Vec<String> =
@@ -313,8 +355,7 @@ impl eframe::App for MergeApp {
                                 ui.label(
                                     RichText::new(labels.join("  "))
                                         .color(pal::TEXT_ANCHOR)
-                                        .monospace()
-                                        .small(),
+                                        .monospace(),
                                 );
                             });
                         }
@@ -350,7 +391,6 @@ impl eframe::App for MergeApp {
                             RichText::new(text)
                                 .color(Color32::from_rgb(255, 200, 80))
                                 .monospace()
-                                .small(),
                         );
                     });
                 });
@@ -376,8 +416,7 @@ impl eframe::App for MergeApp {
                             RichText::new(&msg)
                                 .color(pal::TEXT_DELETE)
                                 .strong()
-                                .monospace()
-                                .small(),
+                                .monospace(),
                         );
                         if self.del_start.is_some() && self.del_end.is_some() {
                             let start = self.del_start.unwrap();
@@ -390,7 +429,6 @@ impl eframe::App for MergeApp {
                                 RichText::new(format!("Delete block ({} lines)", count))
                                     .color(Color32::WHITE)
                                     .strong()
-                                    .small()
                                     .monospace(),
                             )
                             .fill(Color32::from_rgb(120, 40, 40));
@@ -426,15 +464,13 @@ impl eframe::App for MergeApp {
                             ))
                             .color(Color32::from_rgb(190, 160, 255))
                             .strong()
-                            .monospace()
-                            .small(),
+                            .monospace(),
                         );
                         ui.add(Separator::default().vertical());
                         let del_btn = Button::new(
                             RichText::new("🗑 Delete block")
                                 .color(Color32::WHITE)
                                 .strong()
-                                .small()
                                 .monospace(),
                         )
                         .fill(Color32::from_rgb(120, 40, 40));
@@ -447,7 +483,6 @@ impl eframe::App for MergeApp {
                             RichText::new("⚓ Set anchor ma")
                                 .color(Color32::WHITE)
                                 .strong()
-                                .small()
                                 .monospace(),
                         )
                         .fill(Color32::from_rgb(90, 70, 15));

@@ -208,6 +208,9 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                         ));
                     }
                 }
+                if let Some(warning) = &app.daemon_sync_warning {
+                    ui.label(RichText::new(warning).color(pal::ACCENT_BAD).strong());
+                }
             });
         });
 }
