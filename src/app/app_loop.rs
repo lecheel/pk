@@ -8,6 +8,7 @@ use eframe::egui::*;
 
 impl eframe::App for MergeApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        self.tick_impl_workflow(ctx);
         if ctx.input(|i| i.key_pressed(Key::Q) && i.modifiers.alt) {
             self.quit_requested = true;
         }

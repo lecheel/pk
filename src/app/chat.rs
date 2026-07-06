@@ -102,6 +102,35 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
     });
 
     ui.add(Separator::default());
+    if app.chat_mode == ChatMode::Impl {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "Round: {} / {}",
+                    app.impl_round, app.impl_round_limit
+                ))
+                .color(pal::TEXT_NORMAL)
+                .strong(),
+            );
+            ui.label(
+                RichText::new(format!("Status: {}", app.impl_result_indicator))
+                    .color(pal::TEXT_NORMAL)
+                    .strong(),
+            );
+            if !app.impl_is_running && app.impl_round < app.impl_round_limit {
+                let btn = Button::new(
+                    RichText::new("▶ Start Impl Round")
+                        .color(Color32::WHITE)
+                        .strong(),
+                )
+                .fill(Color32::from_rgb(40, 90, 55));
+                if ui.add(btn).clicked() {
+                    app.start_impl_round();
+                }
+            }
+        });
+        ui.add(Separator::default());
+    }
     if !app.is_llm_for_commit {
         let receiver = app.llm_response_receiver.take();
         if let Some(receiver) = receiver {

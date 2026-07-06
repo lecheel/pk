@@ -151,6 +151,16 @@ impl MergeApp {
             llm_start_time: None,
             show_system_prompt: false,
             is_llm_for_commit: false,
+            impl_round: 0,
+            impl_step: 0,
+            impl_result_indicator: String::new(),
+            impl_is_running: false,
+            impl_skeleton: String::new(),
+            impl_skills: String::new(),
+            impl_files: String::new(),
+            impl_prompt: config.impl_prompt.clone(),
+            impl_round_limit: config.impl_round_limit,
+            rustconcat_api_url: config.rustconcat_api_url.clone(),
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {

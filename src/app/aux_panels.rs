@@ -258,6 +258,36 @@ pub fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
             });
             ui.add_space(16.0);
             ui.separator();
+            ui.heading("Impl Workflow Settings");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label("Impl Prompt:");
+                ui.add(
+                    TextEdit::singleline(&mut app.impl_prompt)
+                        .desired_width(ui.available_width() - 80.0),
+                );
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Round Limit:");
+                if ui
+                    .add(Slider::new(&mut app.impl_round_limit, 1..=20).text("rounds"))
+                    .changed()
+                {
+                    app.save_config();
+                }
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("RustConcat API URL:");
+                ui.add(
+                    TextEdit::singleline(&mut app.rustconcat_api_url)
+                        .desired_width(ui.available_width() - 100.0)
+                        .hint_text("http://127.0.0.1:7890"),
+                );
+            });
+            ui.add_space(16.0);
+            ui.separator();
             chat::render_llm_settings(app, ui);
 
             ui.add_space(16.0);
