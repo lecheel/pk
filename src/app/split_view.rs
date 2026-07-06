@@ -82,12 +82,11 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         "Git Log"
                     } else if app.show_git_commit_window {
                         "Git Commit"
-                    } else if app.show_chat_window {
+                    } else if app.show_chat_window && !app.disable_llm {
                         "Chat"
                     } else {
                         "Search"
                     };
-
                     let show_repos = app.concat_server_enabled;
                     let all_tabs = [
                         ("🔍 Search", "Search", Color32::from_rgb(120, 180, 255)),
@@ -107,6 +106,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         .iter()
                         .cloned()
                         .filter(|t| t.1 != "Repos" || show_repos)
+                        .filter(|t| t.1 != "Chat" || !app.disable_llm)
                         .collect();
 
                     if app.fmt_error.is_some() {
@@ -236,7 +236,11 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                             session.start_time = Some(ui.ctx().input(|i| i.time));
                         }
                         let elapsed = ui.ctx().input(|i| i.time)
-                            - app.chat_sessions.get_mut(&active_mode).start_time.unwrap_or_default();
+                            - app
+                                .chat_sessions
+                                .get_mut(&active_mode)
+                                .start_time
+                                .unwrap_or_default();
                         ui.allocate_ui_with_layout(
                             Vec2::new(right_reserved, ui.available_height()),
                             Layout::right_to_left(Align::Center),
@@ -281,7 +285,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
         render_repos_panel(app, &mut left_ui);
     } else if app.show_debug {
         render_debug_panel(app, &mut left_ui);
-    } else if app.show_chat_window {
+    } else if app.show_chat_window && !app.disable_llm {
         if app.show_system_prompt {
             if let Some(prompt) = app.active_system_prompt() {
                 let mode_color = app.chat_mode.color();

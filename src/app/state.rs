@@ -118,6 +118,7 @@ pub struct MergeApp {
     pub min_match_score: f32,
     pub min_match_floor: f32,
     pub short_search_display: bool,
+    pub disable_llm: bool,
     pub diff_side_hunk_idx: usize,
     pub diff_side_scroll_target: Option<usize>,
     pub git_changed_files: Vec<String>,

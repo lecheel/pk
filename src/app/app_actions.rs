@@ -448,6 +448,7 @@ impl MergeApp {
             min_match_score: self.min_match_score,
             min_match_floor: self.min_match_floor,
             short_search_display: self.short_search_display,
+            disable_llm: self.disable_llm,
             llm_config: self.llm_config.clone(),
             rustconcat_api_url: self.rustconcat_api_url.clone(),
             impl_tools: self.impl_tools.clone(),
@@ -511,7 +512,9 @@ impl MergeApp {
                 self.impl_is_running = false;
                 self.impl_step = 0;
                 self.impl_result_indicator = "✅".to_string();
-                self.set_message(StatusMessage::success("Context fetched. Ready to implement."));
+                self.set_message(StatusMessage::success(
+                    "Context fetched. Ready to implement.",
+                ));
                 ctx.request_repaint();
             }
             _ => {}

@@ -175,37 +175,39 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                 if ui.button("?").on_hover_text("Keyboard shortcuts").clicked() {
                     app.show_help = !app.show_help;
                 }
-                ui.add(Separator::default().vertical().spacing(12.0));
-                let has_prompt = app.active_system_prompt().is_some();
-                let prompt_btn_color = if app.show_system_prompt {
-                    app.chat_mode.color()
-                } else if has_prompt {
-                    pal::TEXT_DIM
-                } else {
-                    Color32::from_gray(40)
-                };
-                if ui
-                    .button(
-                        RichText::new(format!("{} prompt", app.chat_mode.short_label()))
-                            .color(prompt_btn_color)
-                            .size(12.0),
-                    )
-                    .on_hover_text(if has_prompt {
-                        format!(
-                            "Show/hide {} system prompt (current LLM instruction context)",
-                            app.chat_mode.short_label()
+                if !app.disable_llm {
+                    ui.add(Separator::default().vertical().spacing(12.0));
+                    let has_prompt = app.active_system_prompt().is_some();
+                    let prompt_btn_color = if app.show_system_prompt {
+                        app.chat_mode.color()
+                    } else if has_prompt {
+                        pal::TEXT_DIM
+                    } else {
+                        Color32::from_gray(40)
+                    };
+                    if ui
+                        .button(
+                            RichText::new(format!("{} prompt", app.chat_mode.short_label()))
+                                .color(prompt_btn_color)
+                                .size(12.0),
                         )
-                    } else {
-                        "No system prompt for Chat mode — switch to Commit or Impl".to_string()
-                    })
-                    .clicked()
-                {
-                    if has_prompt {
-                        app.show_system_prompt = !app.show_system_prompt;
-                    } else {
-                        app.set_message(StatusMessage::info(
-                            "No system prompt in Chat mode. Try Commit or Impl mode.",
-                        ));
+                        .on_hover_text(if has_prompt {
+                            format!(
+                                "Show/hide {} system prompt (current LLM instruction context)",
+                                app.chat_mode.short_label()
+                            )
+                        } else {
+                            "No system prompt for Chat mode — switch to Commit or Impl".to_string()
+                        })
+                        .clicked()
+                    {
+                        if has_prompt {
+                            app.show_system_prompt = !app.show_system_prompt;
+                        } else {
+                            app.set_message(StatusMessage::info(
+                                "No system prompt in Chat mode. Try Commit or Impl mode.",
+                            ));
+                        }
                     }
                 }
                 if let Some(warning) = &app.daemon_sync_warning {

@@ -17,6 +17,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub short_search_display: bool,
     #[serde(default)]
+    pub disable_llm: bool,
+    #[serde(default)]
     pub llm_config: LlmConfig,
     #[serde(default = "default_rustconcat_api_url")]
     pub rustconcat_api_url: String,
@@ -60,6 +62,7 @@ impl Default for AppConfig {
             min_match_score: default_min_match_score(),
             min_match_floor: default_min_match_floor(),
             short_search_display: false,
+            disable_llm: false,
             llm_config: LlmConfig::default(),
             rustconcat_api_url: default_rustconcat_api_url(),
             impl_tools: ImplToolsConfig::default(),
