@@ -431,10 +431,10 @@ impl MergeApp {
     }
 
     pub fn cancel_llm(&mut self) {
-        if self.is_llm_loading {
-            self.is_llm_loading = false;
-            self.llm_start_time = None;
-            self.llm_response_receiver = None;
+        let mode = self.chat_mode.clone();
+        let was_loading = self.chat_sessions.get_mut(&mode).is_loading;
+        if was_loading {
+            self.chat_sessions.get_mut(&mode).cancel();
             self.set_message(StatusMessage::info("LLM request cancelled."));
         }
     }

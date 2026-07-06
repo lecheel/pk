@@ -41,8 +41,8 @@ impl eframe::App for MergeApp {
             }
         }
 
-        if self.is_llm_loading && self.is_llm_for_commit {
-            if let Some(receiver) = self.llm_response_receiver.take() {
+        if self.commit_ai_session.is_loading {
+            if let Some(receiver) = self.commit_ai_session.receiver.take() {
                 let mut done = false;
                 while let Ok(response) = receiver.try_recv() {
                     match response {
@@ -57,16 +57,16 @@ impl eframe::App for MergeApp {
                             )));
                             done = true;
                         }
+                        LlmResponse::ToolUse { .. } | LlmResponse::ToolResult { .. } => {}
                         LlmResponse::Done => {
                             done = true;
                         }
                     }
                 }
                 if !done {
-                    self.llm_response_receiver = Some(receiver);
+                    self.commit_ai_session.receiver = Some(receiver);
                 } else {
-                    self.is_llm_loading = false;
-                    self.is_llm_for_commit = false;
+                    self.commit_ai_session.is_loading = false;
                 }
             }
         }

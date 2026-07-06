@@ -156,6 +156,16 @@ pub struct ChatMessage {
 #[derive(Debug, Clone)]
 pub enum LlmResponse {
     Text(String),
+    ToolUse {
+        name: String,
+        arguments: String,
+        id: String,
+    },
+    ToolResult {
+        id: String,
+        name: String,
+        result: String,
+    },
     Error(String),
     Done,
 }
@@ -250,6 +260,11 @@ pub fn send_to_llm(
                     arguments,
                     id,
                 }) => {
+                    let _ = tx.send(LlmResponse::ToolUse {
+                        name: name.clone(),
+                        arguments: arguments.clone(),
+                        id: id.clone(),
+                    });
                     let tool_result = execute_tool(&name, &arguments, &concat_base_url, &base_dir);
                     if debug {
                         println!(
@@ -258,6 +273,12 @@ pub fn send_to_llm(
                             &tool_result.chars().take(500).collect::<String>()
                         );
                     }
+                    let _ = tx.send(LlmResponse::ToolResult {
+                        id: id.clone(),
+                        name: name.clone(),
+                        result: tool_result.clone(),
+                    });
+                    // Add assistant message with tool call
 
                     // Add assistant message with tool call
                     let assistant_msg = ChatMessage {
@@ -409,6 +430,24 @@ fn build_tools_json(tools_config: Option<&ImplToolsConfig>) -> Option<serde_json
         Some(json!(tools))
     }
 }
+/// Anthropic's Messages API uses a flat `{name, description, input_schema}`
+/// tool shape instead of OpenAI's `{type: "function", function: {...}}`
+/// wrapper, so tool definitions must be converted per-provider.
+fn to_anthropic_tools(tools_config: Option<&ImplToolsConfig>) -> Option<serde_json::Value> {
+    let openai_tools = build_tools_json(tools_config)?;
+    let arr = openai_tools.as_array()?;
+    let converted: Vec<serde_json::Value> = arr
+        .iter()
+        .map(|t| {
+            json!({
+                "name": t["function"]["name"],
+                "description": t["function"]["description"],
+                "input_schema": t["function"]["parameters"]
+            })
+        })
+        .collect();
+    Some(json!(converted))
+}
 fn call_openai(
     provider: &LlmProvider,
     messages: &[ChatMessage],
@@ -519,14 +558,43 @@ fn call_anthropic(
     };
     let mut json_messages = Vec::new();
     for msg in messages {
-        let mut m = json!({"role": msg.role, "content": msg.content});
+        if msg.role == "tool" {
+            // Anthropic expects tool results as a user message containing a
+            // tool_result content block, not an OpenAI-style tool message.
+            json_messages.push(json!({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": msg.tool_call_id.clone().unwrap_or_default(),
+                    "content": msg.content
+                }]
+            }));
+            continue;
+        }
         if let Some(tc) = &msg.tool_calls {
-            m["content"] = tc.clone();
+            // Anthropic expects tool calls as tool_use content blocks on an
+            // assistant message, not an OpenAI-style tool_calls array.
+            let mut blocks = Vec::new();
+            if !msg.content.is_empty() {
+                blocks.push(json!({"type": "text", "text": msg.content}));
+            }
+            if let Some(arr) = tc.as_array() {
+                for call in arr {
+                    let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
+                    let input: serde_json::Value =
+                        serde_json::from_str(args_str).unwrap_or_else(|_| json!({}));
+                    blocks.push(json!({
+                        "type": "tool_use",
+                        "id": call["id"],
+                        "name": call["function"]["name"],
+                        "input": input
+                    }));
+                }
+            }
+            json_messages.push(json!({"role": "assistant", "content": blocks}));
+            continue;
         }
-        if let Some(id) = &msg.tool_call_id {
-            m["tool_call_id"] = json!(id);
-        }
-        json_messages.push(m);
+        json_messages.push(json!({"role": msg.role, "content": msg.content}));
     }
     let mut body = json!({
         "model": provider.model,
@@ -537,7 +605,7 @@ fn call_anthropic(
     if let Some(sys) = system_prompt {
         body["system"] = json!(sys);
     }
-    if let Some(tools) = build_tools_json(tools_config) {
+    if let Some(tools) = to_anthropic_tools(tools_config) {
         body["tools"] = tools;
     }
     if debug {

@@ -143,14 +143,10 @@ impl MergeApp {
             git_status_selected_path: None,
             show_chat_window: false,
             chat_mode: ChatMode::Chat,
-            chat_history: Vec::new(),
-            chat_input: String::new(),
+            chat_sessions: super::chat::ChatSessions::default(),
             llm_config: config.llm_config.clone(),
-            llm_response_receiver: None,
-            is_llm_loading: false,
-            llm_start_time: None,
             show_system_prompt: false,
-            is_llm_for_commit: false,
+            commit_ai_session: super::chat::ChatSession::default(),
             rustconcat_api_url: config.rustconcat_api_url.clone(),
             impl_tools: config.impl_tools.clone(),
             impl_step: 0,
@@ -446,13 +442,9 @@ impl MergeApp {
         self.git_status_selected_path = None;
         self.show_chat_window = false;
         self.chat_mode = ChatMode::Chat;
-        self.chat_history.clear();
-        self.chat_input.clear();
-        self.llm_response_receiver = None;
-        self.is_llm_loading = false;
-        self.llm_start_time = None;
+        self.chat_sessions = super::chat::ChatSessions::default();
         self.show_system_prompt = false;
-        self.is_llm_for_commit = false;
+        self.commit_ai_session = super::chat::ChatSession::default();
         self.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&self.base_dir));
         self.set_message(StatusMessage::info(
             "Welcome! Open a .md file or paste a patch to begin.",

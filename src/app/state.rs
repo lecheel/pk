@@ -1,9 +1,9 @@
-use super::chat::{ChatEntry, ChatMode};
+use super::chat::{ChatEntry, ChatMode, ChatSession, ChatSessions};
 use super::clipboard_utils::get_clipboard_text;
 use super::config::AppConfig;
 use super::daemon::{self, RepoInfo};
 use super::git_ops::GitStatus;
-use super::llm::{LlmConfig, LlmResponse};
+use super::llm::LlmConfig;
 use super::matching::MergeMatching;
 use super::types::{Action, FileAnchor, FileState, StatusMessage};
 use crate::app::pal;
@@ -139,14 +139,10 @@ pub struct MergeApp {
     pub git_status_selected_path: Option<String>,
     pub show_chat_window: bool,
     pub chat_mode: ChatMode,
-    pub chat_history: Vec<ChatEntry>,
-    pub chat_input: String,
+    pub chat_sessions: ChatSessions,
     pub llm_config: LlmConfig,
-    pub llm_response_receiver: Option<mpsc::Receiver<LlmResponse>>,
-    pub is_llm_loading: bool,
-    pub llm_start_time: Option<f64>,
     pub show_system_prompt: bool,
-    pub is_llm_for_commit: bool,
+    pub commit_ai_session: ChatSession,
     pub rustconcat_api_url: String,
     pub impl_tools: super::config::ImplToolsConfig,
     pub debug_impl_llm: bool,

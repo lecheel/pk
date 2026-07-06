@@ -1030,6 +1030,33 @@ pub fn render_git_commit_panel(
     _char_w: f32,
     panel_w: f32,
 ) {
+    // Drain the dedicated AI-commit session. This is independent of the
+    // chat window's Chat/Commit/Impl sessions, so it's always drained here
+    // regardless of which chat tab happens to be open.
+    if let Some(receiver) = app.commit_ai_session.receiver.take() {
+        let mut finished = false;
+        while let Ok(response) = receiver.try_recv() {
+            match response {
+                llm::LlmResponse::Text(text) => {
+                    app.commit_message = text;
+                }
+                llm::LlmResponse::Error(err) => {
+                    app.set_message(super::types::StatusMessage::error(err));
+                    finished = true;
+                }
+                llm::LlmResponse::Done => {
+                    finished = true;
+                }
+                _ => {}
+            }
+        }
+        if finished {
+            app.commit_ai_session.is_loading = false;
+            app.commit_ai_session.receiver = None;
+        } else {
+            app.commit_ai_session.receiver = Some(receiver);
+        }
+    }
     ui.add_space(8.0);
     ui.label(
         RichText::new("💾 GIT COMMIT")
@@ -1107,8 +1134,8 @@ pub fn render_git_commit_panel(
             app.commit_message.clear();
         }
         let ai_btn = Button::new("AI Commit")
-            .fill(if app.is_llm_loading { Color32::from_gray(60) } else { Color32::from_rgb(40, 90, 55) });
-        if ui.add_enabled(!app.is_llm_loading, ai_btn).clicked() {
+            .fill(if app.commit_ai_session.is_loading { Color32::from_gray(60) } else { Color32::from_rgb(40, 90, 55) });
+        if ui.add_enabled(!app.commit_ai_session.is_loading, ai_btn).clicked() {
             let recent_commits = app.git_log_entries.iter().take(5).map(|e| format!("- {}", e.message)).collect::<Vec<String>>().join("\n");
             let diff = std::process::Command::new("git")
                 .args(["diff", "--staged"])
@@ -1166,9 +1193,8 @@ Git diff:\n{}", recent_commits, diff
                 tool_call_id: None,
             }];
             let provider = app.llm_config.commit_provider.clone();
-            app.llm_response_receiver = Some(llm::send_to_llm(provider, messages, system_prompt, None, String::new(), String::new(), false));
-            app.is_llm_loading = true;
-            app.is_llm_for_commit = true;
+            app.commit_ai_session.receiver = Some(llm::send_to_llm(provider, messages, system_prompt, None, String::new(), String::new(), false));
+            app.commit_ai_session.is_loading = true;
         }
     });
     ui.add_space(10.0);

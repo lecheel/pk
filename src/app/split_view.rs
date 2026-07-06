@@ -207,7 +207,13 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         )
                     };
 
-                    let right_reserved = if app.is_llm_loading { 150.0 } else { 0.0 };
+                    // Reflects the loading state of whichever chat mode is
+                    // currently active (Chat/Commit/Impl each have their own
+                    // session now), so this header spinner tracks the tab
+                    // the user is actually looking at.
+                    let active_mode = app.chat_mode.clone();
+                    let active_is_loading = app.chat_sessions.get_mut(&active_mode).is_loading;
+                    let right_reserved = if active_is_loading { 150.0 } else { 0.0 };
                     let available = ui.available_width().max(right_reserved) - right_reserved;
 
                     // Allocate space for the left side so it doesn't push the right side off-screen
@@ -224,13 +230,13 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         },
                     );
 
-                    if app.is_llm_loading {
-                        if app.llm_start_time.is_none() {
-                            app.llm_start_time = Some(ui.ctx().input(|i| i.time));
+                    if active_is_loading {
+                        let session = app.chat_sessions.get_mut(&active_mode);
+                        if session.start_time.is_none() {
+                            session.start_time = Some(ui.ctx().input(|i| i.time));
                         }
-                        let elapsed =
-                            ui.ctx().input(|i| i.time) - app.llm_start_time.unwrap_or_default();
-
+                        let elapsed = ui.ctx().input(|i| i.time)
+                            - app.chat_sessions.get_mut(&active_mode).start_time.unwrap_or_default();
                         ui.allocate_ui_with_layout(
                             Vec2::new(right_reserved, ui.available_height()),
                             Layout::right_to_left(Align::Center),
@@ -248,7 +254,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         );
                         ui.ctx().request_repaint();
                     } else {
-                        app.llm_start_time = None;
+                        app.chat_sessions.get_mut(&active_mode).start_time = None;
                     }
                 });
             });
