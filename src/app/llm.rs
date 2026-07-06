@@ -143,65 +143,299 @@ impl Default for LlmConfig {
     }
 }
 
+use super::config::ImplToolsConfig;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
-
 #[derive(Debug, Clone)]
 pub enum LlmResponse {
     Text(String),
     Error(String),
     Done,
 }
-
+enum LlmOutput {
+    Text(String),
+    ToolCall {
+        name: String,
+        arguments: String,
+        id: String,
+    },
+}
 pub fn send_to_llm(
     provider: LlmProvider,
-    messages: Vec<ChatMessage>,
+    mut messages: Vec<ChatMessage>,
     system_prompt: Option<String>,
+    tools_config: Option<ImplToolsConfig>,
+    concat_base_url: String,
+    base_dir: String,
+    debug: bool,
 ) -> mpsc::Receiver<LlmResponse> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = match provider.api_type.as_str() {
-            "anthropic" => call_anthropic(&provider, messages, system_prompt),
-            "openai" => call_openai(&provider, messages, system_prompt),
-            _ => call_ollama(&provider, messages, system_prompt),
-        };
-
-        match result {
-            Ok(text) => {
-                let _ = tx.send(LlmResponse::Text(text));
-                let _ = tx.send(LlmResponse::Done);
+        if debug {
+            println!("\n=== [IMPL LLM DEBUG] Starting LLM request ===");
+            println!(
+                "[IMPL LLM DEBUG] Provider: {} ({})",
+                provider.name(),
+                provider.model
+            );
+            println!("[IMPL LLM DEBUG] System Prompt: {:?}", system_prompt);
+            println!("[IMPL LLM DEBUG] Tools Config: {:?}", tools_config);
+        }
+        // Max 5 tool calls to prevent infinite loops
+        for i in 0..5 {
+            if debug {
+                println!("\n[IMPL LLM DEBUG] --- Loop iteration {} ---", i + 1);
+                println!(
+                    "[IMPL LLM DEBUG] Sending messages to LLM: {}",
+                    serde_json::to_string_pretty(&messages).unwrap_or_default()
+                );
             }
-            Err(e) => {
-                let _ = tx.send(LlmResponse::Error(e));
+
+            let result = match provider.api_type.as_str() {
+                "anthropic" => call_anthropic(
+                    &provider,
+                    &messages,
+                    &system_prompt,
+                    tools_config.as_ref(),
+                    debug,
+                ),
+                "openai" => call_openai(
+                    &provider,
+                    &messages,
+                    &system_prompt,
+                    tools_config.as_ref(),
+                    debug,
+                ),
+                _ => call_ollama(
+                    &provider,
+                    &messages,
+                    &system_prompt,
+                    tools_config.as_ref(),
+                    debug,
+                ),
+            };
+
+            if debug {
+                match &result {
+                    Ok(LlmOutput::Text(t)) => {
+                        println!("[IMPL LLM DEBUG] Received Text output: {}", t)
+                    }
+                    Ok(LlmOutput::ToolCall {
+                        name,
+                        arguments,
+                        id,
+                    }) => println!(
+                        "[IMPL LLM DEBUG] Received ToolCall: name={}, id={}, args={}",
+                        name, id, arguments
+                    ),
+                    Err(e) => println!("[IMPL LLM DEBUG] Received Error: {}", e),
+                }
+            }
+
+            match result {
+                Ok(LlmOutput::Text(text)) => {
+                    let _ = tx.send(LlmResponse::Text(text));
+                    let _ = tx.send(LlmResponse::Done);
+                    return;
+                }
+                Ok(LlmOutput::ToolCall {
+                    name,
+                    arguments,
+                    id,
+                }) => {
+                    let tool_result = execute_tool(&name, &arguments, &concat_base_url, &base_dir);
+                    if debug {
+                        println!(
+                            "[IMPL LLM DEBUG] Tool '{}' executed. Result (first 500 chars): {}",
+                            name,
+                            &tool_result.chars().take(500).collect::<String>()
+                        );
+                    }
+
+                    // Add assistant message with tool call
+                    let assistant_msg = ChatMessage {
+                        role: "assistant".to_string(),
+                        content: String::new(),
+                        tool_calls: Some(serde_json::json!([{
+                            "id": id,
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": arguments
+                            }
+                        }])),
+                        tool_call_id: None,
+                    };
+                    messages.push(assistant_msg);
+
+                    // Add tool response message
+                    let tool_msg = ChatMessage {
+                        role: "tool".to_string(),
+                        content: tool_result,
+                        tool_calls: None,
+                        tool_call_id: Some(id),
+                    };
+                    messages.push(tool_msg);
+                }
+                Err(e) => {
+                    let _ = tx.send(LlmResponse::Error(e));
+                    return;
+                }
             }
         }
+        let _ = tx.send(LlmResponse::Error("Max tool calls reached".to_string()));
     });
     rx
 }
+fn execute_tool(name: &str, arguments: &str, base_url: &str, base_dir: &str) -> String {
+    match name {
+        "get_skeleton" => {
+            let url = format!("{}/skeleton", base_url);
+            match reqwest::blocking::get(&url) {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        resp.text().unwrap_or_else(|e| format!("Failed to read response: {}", e))
+                    } else {
+                        format!("HTTP Error: {}", resp.status())
+                    }
+                }
+                Err(e) => format!("Request failed: {}", e),
+            }
+        }
+        "get_files" => {
+            let url = format!("{}/files", base_url);
+            match reqwest::blocking::get(&url) {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        resp.text().unwrap_or_else(|e| format!("Failed to read response: {}", e))
+                    } else {
+                        format!("HTTP Error: {}", resp.status())
+                    }
+                }
+                Err(e) => format!("Request failed: {}", e),
+            }
+        }
+        "get_hashes" => {
+            let url = format!("{}/hashes", base_url);
+            match reqwest::blocking::get(&url) {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        resp.text().unwrap_or_else(|e| format!("Failed to read response: {}", e))
+                    } else {
+                        format!("HTTP Error: {}", resp.status())
+                    }
+                }
+                Err(e) => format!("Request failed: {}", e),
+            }
+        }
+        "save_impl_patch" => {
+            let parsed: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
+            let patch = parsed["patch"].as_str().unwrap_or_default();
+            if patch.is_empty() {
+                return "Error: patch argument is empty".to_string();
+            }
+            let todo_path = std::path::Path::new(base_dir).join("todo.md");
+            match std::fs::write(&todo_path, patch) {
+                Ok(_) => "Patch successfully saved to todo.md".to_string(),
+                Err(e) => format!("Failed to save todo.md: {}", e),
+            }
+        }
+        _ => format!("Unknown tool: {}", name),
+    }
+}
+fn build_tools_json(tools_config: Option<&ImplToolsConfig>) -> Option<serde_json::Value> {
+    let config = tools_config?;
+    let mut tools = Vec::new();
 
+    if config.skeleton {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "get_skeleton",
+                "description": "Get the project skeleton structure",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        }));
+    }
+    if config.files {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "get_files",
+                "description": "Get a list of all files in the project",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        }));
+    }
+    if config.hashes {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "get_hashes",
+                "description": "Get hashes of the project files",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        }));
+    }
+    
+    tools.push(json!({
+        "type": "function",
+        "function": {
+            "name": "save_impl_patch",
+            "description": "Save the generated search/replace patch to todo.md in the repository directory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patch": {
+                        "type": "string",
+                        "description": "The complete search/replace code blocks to be saved"
+                    }
+                },
+                "required": ["patch"]
+            }
+        }
+    }));
+    
+    if tools.is_empty() {
+        None
+    } else {
+        Some(json!(tools))
+    }
+}
 fn call_openai(
     provider: &LlmProvider,
-    messages: Vec<ChatMessage>,
-    system_prompt: Option<String>,
-) -> Result<String, String> {
+    messages: &[ChatMessage],
+    system_prompt: &Option<String>,
+    tools_config: Option<&ImplToolsConfig>,
+    debug: bool,
+) -> Result<LlmOutput, String> {
     let base = provider.base_url.trim_end_matches('/');
     let url = if base.ends_with("/v1") {
         format!("{}/chat/completions", base)
     } else {
         format!("{}/v1/chat/completions", base)
     };
-
     let mut json_messages = Vec::new();
     if let Some(sys) = system_prompt {
         json_messages.push(json!({"role": "system", "content": sys}));
     }
-    for msg in &messages {
-        json_messages.push(json!({"role": msg.role, "content": msg.content}));
+    for msg in messages {
+        let mut m = json!({"role": msg.role, "content": msg.content});
+        if let Some(tc) = &msg.tool_calls {
+            m["tool_calls"] = tc.clone();
+        }
+        if let Some(id) = &msg.tool_call_id {
+            m["tool_call_id"] = json!(id);
+        }
+        json_messages.push(m);
     }
-
     let mut body = json!({
         "model": provider.model,
         "messages": json_messages,
@@ -209,112 +443,184 @@ fn call_openai(
     });
     body["options"] = json!({ "num_ctx": provider.num_ctx });
 
+    if let Some(tools) = build_tools_json(tools_config) {
+        body["tools"] = tools;
+    }
+
+    if debug {
+        println!("[IMPL LLM DEBUG] OpenAI Request URL: {}", url);
+        println!(
+            "[IMPL LLM DEBUG] OpenAI Request Body: {}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
+    }
+
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(provider.timeout_secs))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
     let mut req = client.post(&url).json(&body);
     if let Some(ref key) = provider.api_key {
         req = req.bearer_auth(key);
     }
-
     let resp = req.send().map_err(|e| format!("Request failed: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().unwrap_or_default();
+        if debug {
+            println!("[IMPL LLM DEBUG] OpenAI API Error Response: {}", text);
+        }
         return Err(format!("OpenAI API error {}: {}", status, text));
     }
+    let text = resp
+        .text()
+        .map_err(|e| format!("Failed to read response text: {}", e))?;
+    if debug {
+        println!("[IMPL LLM DEBUG] OpenAI Raw Response: {}", text);
+    }
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("Failed to parse response: {}", e))?;
 
-    let data: serde_json::Value = resp
-        .json()
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
-    data["choices"][0]["message"]["content"]
+    let msg = &data["choices"][0]["message"];
+    if let Some(tool_calls) = msg["tool_calls"].as_array() {
+        if !tool_calls.is_empty() {
+            let tc = &tool_calls[0];
+            return Ok(LlmOutput::ToolCall {
+                name: tc["function"]["name"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                arguments: tc["function"]["arguments"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                id: tc["id"].as_str().unwrap_or_default().to_string(),
+            });
+        }
+    }
+
+    msg["content"]
         .as_str()
-        .map(|s| s.to_string())
+        .map(|s| LlmOutput::Text(s.to_string()))
         .ok_or_else(|| "No content in response".to_string())
 }
-
 fn call_anthropic(
     provider: &LlmProvider,
-    messages: Vec<ChatMessage>,
-    system_prompt: Option<String>,
-) -> Result<String, String> {
+    messages: &[ChatMessage],
+    system_prompt: &Option<String>,
+    tools_config: Option<&ImplToolsConfig>,
+    debug: bool,
+) -> Result<LlmOutput, String> {
     let base = provider.base_url.trim_end_matches('/');
     let url = if base.ends_with("/v1") {
         format!("{}/messages", base)
     } else {
         format!("{}/v1/messages", base)
     };
-
     let mut json_messages = Vec::new();
-    for msg in &messages {
-        json_messages.push(json!({"role": msg.role, "content": msg.content}));
+    for msg in messages {
+        let mut m = json!({"role": msg.role, "content": msg.content});
+        if let Some(tc) = &msg.tool_calls {
+            m["content"] = tc.clone();
+        }
+        if let Some(id) = &msg.tool_call_id {
+            m["tool_call_id"] = json!(id);
+        }
+        json_messages.push(m);
     }
-
     let mut body = json!({
         "model": provider.model,
         "max_tokens": 4096,
         "messages": json_messages,
         "stream": false
     });
-
     if let Some(sys) = system_prompt {
         body["system"] = json!(sys);
     }
-
+    if let Some(tools) = build_tools_json(tools_config) {
+        body["tools"] = tools;
+    }
+    if debug {
+        println!("[IMPL LLM DEBUG] Anthropic Request URL: {}", url);
+        println!(
+            "[IMPL LLM DEBUG] Anthropic Request Body: {}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
+    }
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(provider.timeout_secs))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
     let mut req = client.post(&url).json(&body);
     if let Some(ref key) = provider.api_key {
         req = req
             .header("x-api-key", key)
             .header("anthropic-version", "2023-06-01");
     }
-
     let resp = req.send().map_err(|e| format!("Request failed: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().unwrap_or_default();
+        if debug {
+            println!("[IMPL LLM DEBUG] Anthropic API Error Response: {}", text);
+        }
         return Err(format!("Anthropic API error {}: {}", status, text));
     }
+    let text = resp
+        .text()
+        .map_err(|e| format!("Failed to read response text: {}", e))?;
+    if debug {
+        println!("[IMPL LLM DEBUG] Anthropic Raw Response: {}", text);
+    }
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("Failed to parse response: {}", e))?;
 
-    let data: serde_json::Value = resp
-        .json()
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    if let Some(content) = data["content"].as_array() {
+        for block in content {
+            if block["type"].as_str() == Some("tool_use") {
+                return Ok(LlmOutput::ToolCall {
+                    name: block["name"].as_str().unwrap_or_default().to_string(),
+                    arguments: block["input"].to_string(),
+                    id: block["id"].as_str().unwrap_or_default().to_string(),
+                });
+            }
+        }
+    }
 
     data["content"]
         .as_array()
         .and_then(|arr| arr.iter().find(|b| b["type"].as_str() == Some("text")))
         .and_then(|b| b["text"].as_str())
-        .map(|s| s.to_string())
+        .map(|s| LlmOutput::Text(s.to_string()))
         .ok_or_else(|| "No content in response".to_string())
 }
-
 fn call_ollama(
     provider: &LlmProvider,
-    messages: Vec<ChatMessage>,
-    system_prompt: Option<String>,
-) -> Result<String, String> {
-    // llama.cpp uses OpenAI-compatible endpoint at /v1/chat/completions
+    messages: &[ChatMessage],
+    system_prompt: &Option<String>,
+    tools_config: Option<&ImplToolsConfig>,
+    debug: bool,
+) -> Result<LlmOutput, String> {
     let base = provider.base_url.trim_end_matches('/');
     let url = if base.ends_with("/v1") {
         format!("{}/chat/completions", base)
     } else {
         format!("{}/v1/chat/completions", base)
     };
-
     let mut json_messages = Vec::new();
     if let Some(sys) = system_prompt {
         json_messages.push(json!({"role": "system", "content": sys}));
     }
-    for msg in &messages {
-        json_messages.push(json!({"role": msg.role, "content": msg.content}));
+    for msg in messages {
+        let mut m = json!({"role": msg.role, "content": msg.content});
+        if let Some(tc) = &msg.tool_calls {
+            m["tool_calls"] = tc.clone();
+        }
+        if let Some(id) = &msg.tool_call_id {
+            m["tool_call_id"] = json!(id);
+        }
+        json_messages.push(m);
     }
-
     let mut body = json!({
         "model": provider.model,
         "messages": json_messages,
@@ -322,11 +628,20 @@ fn call_ollama(
     });
     body["options"] = json!({ "num_ctx": provider.num_ctx });
 
+    if let Some(tools) = build_tools_json(tools_config) {
+        body["tools"] = tools;
+    }
+    if debug {
+        println!("[IMPL LLM DEBUG] Ollama Request URL: {}", url);
+        println!(
+            "[IMPL LLM DEBUG] Ollama Request Body: {}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
+    }
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(provider.timeout_secs))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
     let resp = client
         .post(&url)
         .json(&body)
@@ -335,14 +650,40 @@ fn call_ollama(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().unwrap_or_default();
+        if debug {
+            println!("[IMPL LLM DEBUG] Ollama API Error Response: {}", text);
+        }
         return Err(format!("Ollama/llama.cpp API error {}: {}", status, text));
     }
+    let text = resp
+        .text()
+        .map_err(|e| format!("Failed to read response text: {}", e))?;
+    if debug {
+        println!("[IMPL LLM DEBUG] Ollama Raw Response: {}", text);
+    }
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("Failed to parse response: {}", e))?;
 
-    let data: serde_json::Value = resp
-        .json()
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
-    data["choices"][0]["message"]["content"]
+    let msg = &data["choices"][0]["message"];
+    if let Some(tool_calls) = msg["tool_calls"].as_array() {
+        if !tool_calls.is_empty() {
+            let tc = &tool_calls[0];
+            return Ok(LlmOutput::ToolCall {
+                name: tc["function"]["name"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                arguments: tc["function"]["arguments"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                id: tc["id"].as_str().unwrap_or_default().to_string(),
+            });
+        }
+    }
+
+    msg["content"]
         .as_str()
-        .map(|s| s.to_string())
+        .map(|s| LlmOutput::Text(s.to_string()))
         .ok_or_else(|| "No content in response".to_string())
 }

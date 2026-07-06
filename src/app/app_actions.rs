@@ -450,6 +450,7 @@ impl MergeApp {
             llm_config: self.llm_config.clone(),
             rustconcat_api_url: self.rustconcat_api_url.clone(),
             impl_tools: self.impl_tools.clone(),
+            debug_impl_llm: self.debug_impl_llm,
         };
         config.save();
     }

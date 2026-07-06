@@ -147,14 +147,15 @@ pub struct MergeApp {
     pub llm_start_time: Option<f64>,
     pub show_system_prompt: bool,
     pub is_llm_for_commit: bool,
+    pub rustconcat_api_url: String,
+    pub impl_tools: super::config::ImplToolsConfig,
+    pub debug_impl_llm: bool,
     pub impl_step: usize,
-    pub impl_result_indicator: String,
     pub impl_is_running: bool,
+    pub impl_result_indicator: String,
     pub impl_skeleton: String,
     pub impl_files: String,
     pub impl_hashes: String,
-    pub rustconcat_api_url: String,
-    pub impl_tools: super::config::ImplToolsConfig,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

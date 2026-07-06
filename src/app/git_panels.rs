@@ -1162,9 +1162,11 @@ Git diff:\n{}", recent_commits, diff
             let messages = vec![ChatMessage {
                 role: "user".to_string(),
                 content: user_msg,
+                tool_calls: None,
+                tool_call_id: None,
             }];
             let provider = app.llm_config.commit_provider.clone();
-            app.llm_response_receiver = Some(llm::send_to_llm(provider, messages, system_prompt));
+            app.llm_response_receiver = Some(llm::send_to_llm(provider, messages, system_prompt, None, String::new(), String::new(), false));
             app.is_llm_loading = true;
             app.is_llm_for_commit = true;
         }

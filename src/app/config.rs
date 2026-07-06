@@ -20,6 +20,8 @@ pub struct AppConfig {
     pub rustconcat_api_url: String,
     #[serde(default)]
     pub impl_tools: ImplToolsConfig,
+    #[serde(default)]
+    pub debug_impl_llm: bool,
 }
 fn default_min_match_score() -> f32 {
     60.0
@@ -58,6 +60,7 @@ impl Default for AppConfig {
             llm_config: LlmConfig::default(),
             rustconcat_api_url: default_rustconcat_api_url(),
             impl_tools: ImplToolsConfig::default(),
+            debug_impl_llm: false,
         }
     }
 }

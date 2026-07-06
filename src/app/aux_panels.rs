@@ -281,6 +281,10 @@ pub fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
                     app.save_config();
                 }
             });
+            ui.add_space(8.0);
+            if ui.checkbox(&mut app.debug_impl_llm, "Debug Impl LLM (Log to console)").changed() {
+                app.save_config();
+            }
             ui.add_space(16.0);
             ui.separator();
             chat::render_llm_settings(app, ui);

@@ -2,6 +2,7 @@
 use super::llm::{self, ChatMessage, LlmResponse};
 use super::palette::pal;
 use super::state::MergeApp;
+use super::types::StatusMessage;
 use eframe::egui::*;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,12 +45,26 @@ impl ChatMode {
             ChatMode::Commit => "You are a helpful assistant that generates concise, meaningful git commit messages. \
                  Only output the commit message, nothing else. Use conventional commit format if appropriate."
                 .to_string(),
-            ChatMode::Impl => "You are a code implementation assistant. When given a description or partial code, \
-                 provide complete implementation in the appropriate language. Use the same style as \
-                 the surrounding code. Output ONLY the search/replace blocks using the format:\n\
-                 ```// src/filename.rs\n<<<<<<< SEARCH\n[exact original lines]\n=======\n[modified lines]\n>>>>>>> REPLACE```\n\
-                 Do not include any other text or explanations."
-                .to_string(),
+            ChatMode::Impl => "You are an autonomous code implementation assistant. Follow these steps strictly:\n\
+### 1. PREPARE\n\
+- Analyze the user's request to determine if it is an implementation or bugfix intention.\n\
+- Use the `get_skeleton` tool to view the project overview and understand the architecture.\n\
+- NEVER guess the existing code structure, whitespace, or indentation.\n\
+- Based on the project size (LOC), use `get_files` or `get_hashes` to locate the specific files that need changes.\n\
+\n\
+### 2. SUMMARY\n\
+- Once you have gathered enough context, provide a concise summary of your intention and the files you plan to modify.\n\
+- STOP and wait for the user to confirm your intention before proceeding to the implementation step.\n\
+\n\
+### 3. IMPL\n\
+- Only after the user confirms, generate the search/replace patch.\n\
+- Use the `save_impl_patch` tool to save the generated patch to `todo.md`. Do not output the patch directly in the chat.\n\
+- After saving, inform the user that the patch has been saved to `todo.md`.\n\
+\n\
+Search/replace format:\n\
+```// src/filename.rs\n<<<<<<< SEARCH\n[exact original lines (include enough context to be unique)]\n=======\n[modified lines]\n>>>>>>> REPLACE```\n\
+\n\
+If multiple files need changes, include multiple blocks in the `patch` argument of the `save_impl_patch` tool. Ensure the `SEARCH` block exactly matches the existing code, including whitespace.".to_string(),
         }
     }
 }
@@ -139,11 +154,25 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
                     LlmResponse::Text(text) => {
                         app.chat_history.push(ChatEntry {
                             role: "assistant".to_string(),
-                            content: text,
+                            content: text.clone(),
                             is_error: false,
                         });
                         done = true;
                         app.is_llm_loading = false;
+
+                        if app.chat_mode == ChatMode::Impl && !text.is_empty() {
+                            let todo_path = std::path::Path::new(&app.base_dir).join("todo.md");
+                            if let Err(e) = std::fs::write(&todo_path, &text) {
+                                app.set_message(StatusMessage::error(format!(
+                                    "Failed to save todo.md: {}",
+                                    e
+                                )));
+                            } else {
+                                app.set_message(StatusMessage::success(
+                                    "Impl patch saved to repo/todo.md. Please review and apply.",
+                                ));
+                            }
+                        }
                     }
                     LlmResponse::Error(err) => {
                         app.chat_history.push(ChatEntry {
@@ -340,6 +369,8 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
                 .map(|e| ChatMessage {
                     role: e.role.clone(),
                     content: e.content.clone(),
+                    tool_calls: None,
+                    tool_call_id: None,
                 })
                 .collect();
 
@@ -352,7 +383,25 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
 
             let provider = app.current_chat_provider().clone();
             let system_prompt = app.active_system_prompt();
-            app.llm_response_receiver = Some(llm::send_to_llm(provider, messages, system_prompt));
+            let tools_config = if app.chat_mode == ChatMode::Impl {
+                Some(app.impl_tools.clone())
+            } else {
+                None
+            };
+
+            let base_dir = app.base_dir.clone();
+            let concat_base_url = app.rustconcat_api_url.clone();
+            let debug = app.debug_impl_llm;
+            let base_dir = app.base_dir.clone();
+            app.llm_response_receiver = Some(llm::send_to_llm(
+                provider,
+                messages,
+                system_prompt,
+                tools_config,
+                concat_base_url,
+                base_dir,
+                debug,
+            ));
             app.is_llm_loading = true;
         }
     }
