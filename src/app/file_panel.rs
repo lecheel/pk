@@ -441,6 +441,19 @@ pub fn render_file_panel(
                         }
                     }
                 }
+                if i.key_pressed(Key::Delete) {
+                    if let Some(cur) = app.cursor_line {
+                        let line = app.file_lines[cur].clone();
+                        let mut chars: Vec<char> = line.chars().collect();
+                        if app.insert_cursor < chars.len() {
+                            app.save_history();
+                            chars.remove(app.insert_cursor);
+                            app.file_lines[cur] = chars.iter().collect();
+                            app.recompute_match();
+                            app.update_git_statuses();
+                        }
+                    }
+                }
                 for event in i.events.clone() {
                     if let Event::Text(txt) = event {
                         if txt != "\n" && txt != "\r" {
@@ -593,6 +606,102 @@ pub fn render_file_panel(
                 }
                 if i.key_pressed(Key::X) && app.is_visual_mode {
                     visual_delete = true;
+                }
+                if i.key_pressed(Key::X) && !app.is_visual_mode && app.vim_buffer.is_empty() && !app.d_pending {
+                    if let Some(cur) = app.cursor_line {
+                        if cur < app.file_lines.len() {
+                            let line = app.file_lines[cur].clone();
+                            let mut chars: Vec<char> = line.chars().collect();
+                            if app.cursor_col < chars.len() {
+                                app.save_history();
+                                chars.remove(app.cursor_col);
+                                app.file_lines[cur] = chars.iter().collect();
+                                let new_len = app.file_lines[cur].chars().count();
+                                if app.cursor_col >= new_len && app.cursor_col > 0 {
+                                    app.cursor_col -= 1;
+                                }
+                                app.recompute_match();
+                                app.update_git_statuses();
+                            }
+                        }
+                    }
+                }
+                if i.key_pressed(Key::F7) {
+                    if let Some(cur) = app.cursor_line {
+                        if cur < app.file_lines.len() {
+                            let line = app.file_lines[cur].clone();
+                            let chars: Vec<char> = line.chars().collect();
+                            let open_brackets = ['(', '{', '['];
+                            let close_brackets = [')', '}', ']'];
+                            let mut target_c = None;
+                            let mut start_col = app.cursor_col;
+                            if start_col < chars.len() {
+                                if open_brackets.contains(&chars[start_col]) || close_brackets.contains(&chars[start_col]) {
+                                    target_c = Some(chars[start_col]);
+                                }
+                            }
+                            if target_c.is_none() {
+                                for i_col in app.cursor_col..chars.len() {
+                                    if open_brackets.contains(&chars[i_col]) || close_brackets.contains(&chars[i_col]) {
+                                        target_c = Some(chars[i_col]);
+                                        start_col = i_col;
+                                        break;
+                                    }
+                                }
+                            }
+                            if let Some(tc) = target_c {
+                                let mut matched_line = None;
+                                let mut matched_col = 0;
+                                if open_brackets.contains(&tc) {
+                                    let match_c = close_brackets[open_brackets.iter().position(|&c| c == tc).unwrap()];
+                                    let mut depth = 0;
+                                    'outer: for l in cur..app.file_lines.len() {
+                                        let l_chars: Vec<char> = app.file_lines[l].chars().collect();
+                                        let c_start = if l == cur { start_col } else { 0 };
+                                        for c_idx in c_start..l_chars.len() {
+                                            let ch = l_chars[c_idx];
+                                            if ch == tc {
+                                                depth += 1;
+                                            } else if ch == match_c {
+                                                depth -= 1;
+                                                if depth == 0 {
+                                                    matched_line = Some(l);
+                                                    matched_col = c_idx;
+                                                    break 'outer;
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    let match_c = open_brackets[close_brackets.iter().position(|&c| c == tc).unwrap()];
+                                    let mut depth = 0;
+                                    'outer: for l in (0..=cur).rev() {
+                                        let l_chars: Vec<char> = app.file_lines[l].chars().collect();
+                                        let c_end = if l == cur { start_col + 1 } else { l_chars.len() };
+                                        for c_idx in (0..c_end).rev() {
+                                            let ch = l_chars[c_idx];
+                                            if ch == tc {
+                                                depth += 1;
+                                            } else if ch == match_c {
+                                                depth -= 1;
+                                                if depth == 0 {
+                                                    matched_line = Some(l);
+                                                    matched_col = c_idx;
+                                                    break 'outer;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if let Some(ml) = matched_line {
+                                    app.cursor_line = Some(ml);
+                                    app.cursor_col = matched_col;
+                                    app.scroll_to_match = true;
+                                    cursor_changed = true;
+                                }
+                            }
+                        }
+                    }
                 }
                 if i.key_pressed(Key::L) && !app.d_pending && app.vim_buffer.is_empty() {
                     if i.modifiers.shift {

@@ -124,6 +124,7 @@ pub struct MergeApp {
     pub git_changed_files: Vec<String>,
     pub git_changed_file_idx: usize,
     pub git_diff_cursor: Option<usize>,
+    pub git_diff_cursor_col: usize,
     pub git_diff_vim_buffer: String,
     pub git_diff_scroll_to_cursor: bool,
     pub git_diff_insert_mode: bool,

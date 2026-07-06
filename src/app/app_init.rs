@@ -128,6 +128,7 @@ impl MergeApp {
             git_changed_files: Vec::new(),
             git_changed_file_idx: 0,
             git_diff_cursor: None,
+            git_diff_cursor_col: 0,
             git_diff_vim_buffer: String::new(),
             git_diff_scroll_to_cursor: false,
             git_diff_insert_mode: false,
@@ -426,6 +427,7 @@ impl MergeApp {
         self.git_changed_files.clear();
         self.git_changed_file_idx = 0;
         self.git_diff_cursor = None;
+        self.git_diff_cursor_col = 0;
         self.git_diff_vim_buffer.clear();
         self.git_diff_scroll_to_cursor = false;
         self.git_diff_insert_mode = false;

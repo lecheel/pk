@@ -64,6 +64,8 @@ pub fn render_git_diff_side_panel(
         let mut revert_to_head = false;
         let mut enter_insert = false;
         let mut enter_insert_at_start = false;
+        let mut x_pressed = false;
+        let mut f7_pressed = false;
         ui.input(|i| {
             if i.key_pressed(Key::ArrowDown) {
                 app.git_diff_cursor = Some((cur + 1).min(rows.len() - 1));
@@ -76,12 +78,27 @@ pub fn render_git_diff_side_panel(
             if app.git_diff_cursor.is_none() {
                 app.git_diff_cursor = Some(cur);
             }
+            if i.key_pressed(Key::F7) {
+                f7_pressed = true;
+            }
+            if i.key_pressed(Key::ArrowLeft) {
+                if app.git_diff_cursor_col > 0 {
+                    app.git_diff_cursor_col -= 1;
+                }
+            }
+            if i.key_pressed(Key::ArrowRight) {
+                let max_len = app.git_diff_rows.get(cur).and_then(|r| r.right.as_ref()).map(|s| s.chars().count()).unwrap_or(0);
+                if app.git_diff_cursor_col < max_len {
+                    app.git_diff_cursor_col += 1;
+                }
+            }
             for event in i.events.clone() {
                 if let Event::Text(txt) = event {
                     match txt.as_str() {
                         "r" if app.git_diff_vim_buffer.is_empty() => revert_to_head = true,
                         "i" if app.git_diff_vim_buffer.is_empty() => enter_insert = true,
                         "I" if app.git_diff_vim_buffer.is_empty() => enter_insert_at_start = true,
+                        "x" if app.git_diff_vim_buffer.is_empty() => x_pressed = true,
                         _ => new_text.push_str(&txt),
                     }
                 }
@@ -89,6 +106,104 @@ pub fn render_git_diff_side_panel(
         });
         if moved {
             app.git_diff_scroll_to_cursor = true;
+        }
+        if x_pressed {
+            if let Some(fl) = app.git_diff_rows.get(cur).and_then(|r| r.right_num).map(|n| n - 1) {
+                if fl < app.file_lines.len() {
+                    let line = app.file_lines[fl].clone();
+                    let mut chars: Vec<char> = line.chars().collect();
+                    if app.git_diff_cursor_col < chars.len() {
+                        app.save_history();
+                        chars.remove(app.git_diff_cursor_col);
+                        app.file_lines[fl] = chars.iter().collect();
+                        let new_len = app.file_lines[fl].chars().count();
+                        if app.git_diff_cursor_col >= new_len && app.git_diff_cursor_col > 0 {
+                            app.git_diff_cursor_col -= 1;
+                        }
+                        app.recompute_match();
+                        app.update_git_statuses();
+                        app.refresh_git_diff_side_rows();
+                    }
+                }
+            }
+        }
+        if f7_pressed {
+            if let Some(fl) = app.git_diff_rows.get(cur).and_then(|r| r.right_num).map(|n| n - 1) {
+                if fl < app.file_lines.len() {
+                    let line = app.file_lines[fl].clone();
+                    let chars: Vec<char> = line.chars().collect();
+                    let open_brackets = ['(', '{', '['];
+                    let close_brackets = [')', '}', ']'];
+                    let mut target_c = None;
+                    let mut start_col = app.git_diff_cursor_col;
+                    if start_col < chars.len() {
+                        if open_brackets.contains(&chars[start_col]) || close_brackets.contains(&chars[start_col]) {
+                            target_c = Some(chars[start_col]);
+                        }
+                    }
+                    if target_c.is_none() {
+                        for i in app.git_diff_cursor_col..chars.len() {
+                            if open_brackets.contains(&chars[i]) || close_brackets.contains(&chars[i]) {
+                                target_c = Some(chars[i]);
+                                start_col = i;
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(tc) = target_c {
+                        let mut matched_line = None;
+                        let mut matched_col = 0;
+                        if open_brackets.contains(&tc) {
+                            let match_c = close_brackets[open_brackets.iter().position(|&c| c == tc).unwrap()];
+                            let mut depth = 0;
+                            'outer: for l in fl..app.file_lines.len() {
+                                let l_chars: Vec<char> = app.file_lines[l].chars().collect();
+                                let c_start = if l == fl { start_col } else { 0 };
+                                for c_idx in c_start..l_chars.len() {
+                                    let ch = l_chars[c_idx];
+                                    if ch == tc {
+                                        depth += 1;
+                                    } else if ch == match_c {
+                                        depth -= 1;
+                                        if depth == 0 {
+                                            matched_line = Some(l);
+                                            matched_col = c_idx;
+                                            break 'outer;
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            let match_c = open_brackets[close_brackets.iter().position(|&c| c == tc).unwrap()];
+                            let mut depth = 0;
+                            'outer: for l in (0..=fl).rev() {
+                                let l_chars: Vec<char> = app.file_lines[l].chars().collect();
+                                let c_end = if l == fl { start_col + 1 } else { l_chars.len() };
+                                for c_idx in (0..c_end).rev() {
+                                    let ch = l_chars[c_idx];
+                                    if ch == tc {
+                                        depth += 1;
+                                    } else if ch == match_c {
+                                        depth -= 1;
+                                        if depth == 0 {
+                                            matched_line = Some(l);
+                                            matched_col = c_idx;
+                                            break 'outer;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(ml) = matched_line {
+                            if let Some(row_idx) = app.git_diff_rows.iter().position(|r| r.right_num == Some(ml + 1)) {
+                                app.git_diff_cursor = Some(row_idx);
+                                app.git_diff_cursor_col = matched_col;
+                                app.git_diff_scroll_to_cursor = true;
+                            }
+                        }
+                    }
+                }
+            }
         }
         if revert_to_head {
             apply_git_diff_vim_cmd(app, VimCmd::RevertToHead, cur, &hunk_row_starts);
@@ -105,10 +220,7 @@ pub fn render_git_diff_side_panel(
                 app.insert_cursor = if enter_insert_at_start {
                     0
                 } else {
-                    app.file_lines
-                        .get(fl)
-                        .map(|l| l.chars().count())
-                        .unwrap_or(0)
+                    app.git_diff_cursor_col
                 };
             }
         }
@@ -499,6 +611,20 @@ pub fn render_git_diff_side_panel(
                             pal::TEXT_NORMAL
                         },
                     );
+
+                    if is_cursor {
+                        let col = if app.git_diff_insert_mode {
+                            app.insert_cursor
+                        } else {
+                            app.git_diff_cursor_col
+                        };
+                        let cursor_x = right_rect.left() + text_x_off + (col as f32 * char_w);
+                        let cursor_rect = Rect::from_min_size(
+                            Pos2::new(cursor_x, rect.top() + 2.0),
+                            Vec2::new(char_w.min(2.0), rect.height() - 4.0),
+                        );
+                        ui.painter().rect_filled(cursor_rect, 0.0, pal::BAR_CURSOR);
+                    }
                 }
                 let sep = Rect::from_min_size(
                     Pos2::new(rect.min.x + half_w + 3.0, rect.top()),
@@ -716,6 +842,36 @@ fn handle_git_diff_insert_mode(app: &mut MergeApp, ui: &mut Ui) {
             app.file_lines[cur] = chars.iter().collect();
             app.insert_cursor -= 1;
             changed = true;
+        }
+        if i.key_pressed(Key::Delete) {
+            let max_len = app
+                .file_lines
+                .get(cur)
+                .map(|l| l.chars().count())
+                .unwrap_or(0);
+            if app.insert_cursor < max_len {
+                app.save_history();
+                let line = app.file_lines[cur].clone();
+                let mut chars: Vec<char> = line.chars().collect();
+                chars.remove(app.insert_cursor);
+                app.file_lines[cur] = chars.iter().collect();
+                changed = true;
+            }
+        }
+        if i.key_pressed(Key::Delete) {
+            let max_len = app
+                .file_lines
+                .get(cur)
+                .map(|l| l.chars().count())
+                .unwrap_or(0);
+            if app.insert_cursor < max_len {
+                app.save_history();
+                let line = app.file_lines[cur].clone();
+                let mut chars: Vec<char> = line.chars().collect();
+                chars.remove(app.insert_cursor);
+                app.file_lines[cur] = chars.iter().collect();
+                changed = true;
+            }
         }
         for event in i.events.clone() {
             if let Event::Text(txt) = event {
