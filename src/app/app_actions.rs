@@ -448,123 +448,68 @@ impl MergeApp {
             min_match_score: self.min_match_score,
             min_match_floor: self.min_match_floor,
             llm_config: self.llm_config.clone(),
-            impl_prompt: self.impl_prompt.clone(),
-            impl_round_limit: self.impl_round_limit,
             rustconcat_api_url: self.rustconcat_api_url.clone(),
+            impl_tools: self.impl_tools.clone(),
         };
         config.save();
     }
     pub fn start_impl_round(&mut self) {
-        if self.impl_round >= self.impl_round_limit {
-            self.set_message(StatusMessage::warning(format!(
-                "Impl round limit ({}) reached.",
-                self.impl_round_limit
-            )));
-            return;
-        }
-        self.impl_round += 1;
         self.impl_step = 1;
         self.impl_is_running = true;
         self.impl_result_indicator = "⏳".to_string();
-        self.set_message(StatusMessage::info(format!(
-            "Impl round {} started. Fetching skeleton...",
-            self.impl_round
-        )));
+        self.impl_skeleton.clear();
+        self.impl_files.clear();
+        self.impl_hashes.clear();
+        self.set_message(StatusMessage::info("Fetching context for Impl..."));
     }
     pub fn tick_impl_workflow(&mut self, ctx: &eframe::egui::Context) {
         if !self.impl_is_running {
             return;
         }
         let base_url = self.rustconcat_api_url.clone();
-        let repo_path = self.base_dir.clone();
-        let todo_path = std::path::Path::new(&repo_path).join("todo.md");
 
         match self.impl_step {
             1 => {
-                let url = format!("{}/skeleton", base_url);
-                match reqwest::blocking::get(&url) {
-                    Ok(resp) => {
+                if self.impl_tools.skeleton {
+                    let url = format!("{}/skeleton", base_url);
+                    if let Ok(resp) = reqwest::blocking::get(&url) {
                         if resp.status().is_success() {
                             self.impl_skeleton = resp.text().unwrap_or_default();
-                            self.impl_step = 2;
-                        } else {
-                            self.impl_result_indicator = "❌".to_string();
-                            self.impl_step = 5;
                         }
                     }
-                    Err(_) => {
-                        self.impl_result_indicator = "❌".to_string();
-                        self.impl_step = 5;
-                    }
                 }
+                self.impl_step = 2;
                 ctx.request_repaint();
             }
             2 => {
-                let url = format!("{}/skills", base_url);
-                match reqwest::blocking::get(&url) {
-                    Ok(resp) => {
+                if self.impl_tools.files {
+                    let url = format!("{}/files", base_url);
+                    if let Ok(resp) = reqwest::blocking::get(&url) {
                         if resp.status().is_success() {
-                            self.impl_skills = resp.text().unwrap_or_default();
-                            self.impl_step = 3;
-                        } else {
-                            self.impl_result_indicator = "❌".to_string();
-                            self.impl_step = 5;
+                            self.impl_files = resp.text().unwrap_or_default();
                         }
                     }
-                    Err(_) => {
-                        self.impl_result_indicator = "❌".to_string();
-                        self.impl_step = 5;
-                    }
                 }
+                self.impl_step = 3;
                 ctx.request_repaint();
             }
             3 => {
-                let url = format!("{}/files", base_url);
-                match reqwest::blocking::get(&url) {
-                    Ok(resp) => {
+                if self.impl_tools.hashes {
+                    let url = format!("{}/hashes", base_url);
+                    if let Ok(resp) = reqwest::blocking::get(&url) {
                         if resp.status().is_success() {
-                            self.impl_files = resp.text().unwrap_or_default();
-                            self.impl_step = 4;
-                        } else {
-                            self.impl_result_indicator = "❌".to_string();
-                            self.impl_step = 5;
+                            self.impl_hashes = resp.text().unwrap_or_default();
                         }
                     }
-                    Err(_) => {
-                        self.impl_result_indicator = "❌".to_string();
-                        self.impl_step = 5;
-                    }
                 }
+                self.impl_step = 4;
                 ctx.request_repaint();
             }
             4 => {
-                let content = format!(
-                    "# TODO - Impl Round {}\n\n## Status\n{}\n\n## Skeleton\n{}\n\n## Skills\n{}\n\n## Files\n{}\n",
-                    self.impl_round,
-                    self.impl_result_indicator,
-                    self.impl_skeleton,
-                    self.impl_skills,
-                    self.impl_files
-                );
-                if let Err(e) = std::fs::write(&todo_path, content) {
-                    self.set_message(StatusMessage::error(format!(
-                        "Failed to save todo.md: {}",
-                        e
-                    )));
-                    self.impl_result_indicator = "❌".to_string();
-                } else {
-                    self.impl_result_indicator = "✅".to_string();
-                    self.set_message(StatusMessage::success(format!(
-                        "Impl round {} result saved to repo/todo.md for manual merge.",
-                        self.impl_round
-                    )));
-                }
-                self.impl_step = 5;
-                ctx.request_repaint();
-            }
-            5 => {
                 self.impl_is_running = false;
                 self.impl_step = 0;
+                self.impl_result_indicator = "✅".to_string();
+                self.set_message(StatusMessage::success("Context fetched. Ready to implement."));
                 ctx.request_repaint();
             }
             _ => {}

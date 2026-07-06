@@ -16,12 +16,10 @@ pub struct AppConfig {
     pub min_match_floor: f32,
     #[serde(default)]
     pub llm_config: LlmConfig,
-    #[serde(default = "default_impl_prompt")]
-    pub impl_prompt: String,
-    #[serde(default = "default_impl_round_limit")]
-    pub impl_round_limit: usize,
     #[serde(default = "default_rustconcat_api_url")]
     pub rustconcat_api_url: String,
+    #[serde(default)]
+    pub impl_tools: ImplToolsConfig,
 }
 fn default_min_match_score() -> f32 {
     60.0
@@ -29,14 +27,23 @@ fn default_min_match_score() -> f32 {
 fn default_min_match_floor() -> f32 {
     15.0
 }
-fn default_impl_prompt() -> String {
-    "Implement the requested feature using the provided skeleton and skills.".to_string()
-}
-fn default_impl_round_limit() -> usize {
-    10
-}
 fn default_rustconcat_api_url() -> String {
     "http://127.0.0.1:7890".to_string()
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImplToolsConfig {
+    pub skeleton: bool,
+    pub files: bool,
+    pub hashes: bool,
+}
+impl Default for ImplToolsConfig {
+    fn default() -> Self {
+        Self {
+            skeleton: true,
+            files: false,
+            hashes: false,
+        }
+    }
 }
 impl Default for AppConfig {
     fn default() -> Self {
@@ -49,9 +56,8 @@ impl Default for AppConfig {
             min_match_score: default_min_match_score(),
             min_match_floor: default_min_match_floor(),
             llm_config: LlmConfig::default(),
-            impl_prompt: default_impl_prompt(),
-            impl_round_limit: default_impl_round_limit(),
             rustconcat_api_url: default_rustconcat_api_url(),
+            impl_tools: ImplToolsConfig::default(),
         }
     }
 }

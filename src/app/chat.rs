@@ -46,7 +46,9 @@ impl ChatMode {
                 .to_string(),
             ChatMode::Impl => "You are a code implementation assistant. When given a description or partial code, \
                  provide complete implementation in the appropriate language. Use the same style as \
-                 the surrounding code. Output only the code, no explanations."
+                 the surrounding code. Output ONLY the search/replace blocks using the format:\n\
+                 ```// src/filename.rs\n<<<<<<< SEARCH\n[exact original lines]\n=======\n[modified lines]\n>>>>>>> REPLACE```\n\
+                 Do not include any other text or explanations."
                 .to_string(),
         }
     }
@@ -87,7 +89,10 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
                 .strong()
                 .size(12.0);
             if ui.selectable_label(is_active, rich_text).clicked() {
-                app.chat_mode = mode;
+                app.chat_mode = mode.clone();
+                if mode == ChatMode::Impl && app.impl_skeleton.is_empty() && !app.impl_is_running {
+                    app.start_impl_round();
+                }
             }
         }
 
@@ -105,21 +110,13 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
     if app.chat_mode == ChatMode::Impl {
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(format!(
-                    "Round: {} / {}",
-                    app.impl_round, app.impl_round_limit
-                ))
-                .color(pal::TEXT_NORMAL)
-                .strong(),
-            );
-            ui.label(
                 RichText::new(format!("Status: {}", app.impl_result_indicator))
                     .color(pal::TEXT_NORMAL)
                     .strong(),
             );
-            if !app.impl_is_running && app.impl_round < app.impl_round_limit {
+            if !app.impl_is_running {
                 let btn = Button::new(
-                    RichText::new("▶ Start Impl Round")
+                    RichText::new("🔄 Refetch Context")
                         .color(Color32::WHITE)
                         .strong(),
                 )
@@ -127,6 +124,8 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
                 if ui.add(btn).clicked() {
                     app.start_impl_round();
                 }
+            } else {
+                ui.label(RichText::new("Fetching...").color(pal::ACCENT_INFO));
             }
         });
         ui.add(Separator::default());
@@ -311,21 +310,22 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
                 context
             } else if app.chat_mode == ChatMode::Impl {
                 let mut context = String::new();
-                if !app.file_lines.is_empty() {
-                    context.push_str(&format!("Current file: {}\n\n", app.file_path));
-                    // Include surrounding context around cursor
-                    if let Some(cursor) = app.cursor_line {
-                        let start = cursor.saturating_sub(20);
-                        let end = (cursor + 20).min(app.file_lines.len());
-                        context.push_str("Context around cursor:\n```\n");
-                        for (i, line) in app.file_lines[start..end].iter().enumerate() {
-                            let line_num = start + i + 1;
-                            let marker = if line_num == cursor + 1 { ">>" } else { "  " };
-                            context.push_str(&format!("{} {}\n", marker, line));
-                        }
-                        context.push_str("```\n\n");
-                    }
+                if app.impl_tools.skeleton && !app.impl_skeleton.is_empty() {
+                    context.push_str("## Skeleton\n```\n");
+                    context.push_str(&app.impl_skeleton);
+                    context.push_str("\n```\n\n");
                 }
+                if app.impl_tools.files && !app.impl_files.is_empty() {
+                    context.push_str("## Files\n```\n");
+                    context.push_str(&app.impl_files);
+                    context.push_str("\n```\n\n");
+                }
+                if app.impl_tools.hashes && !app.impl_hashes.is_empty() {
+                    context.push_str("## Hashes\n```\n");
+                    context.push_str(&app.impl_hashes);
+                    context.push_str("\n```\n\n");
+                }
+                context.push_str("User Request: ");
                 context.push_str(&input);
                 context
             } else {
