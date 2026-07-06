@@ -186,7 +186,7 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                 };
                 if ui
                     .button(
-                        RichText::new(format!("🤖 {}", app.chat_mode.short_label()))
+                        RichText::new(format!("{} prompt", app.chat_mode.short_label()))
                             .color(prompt_btn_color)
                             .size(12.0),
                     )
