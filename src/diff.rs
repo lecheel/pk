@@ -173,22 +173,21 @@ pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool
 
     // Use a +3 boundary anchor (check first 3 and last 3 non-empty lines)
     const BOUNDARY_ANCHOR: usize = 3;
-    let s_head = first_n_nonempty(search, BOUNDARY_ANCHOR, true);
-    let s_tail = last_n_nonempty(search, BOUNDARY_ANCHOR, true);
+    let s_head = first_n_nonempty(search, BOUNDARY_ANCHOR, false);
+    let s_tail = last_n_nonempty(search, BOUNDARY_ANCHOR, false);
     let k_head = s_head.len();
     let k_tail = s_tail.len();
-
     let s_first = s_head.first().cloned();
     let s_last = s_tail.last().cloned();
-
     let mut candidate_windows: Vec<(usize, usize)> = Vec::new();
-
     if let (Some(first), Some(last)) = (s_first, s_last) {
         let first_matches: Vec<usize> = file
             .iter()
             .enumerate()
             .filter_map(|(i, l)| {
-                if l.trim() == first.trim() {
+                if l.trim() == first.trim()
+                    || (ignore_comments && is_comment_line(l) && is_comment_line(&first))
+                {
                     Some(i)
                 } else {
                     None
@@ -199,14 +198,15 @@ pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool
             .iter()
             .enumerate()
             .filter_map(|(i, l)| {
-                if l.trim() == last.trim() {
+                if l.trim() == last.trim()
+                    || (ignore_comments && is_comment_line(l) && is_comment_line(&last))
+                {
                     Some(i)
                 } else {
                     None
                 }
             })
             .collect();
-
         for &start in &first_matches {
             for &end in &last_matches {
                 let window_size = end - start + 1;
@@ -216,17 +216,14 @@ pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool
             }
         }
     } else {
-        // Fallback for trivial searches (e.g. all comments or empty)
         for window_size in min_window..=max_window {
             for start in 0..=file.len().saturating_sub(window_size) {
                 candidate_windows.push((start, start + window_size));
             }
         }
     }
-
     for (start, end) in candidate_windows {
         let window = &file[start..end];
-
         let mut all_present = true;
         for &req in &required_lines {
             if !window.iter().any(|l| l.trim() == req.trim()) {
@@ -237,12 +234,17 @@ pub fn find_best_match(search: &[String], file: &[String], ignore_comments: bool
         if !all_present {
             continue;
         }
-
-        let w_head = first_n_nonempty(window, k_head, true);
-        let w_tail = last_n_nonempty(window, k_tail, true);
-        let boundary_match =
-            !s_head.is_empty() && !s_tail.is_empty() && w_head == s_head && w_tail == s_tail;
-
+        let w_head = first_n_nonempty(window, k_head, false);
+        let w_tail = last_n_nonempty(window, k_tail, false);
+        let head_match = s_head.len() == w_head.len()
+            && s_head.iter().zip(w_head.iter()).all(|(a, b)| {
+                a == b || (ignore_comments && is_comment_line(a) && is_comment_line(b))
+            });
+        let tail_match = s_tail.len() == w_tail.len()
+            && s_tail.iter().zip(w_tail.iter()).all(|(a, b)| {
+                a == b || (ignore_comments && is_comment_line(a) && is_comment_line(b))
+            });
+        let boundary_match = !s_head.is_empty() && !s_tail.is_empty() && head_match && tail_match;
         if !boundary_match {
             continue;
         }
@@ -337,24 +339,17 @@ pub fn compute_match_for_window(
         .iter()
         .filter(|l| is_valuable_line(l) && (!ignore_comments || !is_comment_line(l)))
         .count();
-    let first_non_empty = search
-        .iter()
-        .find(|l| !l.trim().is_empty() && (!ignore_comments || !is_comment_line(l)));
-    let last_non_empty = search
-        .iter()
-        .rev()
-        .find(|l| !l.trim().is_empty() && (!ignore_comments || !is_comment_line(l)));
-    let win_first = window
-        .iter()
-        .find(|l| !l.trim().is_empty() && (!ignore_comments || !is_comment_line(l)));
-    let win_last = window
-        .iter()
-        .rev()
-        .find(|l| !l.trim().is_empty() && (!ignore_comments || !is_comment_line(l)));
-
+    let first_non_empty = search.iter().find(|l| !l.trim().is_empty());
+    let last_non_empty = search.iter().rev().find(|l| !l.trim().is_empty());
+    let win_first = window.iter().find(|l| !l.trim().is_empty());
+    let win_last = window.iter().rev().find(|l| !l.trim().is_empty());
     let boundary_match = match (first_non_empty, win_first, last_non_empty, win_last) {
         (Some(s_first), Some(w_first), Some(s_last), Some(w_last)) => {
-            s_first.trim() == w_first.trim() && s_last.trim() == w_last.trim()
+            let head_ok = s_first.trim() == w_first.trim()
+                || (ignore_comments && is_comment_line(s_first) && is_comment_line(w_first));
+            let tail_ok = s_last.trim() == w_last.trim()
+                || (ignore_comments && is_comment_line(s_last) && is_comment_line(w_last));
+            head_ok && tail_ok
         }
         _ => false,
     };
