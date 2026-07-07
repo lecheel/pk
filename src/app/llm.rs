@@ -479,8 +479,10 @@ fn call_openai(
         "model": provider.model,
         "messages": json_messages,
         "stream": false,
+        "max_tokens": 16384,
+        "temperature": 1.0,
+        "top_p": 1.0,
     });
-    body["options"] = json!({ "num_ctx": provider.num_ctx });
 
     if let Some(tools) = build_tools_json(tools_config) {
         body["tools"] = tools;
