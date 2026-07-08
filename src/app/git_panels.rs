@@ -1192,7 +1192,7 @@ Git diff:\n{}", recent_commits, diff
                 tool_calls: None,
                 tool_call_id: None,
             }];
-            let provider = app.llm_config.commit_provider.clone();
+            let provider = app.llm_config.models.get(app.llm_config.commit_model_idx).cloned().unwrap_or_default();
             app.commit_ai_session.receiver = Some(llm::send_to_llm(provider, messages, system_prompt, None, String::new(), String::new(), false));
             app.commit_ai_session.is_loading = true;
         }

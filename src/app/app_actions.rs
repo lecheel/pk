@@ -410,11 +410,15 @@ impl MergeApp {
     }
 
     pub fn current_chat_provider(&self) -> &super::llm::LlmProvider {
-        match self.chat_mode {
-            ChatMode::Chat => &self.llm_config.chat_provider,
-            ChatMode::Commit => &self.llm_config.commit_provider,
-            ChatMode::Impl => &self.llm_config.impl_provider,
-        }
+        let idx = match self.chat_mode {
+            ChatMode::Chat => self.llm_config.chat_model_idx,
+            ChatMode::Commit => self.llm_config.commit_model_idx,
+            ChatMode::Impl => self.llm_config.impl_model_idx,
+        };
+        self.llm_config
+            .models
+            .get(idx)
+            .unwrap_or_else(|| self.llm_config.models.first().expect("at least one model"))
     }
     pub fn active_system_prompt(&self) -> Option<String> {
         let default = self.chat_mode.system_prompt();

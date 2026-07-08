@@ -100,7 +100,54 @@ impl AppConfig {
     pub fn load() -> Self {
         if let Some(path) = Self::config_path() {
             if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
+                if let Ok(mut config) = serde_json::from_str::<AppConfig>(&content) {
+                    if config.llm_config.models.is_empty() {
+                        #[derive(Deserialize)]
+                        struct OldLlmProvider {
+                            api_type: String,
+                            base_url: String,
+                            model: String,
+                            api_key: Option<String>,
+                            num_ctx: u64,
+                            timeout_secs: u64,
+                        }
+                        #[derive(Deserialize)]
+                        struct OldLlmConfig {
+                            chat_provider: OldLlmProvider,
+                            commit_provider: OldLlmProvider,
+                            impl_provider: OldLlmProvider,
+                            chat_system_prompt: String,
+                            commit_system_prompt: String,
+                            impl_system_prompt: String,
+                        }
+                        #[derive(Deserialize)]
+                        struct OldAppConfig {
+                            llm_config: OldLlmConfig,
+                        }
+                        if let Ok(old) = serde_json::from_str::<OldAppConfig>(&content) {
+                            let to_new = |p: OldLlmProvider| super::llm::LlmProvider {
+                                api_type: p.api_type,
+                                base_url: p.base_url,
+                                model: p.model,
+                                api_key: p.api_key,
+                                num_ctx: p.num_ctx,
+                                timeout_secs: p.timeout_secs,
+                            };
+                            config.llm_config.models = vec![
+                                to_new(old.llm_config.chat_provider),
+                                to_new(old.llm_config.commit_provider),
+                                to_new(old.llm_config.impl_provider),
+                            ];
+                            config.llm_config.chat_model_idx = 0;
+                            config.llm_config.commit_model_idx = 1;
+                            config.llm_config.impl_model_idx = 2;
+                            config.llm_config.chat_system_prompt = old.llm_config.chat_system_prompt;
+                            config.llm_config.commit_system_prompt = old.llm_config.commit_system_prompt;
+                            config.llm_config.impl_system_prompt = old.llm_config.impl_system_prompt;
+                        } else {
+                            config.llm_config = super::llm::LlmConfig::default();
+                        }
+                    }
                     return config;
                 }
             }

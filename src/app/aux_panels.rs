@@ -320,66 +320,16 @@ pub fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
             {
                 app.save_config();
             }
+
             if !app.disable_llm {
                 ui.add_space(16.0);
                 ui.separator();
-                chat::render_llm_settings(app, ui);
-                ui.add_space(16.0);
-                ui.separator();
-                ui.add_space(8.0);
-                ui.heading("Context Window & Timeout");
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(
-                        "Configure num_ctx (context tokens) and request timeout per provider.",
-                    )
-                    .color(pal::TEXT_DIM)
-                    .small(),
-                );
-                ui.add_space(8.0);
-                let mut changed = false;
-                let providers: [(&str, &mut super::llm::LlmProvider); 3] = [
-                    ("Chat", &mut app.llm_config.chat_provider),
-                    ("Commit", &mut app.llm_config.commit_provider),
-                    ("Impl", &mut app.llm_config.impl_provider),
-                ];
-                for (label, provider) in providers {
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!("{} ({}):", label, provider.name())).strong(),
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("num_ctx:");
-                        let mut ctx = provider.num_ctx;
-                        let resp = ui.add(
-                            Slider::new(&mut ctx, 256..=131072)
-                                .logarithmic(true)
-                                .text("tokens"),
-                        );
-                        if resp.changed() {
-                            provider.num_ctx = ctx;
-                            changed = true;
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("timeout (s):");
-                        let mut secs = provider.timeout_secs;
-                        let resp = ui.add(
-                            Slider::new(&mut secs, 30..=3600)
-                                .text("secs")
-                                .clamp_to_range(true),
-                        );
-                        if resp.changed() {
-                            provider.timeout_secs = secs;
-                            changed = true;
-                        }
-                    });
-                }
-                if changed {
-                    app.save_config();
-                }
+                ui.horizontal(|ui| {
+                    if ui.button("⚙ Open LLM Configuration").clicked() {
+                        app.show_llm_config = true;
+                        app.show_settings = false;
+                    }
+                });
             }
         });
 }

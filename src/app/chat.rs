@@ -167,11 +167,7 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
         for m in [ChatMode::Chat, ChatMode::Commit, ChatMode::Impl] {
             let is_active = app.chat_mode == m;
             let rich_text = RichText::new(m.label())
-                .color(if is_active {
-                    m.color()
-                } else {
-                    pal::TEXT_DIM
-                })
+                .color(if is_active { m.color() } else { pal::TEXT_DIM })
                 .strong()
                 .size(12.0);
             if ui.selectable_label(is_active, rich_text).clicked() {
@@ -235,7 +231,11 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
                             tool_id: None,
                         });
                     }
-                    LlmResponse::ToolUse { name, arguments, id } => {
+                    LlmResponse::ToolUse {
+                        name,
+                        arguments,
+                        id,
+                    } => {
                         // Persisted into history (not just used locally by the
                         // request thread) so the *next* turn still remembers
                         // which tools already ran.
@@ -319,8 +319,7 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
             if is_loading {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    let dots =
-                        ".".repeat(((ui.input(|i| i.time) * 2.0).floor() as usize % 4) + 1);
+                    let dots = ".".repeat(((ui.input(|i| i.time) * 2.0).floor() as usize % 4) + 1);
                     ui.label(
                         RichText::new(format!("Thinking{}", dots))
                             .color(pal::ACCENT_INFO)
@@ -346,9 +345,7 @@ pub fn render_chat_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: f32) {
             .text_color(pal::TEXT_NORMAL);
         let response = ui.add(text_edit);
         // Handle Enter key for submit
-        if response.lost_focus()
-            && ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift)
-        {
+        if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift) {
             submit = true;
             response.request_focus();
         }
@@ -559,33 +556,127 @@ fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
     result
 }
 
+pub fn render_llm_config_panel(app: &mut MergeApp, ui: &mut Ui) {
+    ui.horizontal(|ui| {
+        if ui.button("← Back").clicked() {
+            app.show_llm_config = false;
+            app.show_settings = true;
+        }
+        ui.heading("LLM Configuration");
+    });
+    ui.separator();
+    ScrollArea::vertical()
+        .id_source("llm_config_scroll")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            render_llm_settings(app, ui);
+        });
+}
+
 pub fn render_llm_settings(app: &mut MergeApp, ui: &mut Ui) {
     ui.add_space(8.0);
-    ui.heading("LLM Configuration");
+    ui.heading("Available Models");
     ui.add_space(8.0);
 
-    let providers = ["OpenAI", "Anthropic", "Ollama"];
+    ui.horizontal(|ui| {
+        if ui.button("➕ Add Model").clicked() {
+            app.llm_config
+                .models
+                .push(super::llm::LlmProvider::default());
+        }
+    });
 
-    render_provider_config(
-        ui,
-        "Chat Provider:",
-        &mut app.llm_config.chat_provider,
-        &providers,
-    );
-    ui.add_space(12.0);
-    render_provider_config(
-        ui,
-        "Commit Provider:",
-        &mut app.llm_config.commit_provider,
-        &providers,
-    );
-    ui.add_space(12.0);
-    render_provider_config(
-        ui,
-        "Impl Provider:",
-        &mut app.llm_config.impl_provider,
-        &providers,
-    );
+    ui.add_space(8.0);
+
+    let mut to_delete = None;
+    let models_len = app.llm_config.models.len();
+
+    for (i, model) in app.llm_config.models.iter_mut().enumerate() {
+        ui.add_space(8.0);
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("Model {}", i + 1)).strong());
+            if models_len > 1 {
+                if ui.button("🗑 Delete").clicked() {
+                    to_delete = Some(i);
+                }
+            }
+        });
+        let providers = ["OpenAI", "Anthropic", "Ollama"];
+        render_provider_config(ui, model, &providers);
+    }
+
+    if let Some(idx) = to_delete {
+        app.llm_config.models.remove(idx);
+        if app.llm_config.chat_model_idx >= app.llm_config.models.len() {
+            app.llm_config.chat_model_idx = 0;
+        }
+        if app.llm_config.commit_model_idx >= app.llm_config.models.len() {
+            app.llm_config.commit_model_idx = 0;
+        }
+        if app.llm_config.impl_model_idx >= app.llm_config.models.len() {
+            app.llm_config.impl_model_idx = 0;
+        }
+    }
+
+    ui.add_space(16.0);
+    ui.separator();
+    ui.add_space(8.0);
+    ui.heading("Role Assignment");
+    ui.add_space(8.0);
+
+    let model_names: Vec<String> = app
+        .llm_config
+        .models
+        .iter()
+        .enumerate()
+        .map(|(i, m)| format!("{}. {} ({})", i + 1, m.model, m.name()))
+        .collect();
+
+    ui.horizontal(|ui| {
+        ui.label("Chat Model:");
+        let selected = model_names
+            .get(app.llm_config.chat_model_idx)
+            .cloned()
+            .unwrap_or_default();
+        ComboBox::from_id_source("chat_model_select")
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                for (i, name) in model_names.iter().enumerate() {
+                    ui.selectable_value(&mut app.llm_config.chat_model_idx, i, name);
+                }
+            });
+    });
+
+    ui.horizontal(|ui| {
+        ui.label("Commit Model:");
+        let selected = model_names
+            .get(app.llm_config.commit_model_idx)
+            .cloned()
+            .unwrap_or_default();
+        ComboBox::from_id_source("commit_model_select")
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                for (i, name) in model_names.iter().enumerate() {
+                    ui.selectable_value(&mut app.llm_config.commit_model_idx, i, name);
+                }
+            });
+    });
+
+    ui.horizontal(|ui| {
+        ui.label("Impl Model:");
+        let selected = model_names
+            .get(app.llm_config.impl_model_idx)
+            .cloned()
+            .unwrap_or_default();
+        ComboBox::from_id_source("impl_model_select")
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                for (i, name) in model_names.iter().enumerate() {
+                    ui.selectable_value(&mut app.llm_config.impl_model_idx, i, name);
+                }
+            });
+    });
 
     ui.add_space(16.0);
     ui.separator();
@@ -598,7 +689,6 @@ pub fn render_llm_settings(app: &mut MergeApp, ui: &mut Ui) {
             .small(),
     );
     ui.add_space(8.0);
-
     ui.label(RichText::new("Chat Prompt:").strong());
     ui.add(
         TextEdit::multiline(&mut app.llm_config.chat_system_prompt)
@@ -607,7 +697,6 @@ pub fn render_llm_settings(app: &mut MergeApp, ui: &mut Ui) {
             .font(FontId::monospace(10.0)),
     );
     ui.add_space(8.0);
-
     ui.label(RichText::new("Commit Prompt:").strong());
     ui.add(
         TextEdit::multiline(&mut app.llm_config.commit_system_prompt)
@@ -616,7 +705,6 @@ pub fn render_llm_settings(app: &mut MergeApp, ui: &mut Ui) {
             .font(FontId::monospace(10.0)),
     );
     ui.add_space(8.0);
-
     ui.label(RichText::new("Impl Prompt:").strong());
     ui.add(
         TextEdit::multiline(&mut app.llm_config.impl_system_prompt)
@@ -624,7 +712,6 @@ pub fn render_llm_settings(app: &mut MergeApp, ui: &mut Ui) {
             .hint_text("Default: Code implementation assistant...")
             .font(FontId::monospace(10.0)),
     );
-
     ui.add_space(16.0);
     if ui.button("💾 Save LLM Config").clicked() {
         app.save_config();
@@ -634,13 +721,10 @@ pub fn render_llm_settings(app: &mut MergeApp, ui: &mut Ui) {
 
 fn render_provider_config(
     ui: &mut Ui,
-    label: &str,
     provider: &mut super::llm::LlmProvider,
     provider_names: &[&str],
 ) {
-    ui.label(RichText::new(label).strong().color(pal::TEXT_NORMAL));
     ui.add_space(4.0);
-
     ui.horizontal(|ui| {
         ui.label("Type:");
         for (i, name) in provider_names.iter().enumerate() {
@@ -650,7 +734,6 @@ fn render_provider_config(
             }
         }
     });
-
     ui.horizontal(|ui| {
         ui.label("Model:");
         ui.add(
@@ -659,7 +742,6 @@ fn render_provider_config(
                 .font(FontId::monospace(10.0)),
         );
     });
-
     ui.horizontal(|ui| {
         ui.label("URL:");
         ui.add(
@@ -669,7 +751,6 @@ fn render_provider_config(
                 .font(FontId::monospace(10.0)),
         );
     });
-
     ui.horizontal(|ui| {
         ui.label("Key: ");
         let mut key_str = provider.api_key.clone().unwrap_or_default();
@@ -686,6 +767,30 @@ fn render_provider_config(
             } else {
                 Some(key_str)
             };
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("num_ctx:");
+        let mut ctx = provider.num_ctx;
+        let resp = ui.add(
+            Slider::new(&mut ctx, 256..=131072)
+                .logarithmic(true)
+                .text("tokens"),
+        );
+        if resp.changed() {
+            provider.num_ctx = ctx;
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("timeout (s):");
+        let mut secs = provider.timeout_secs;
+        let resp = ui.add(
+            Slider::new(&mut secs, 30..=3600)
+                .text("secs")
+                .clamp_to_range(true),
+        );
+        if resp.changed() {
+            provider.timeout_secs = secs;
         }
     });
 }

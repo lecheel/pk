@@ -105,6 +105,7 @@ pub struct MergeApp {
     pub format_on_save: bool,
     pub fmt_command: String,
     pub show_settings: bool,
+    pub show_llm_config: bool,
     pub fmt_error: Option<String>,
     pub show_fmt_error: bool,
     pub drag_start_active: bool,

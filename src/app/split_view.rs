@@ -19,6 +19,10 @@ use crate::diff::RowKind;
 use eframe::egui::*;
 
 pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
+    if app.show_llm_config {
+        super::chat::render_llm_config_panel(app, ui);
+        return;
+    }
     let mr = match app.match_result.clone() {
         Some(m) => m,
         None => crate::diff::MatchResult {

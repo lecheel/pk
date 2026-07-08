@@ -119,9 +119,14 @@ impl LlmProvider {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
-    pub chat_provider: LlmProvider,
-    pub commit_provider: LlmProvider,
-    pub impl_provider: LlmProvider,
+    #[serde(default)]
+    pub models: Vec<LlmProvider>,
+    #[serde(default)]
+    pub chat_model_idx: usize,
+    #[serde(default)]
+    pub commit_model_idx: usize,
+    #[serde(default)]
+    pub impl_model_idx: usize,
     #[serde(default)]
     pub chat_system_prompt: String,
     #[serde(default)]
@@ -129,13 +134,13 @@ pub struct LlmConfig {
     #[serde(default)]
     pub impl_system_prompt: String,
 }
-
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            chat_provider: LlmProvider::default(),
-            commit_provider: LlmProvider::default(),
-            impl_provider: LlmProvider::default(),
+            models: vec![LlmProvider::default()],
+            chat_model_idx: 0,
+            commit_model_idx: 0,
+            impl_model_idx: 0,
             chat_system_prompt: String::new(),
             commit_system_prompt: String::new(),
             impl_system_prompt: String::new(),
