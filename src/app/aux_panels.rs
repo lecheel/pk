@@ -331,6 +331,14 @@ pub fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
                     }
                 });
             }
+            ui.add_space(16.0);
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button("💾 Save Config").clicked() {
+                    app.save_config();
+                    app.set_message(StatusMessage::success("Configuration saved"));
+                }
+            });
         });
 }
 

@@ -563,6 +563,12 @@ pub fn render_llm_config_panel(app: &mut MergeApp, ui: &mut Ui) {
             app.show_settings = true;
         }
         ui.heading("LLM Configuration");
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui.button("💾 Save Config").clicked() {
+                app.save_config();
+                app.set_message(super::types::StatusMessage::success("LLM config saved"));
+            }
+        });
     });
     ui.separator();
     ScrollArea::vertical()
