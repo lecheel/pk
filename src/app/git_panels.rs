@@ -221,6 +221,7 @@ pub fn render_git_commit_detail_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: 
         if finished {
             app.commit_ai_session.is_loading = false;
             app.commit_ai_session.receiver = None;
+            app.commit_ai_session.start_time = None;
         } else {
             app.commit_ai_session.receiver = Some(receiver);
         }
@@ -301,9 +302,24 @@ pub fn render_git_commit_detail_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: 
                 if ui.button("🗑 Clear").clicked() {
                     app.commit_message.clear();
                 }
-                let ai_btn = Button::new("AI Commit")
-                    .fill(if app.commit_ai_session.is_loading { Color32::from_gray(60) } else { Color32::from_rgb(40, 90, 55) });
-                if ui.add_enabled(!app.commit_ai_session.is_loading, ai_btn).clicked() {
+            let btn_text = if app.commit_ai_session.is_loading {
+                if app.commit_ai_session.start_time.is_none() {
+                    app.commit_ai_session.start_time = Some(ui.ctx().input(|i| i.time));
+                }
+                let elapsed = ui.ctx().input(|i| i.time) - app.commit_ai_session.start_time.unwrap_or_default();
+                let dots = match (elapsed * 2.0) as usize % 4 {
+                    0 => "   ",
+                    1 => ".  ",
+                    2 => ".. ",
+                    _ => "...",
+                };
+                format!("AI Commit [{}] {:.1}s", dots, elapsed)
+            } else {
+                "AI Commit".to_string()
+            };
+            let ai_btn = Button::new(RichText::new(btn_text).strong())
+                .fill(if app.commit_ai_session.is_loading { Color32::from_gray(60) } else { Color32::from_rgb(40, 90, 55) });
+            if ui.add_enabled(!app.commit_ai_session.is_loading, ai_btn).clicked() {
                     let recent_commits = app.git_log_entries.iter().take(5).map(|e| format!("- {}", e.message)).collect::<Vec<String>>().join("\n");
                     let diff = std::process::Command::new("git")
                         .args(["diff", "--staged"])
@@ -358,10 +374,13 @@ Git diff:\n{}", recent_commits, diff
                         tool_call_id: None,
                     }];
                     let provider = app.llm_config.models.get(app.llm_config.commit_model_idx).cloned().unwrap_or_default();
-                    app.commit_ai_session.receiver = Some(llm::send_to_llm(provider, messages, system_prompt, None, String::new(), String::new(), false));
-                    app.commit_ai_session.is_loading = true;
-                }
-            });
+                app.commit_ai_session.receiver = Some(llm::send_to_llm(provider, messages, system_prompt, None, String::new(), String::new(), false));
+                app.commit_ai_session.is_loading = true;
+            }
+            if app.commit_ai_session.is_loading {
+                ui.ctx().request_repaint();
+            }
+        });
 
             ui.add_space(10.0);
             ui.separator();
