@@ -7,8 +7,8 @@ use super::clipboard_utils::{get_clipboard_text, parse_clipboard_patch};
 use super::file_panel::render_file_panel;
 use super::git_diff_side::render_git_diff_side_panel;
 use super::git_panels::{
-    render_git_commit_detail_panel, render_git_commit_panel, render_git_diff_panel,
-    render_git_log_panel, render_git_status_panel,
+    render_git_commit_detail_panel, render_git_diff_panel, render_git_log_panel,
+    render_git_status_panel,
 };
 use super::matching::MergeMatching;
 use super::palette::pal;
@@ -84,8 +84,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                         "Git Diff"
                     } else if app.show_git_log_window {
                         "Git Log"
-                    } else if app.show_git_commit_window {
-                        "Git Commit"
                     } else if app.show_chat_window && !app.disable_llm {
                         "Chat"
                     } else {
@@ -101,8 +99,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                             "Git Diff Side",
                             Color32::from_rgb(100, 210, 220),
                         ),
-                        ("Log(F4)", "Git Log", Color32::from_rgb(180, 130, 230)),
-                        ("Commit", "Git Commit", Color32::from_rgb(230, 200, 120)),
+                        ("Log/Commit(F4)", "Git Log", Color32::from_rgb(180, 130, 230)),
                         ("Repos", "Repos", Color32::from_rgb(120, 230, 160)),
                         ("Chat(F9)", "Chat", Color32::from_rgb(180, 140, 255)),
                     ];
@@ -160,9 +157,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                                 "Git Diff Side" => {
                                     app.show_git_diff_side = true;
                                     app.refresh_git_changed_files();
-                                }
-                                "Git Commit" => {
-                                    app.show_git_commit_window = true;
                                 }
                                 "Git Log" => {
                                     app.show_git_log_window = true;
@@ -345,8 +339,6 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
             }
         }
         chat::render_chat_panel(app, &mut left_ui, left_w);
-    } else if app.show_git_commit_window {
-        render_git_commit_panel(app, &mut left_ui, row_h, char_w, left_w);
     } else if app.show_git_status_window {
         render_git_status_panel(app, &mut left_ui, row_h, char_w, left_w);
     } else if app.show_git_diff_window {
@@ -359,7 +351,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
 
     let mut right_ui = ui.child_ui(right_rect, Layout::top_down(Align::LEFT), None);
     if app.show_git_log_window {
-        render_git_commit_detail_panel(app, &mut right_ui);
+        render_git_commit_detail_panel(app, &mut right_ui, right_w);
     } else if app.hunks.is_empty() && app.file_lines.is_empty() {
         right_ui.horizontal(|ui| {
             ui.add_space(40.0); // Left indentation
