@@ -160,6 +160,7 @@ pub fn render_split_view(app: &mut MergeApp, ui: &mut Ui) {
                                 }
                                 "Git Log" => {
                                     app.show_git_log_window = true;
+                                    app.show_commit_prompt = false;
                                     app.git_log_entries = super::git_ops::get_git_log(
                                         std::path::Path::new(&app.base_dir),
                                     );

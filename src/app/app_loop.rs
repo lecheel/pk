@@ -513,25 +513,6 @@ impl eframe::App for MergeApp {
                     });
                 });
         }
-        if self.show_commit_prompt {
-            let mut show_prompt = self.show_commit_prompt;
-            Window::new("Git Commit")
-                .open(&mut show_prompt)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.label("Commit message:");
-                    ui.text_edit_multiline(&mut self.commit_message);
-                    ui.horizontal(|ui| {
-                        if ui.button("Commit (c)").clicked() {
-                            self.commit_changes();
-                        }
-                        if ui.button("Cancel").clicked() {
-                            self.show_commit_prompt = false;
-                        }
-                    });
-                });
-            self.show_commit_prompt = show_prompt;
-        }
         super::toolbar::render_toolbar(self, ctx);
         super::status_bar::render_status_bar(self, ctx);
         CentralPanel::default().show(ctx, |ui| {

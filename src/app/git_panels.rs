@@ -231,117 +231,118 @@ pub fn render_git_commit_detail_panel(app: &mut MergeApp, ui: &mut Ui, panel_w: 
         .id_source("git_commit_detail_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new("💾 GIT COMMIT")
-                    .color(Color32::from_rgb(230, 200, 120))
-                    .strong()
-                    .monospace(),
-            );
-            ui.add_space(8.0);
+            if app.show_commit_prompt {
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new("💾 GIT COMMIT")
+                        .color(Color32::from_rgb(230, 200, 120))
+                        .strong()
+                        .monospace(),
+                );
+                ui.add_space(8.0);
 
-            let mut staged_files: Vec<String> = Vec::new();
-            if let Ok(repo) = git2::Repository::discover(&app.base_dir) {
-                let mut opts = git2::StatusOptions::new();
-                opts.include_untracked(false);
-                if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
-                    for entry in statuses.iter() {
-                        if let Some(path) = entry.path() {
-                            let status = entry.status();
-                            if status.is_index_new()
-                                || status.is_index_modified()
-                                || status.is_index_deleted()
-                                || status.is_index_renamed()
-                            {
-                                staged_files.push(path.to_string());
+                let mut staged_files: Vec<String> = Vec::new();
+                if let Ok(repo) = git2::Repository::discover(&app.base_dir) {
+                    let mut opts = git2::StatusOptions::new();
+                    opts.include_untracked(false);
+                    if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
+                        for entry in statuses.iter() {
+                            if let Some(path) = entry.path() {
+                                let status = entry.status();
+                                if status.is_index_new()
+                                    || status.is_index_modified()
+                                    || status.is_index_deleted()
+                                    || status.is_index_renamed()
+                                {
+                                    staged_files.push(path.to_string());
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            if !staged_files.is_empty() {
-                ui.label(
-                    RichText::new(format!(
-                        "📝 Staged files to commit ({}):",
-                        staged_files.len()
-                    ))
-                    .color(pal::TEXT_DIM),
-                );
+                if !staged_files.is_empty() {
+                    ui.label(
+                        RichText::new(format!(
+                            "📝 Staged files to commit ({}):",
+                            staged_files.len()
+                        ))
+                        .color(pal::TEXT_DIM),
+                    );
+                    ui.add_space(2.0);
+                    ScrollArea::vertical()
+                        .id_source("git_commit_files_scroll")
+                        .max_height(120.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            for path in &staged_files {
+                                ui.label(
+                                    RichText::new(format!("• {}", path))
+                                        .color(pal::TEXT_NORMAL)
+                                        .monospace(),
+                                );
+                            }
+                        });
+                    ui.add_space(8.0);
+                }
+
+                ui.label(RichText::new("Commit message:").color(pal::TEXT_DIM));
                 ui.add_space(2.0);
-                ScrollArea::vertical()
-                    .id_source("git_commit_files_scroll")
-                    .max_height(120.0)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        for path in &staged_files {
-                            ui.label(
-                                RichText::new(format!("• {}", path))
-                                    .color(pal::TEXT_NORMAL)
-                                    .monospace(),
-                            );
+                ui.add(
+                    TextEdit::multiline(&mut app.commit_message)
+                        .desired_width(panel_w - 16.0)
+                        .desired_rows(5)
+                        .font(FontId::monospace(12.0)),
+                );
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if ui.button("✅ Commit").clicked() {
+                        app.commit_changes();
+                    }
+                    if ui.button("🗑 Clear").clicked() {
+                        app.commit_message.clear();
+                    }
+                    let btn_text = if app.commit_ai_session.is_loading {
+                        if app.commit_ai_session.start_time.is_none() {
+                            app.commit_ai_session.start_time = Some(ui.ctx().input(|i| i.time));
                         }
-                    });
-                ui.add_space(8.0);
-            }
-
-            ui.label(RichText::new("Commit message:").color(pal::TEXT_DIM));
-            ui.add_space(2.0);
-            ui.add(
-                TextEdit::multiline(&mut app.commit_message)
-                    .desired_width(panel_w - 16.0)
-                    .desired_rows(5)
-                    .font(FontId::monospace(12.0)),
-            );
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                if ui.button("✅ Commit").clicked() {
-                    app.commit_changes();
-                }
-                if ui.button("🗑 Clear").clicked() {
-                    app.commit_message.clear();
-                }
-            let btn_text = if app.commit_ai_session.is_loading {
-                if app.commit_ai_session.start_time.is_none() {
-                    app.commit_ai_session.start_time = Some(ui.ctx().input(|i| i.time));
-                }
-                let elapsed = ui.ctx().input(|i| i.time) - app.commit_ai_session.start_time.unwrap_or_default();
-                let dots = match (elapsed * 2.0) as usize % 4 {
-                    0 => "   ",
-                    1 => ".  ",
-                    2 => ".. ",
-                    _ => "...",
-                };
-                format!("AI Commit [{}] {:.1}s", dots, elapsed)
-            } else {
-                "AI Commit".to_string()
-            };
-            let ai_btn = Button::new(RichText::new(btn_text).strong())
-                .fill(if app.commit_ai_session.is_loading { Color32::from_gray(60) } else { Color32::from_rgb(40, 90, 55) });
-            if ui.add_enabled(!app.commit_ai_session.is_loading, ai_btn).clicked() {
-                    let recent_commits = app.git_log_entries.iter().take(5).map(|e| format!("- {}", e.message)).collect::<Vec<String>>().join("\n");
-                    let diff = std::process::Command::new("git")
-                        .args(["diff", "--staged"])
-                        .current_dir(&app.base_dir)
-                        .output()
-                        .ok()
-                        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-                        .unwrap_or_default();
-                    let diff = if diff.trim().is_empty() {
-                        std::process::Command::new("git")
-                            .args(["diff"])
+                        let elapsed = ui.ctx().input(|i| i.time) - app.commit_ai_session.start_time.unwrap_or_default();
+                        let dots = match (elapsed * 2.0) as usize % 4 {
+                            0 => "   ",
+                            1 => ".  ",
+                            2 => ".. ",
+                            _ => "...",
+                        };
+                        format!("AI Commit [{}] {:.1}s", dots, elapsed)
+                    } else {
+                        "AI Commit".to_string()
+                    };
+                    let ai_btn = Button::new(RichText::new(btn_text).strong())
+                        .fill(if app.commit_ai_session.is_loading { Color32::from_gray(60) } else { Color32::from_rgb(40, 90, 55) });
+                    if ui.add_enabled(!app.commit_ai_session.is_loading, ai_btn).clicked() {
+                        let recent_commits = app.git_log_entries.iter().take(5).map(|e| format!("- {}", e.message)).collect::<Vec<String>>().join("\n");
+                        let diff = std::process::Command::new("git")
+                            .args(["diff", "--staged"])
                             .current_dir(&app.base_dir)
                             .output()
                             .ok()
                             .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-                            .unwrap_or_default()
-                    } else {
-                        diff
-                    };
-                    let (system_prompt, user_msg) = if app.llm_config.commit_system_prompt.is_empty() {
-                        let prompt = format!(
-                            "Generate a git commit message following this structure no explanation just the core:\n\
+                            .unwrap_or_default();
+                        let diff = if diff.trim().is_empty() {
+                            std::process::Command::new("git")
+                                .args(["diff"])
+                                .current_dir(&app.base_dir)
+                                .output()
+                                .ok()
+                                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                                .unwrap_or_default()
+                        } else {
+                            diff
+                        };
+                        let (system_prompt, user_msg) = if app.llm_config.commit_system_prompt.is_empty() {
+                            let prompt = format!(
+                                "Generate a git commit message following this structure no explanation just the core:\n\
 1. First line: conventional commit format (type: concise description) (use semantic types like feat, fix, docs, style, refactor, perf, test, chore, etc.).\n\
 2. Optional bullet points if necessary:\n\
    - Keep the second line blank\n\
@@ -361,30 +362,31 @@ fix: typo in README.md\n\
 Your message must be based on the provided git diff, with a bit of styling from recent commits.\n\
 Recent commits for reference:\n{}\n\
 Git diff:\n{}", recent_commits, diff
-                        );
-                        (Some(super::chat::ChatMode::Commit.system_prompt()), prompt)
-                    } else {
-                        let prompt = format!("Recent commits for reference:\n{}\n\nGit diff:\n{}", recent_commits, diff);
-                        (Some(app.llm_config.commit_system_prompt.clone()), prompt)
-                    };
-                    let messages = vec![ChatMessage {
-                        role: "user".to_string(),
-                        content: user_msg,
-                        tool_calls: None,
-                        tool_call_id: None,
-                    }];
-                    let provider = app.llm_config.models.get(app.llm_config.commit_model_idx).cloned().unwrap_or_default();
-                app.commit_ai_session.receiver = Some(llm::send_to_llm(provider, messages, system_prompt, None, String::new(), String::new(), false));
-                app.commit_ai_session.is_loading = true;
-            }
-            if app.commit_ai_session.is_loading {
-                ui.ctx().request_repaint();
-            }
-        });
+                            );
+                            (Some(super::chat::ChatMode::Commit.system_prompt()), prompt)
+                        } else {
+                            let prompt = format!("Recent commits for reference:\n{}\n\nGit diff:\n{}", recent_commits, diff);
+                            (Some(app.llm_config.commit_system_prompt.clone()), prompt)
+                        };
+                        let messages = vec![ChatMessage {
+                            role: "user".to_string(),
+                            content: user_msg,
+                            tool_calls: None,
+                            tool_call_id: None,
+                        }];
+                        let provider = app.llm_config.models.get(app.llm_config.commit_model_idx).cloned().unwrap_or_default();
+                        app.commit_ai_session.receiver = Some(llm::send_to_llm(provider, messages, system_prompt, None, String::new(), String::new(), false));
+                        app.commit_ai_session.is_loading = true;
+                    }
+                    if app.commit_ai_session.is_loading {
+                        ui.ctx().request_repaint();
+                    }
+                });
 
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(10.0);
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(10.0);
+            }
 
             ui.label(
                 RichText::new("📜 COMMIT DETAILS")
@@ -1207,6 +1209,7 @@ fn stage_all_and_open_commit(app: &mut MergeApp) {
     }
     app.show_git_status_window = false;
     app.show_git_log_window = true;
+    app.show_commit_prompt = true;
     app.git_log_entries = super::git_ops::get_git_log(std::path::Path::new(&app.base_dir));
     app.set_message(super::types::StatusMessage::info(
         "Staged all tracked changes — write your commit message in the Log tab"
