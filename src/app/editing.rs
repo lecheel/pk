@@ -200,7 +200,11 @@ impl MergeApp {
     }
 
     pub fn save_file(&mut self) {
-        let content = self.file_lines.join("\n");
+        let content = if self.file_lines.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", self.file_lines.join("\n"))
+        };
         let path = if self.file_path.is_empty() {
             "merged_output.txt".to_string()
         } else {
@@ -277,7 +281,11 @@ impl MergeApp {
             if path.is_empty() || state.history.is_empty() {
                 continue;
             }
-            let content = state.lines.join("\n");
+            let content = if state.lines.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", state.lines.join("\n"))
+            };
             match std::fs::write(path, &content) {
                 Ok(_) => {
                     saved += 1;
