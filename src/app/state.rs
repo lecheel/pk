@@ -157,6 +157,10 @@ pub struct MergeApp {
     pub impl_files: String,
     pub impl_hashes: String,
     pub daemon_sync_warning: Option<String>,
+    pub project_dirs: Vec<String>,
+    pub active_project_dir: Option<String>,
+    pub show_project_dir_browser: bool,
+    pub dir_browser_path: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

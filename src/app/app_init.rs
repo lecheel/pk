@@ -161,6 +161,10 @@ impl MergeApp {
             impl_files: String::new(),
             impl_hashes: String::new(),
             daemon_sync_warning: None,
+            project_dirs: config.project_dirs,
+            active_project_dir: config.active_project_dir,
+            show_project_dir_browser: false,
+            dir_browser_path: String::new(),
         };
         let mut loaded_patch = false;
         if let Some(patch_file) = initial_patch {
@@ -242,8 +246,9 @@ impl MergeApp {
             Some(h) => h.clone(),
             None => return,
         };
+        let filename = hunk.filename.trim_start_matches('/');
         let path = std::path::Path::new(&self.base_dir)
-            .join(&hunk.filename)
+            .join(filename)
             .display()
             .to_string();
         if path != self.file_path {
@@ -328,7 +333,7 @@ impl MergeApp {
             return;
         }
         self.git_changed_file_idx = idx;
-        let rel = self.git_changed_files[idx].clone();
+        let rel = self.git_changed_files[idx].trim_start_matches('/').to_string();
         let path = std::path::Path::new(&self.base_dir)
             .join(&rel)
             .display()

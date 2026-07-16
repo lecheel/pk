@@ -26,6 +26,10 @@ pub struct AppConfig {
     pub impl_tools: ImplToolsConfig,
     #[serde(default)]
     pub debug_impl_llm: bool,
+    #[serde(default)]
+    pub project_dirs: Vec<String>,
+    #[serde(default)]
+    pub active_project_dir: Option<String>,
 }
 fn default_min_match_score() -> f32 {
     60.0
@@ -67,6 +71,8 @@ impl Default for AppConfig {
             rustconcat_api_url: default_rustconcat_api_url(),
             impl_tools: ImplToolsConfig::default(),
             debug_impl_llm: false,
+            project_dirs: Vec::new(),
+            active_project_dir: None,
         }
     }
 }

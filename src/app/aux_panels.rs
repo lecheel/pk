@@ -287,6 +287,101 @@ pub fn render_settings_panel(app: &mut MergeApp, ui: &mut Ui) {
             });
             ui.add_space(16.0);
             ui.separator();
+            ui.heading("Project Directories");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label("Active Project:");
+                let mut selected_idx = app
+                    .active_project_dir
+                    .as_ref()
+                    .and_then(|d| app.project_dirs.iter().position(|p| p == d))
+                    .unwrap_or(0);
+                let items: Vec<String> = app.project_dirs.clone();
+                ComboBox::from_id_source("project_dir_combo")
+                    .selected_text(if let Some(d) = &app.active_project_dir {
+                        d.clone()
+                    } else if items.is_empty() {
+                        "<None>".to_string()
+                    } else {
+                        items[selected_idx].clone()
+                    })
+                    .show_ui(ui, |ui| {
+                        for (i, dir) in items.iter().enumerate() {
+                            ui.selectable_value(&mut selected_idx, i, dir);
+                        }
+                    });
+
+                if ui.button("Set Active").clicked() && !items.is_empty() {
+                    let dir = items[selected_idx].clone();
+                    app.active_project_dir = Some(dir.clone());
+                    app.base_dir = dir.clone();
+                    app.start_pwd = dir.clone();
+                    app.start_pwd_is_repo = git2::Repository::discover(&dir).is_ok();
+                    app.save_config();
+                    app.reparse();
+                    app.git_log_entries =
+                        super::git_ops::get_git_log(std::path::Path::new(&app.base_dir));
+                    app.set_message(StatusMessage::success(format!(
+                        "Active project dir set to: {}",
+                        dir
+                    )));
+                }
+            });
+
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("📁 Browse...").clicked() {
+                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                        let dir = folder.display().to_string();
+                        if !app.project_dirs.contains(&dir) {
+                            app.project_dirs.push(dir.clone());
+                        }
+                        app.active_project_dir = Some(dir.clone());
+                        app.base_dir = dir.clone();
+                        app.start_pwd = dir.clone();
+                        app.start_pwd_is_repo = git2::Repository::discover(&dir).is_ok();
+                        app.save_config();
+                        app.reparse();
+                        app.git_log_entries =
+                            super::git_ops::get_git_log(std::path::Path::new(&app.base_dir));
+                        app.set_message(StatusMessage::success(format!("Active project dir set to: {}", dir)));
+                    }
+                }
+                
+                ui.add(
+                    TextEdit::singleline(&mut app.dir_browser_path)
+                        .desired_width(ui.available_width() - 80.0)
+                        .hint_text("/path/to/repo or working dir"),
+                );
+                if ui.button("➕ Add").clicked() {
+                    let dir = app.dir_browser_path.trim().to_string();
+                    if !dir.is_empty() && !app.project_dirs.contains(&dir) {
+                        app.project_dirs.push(dir);
+                        app.dir_browser_path.clear();
+                        app.save_config();
+                    }
+                }
+            });
+
+            ui.add_space(4.0);
+            if !app.project_dirs.is_empty() {
+                ui.label("Saved Directories:");
+                let dirs_clone = app.project_dirs.clone();
+                for dir in dirs_clone.iter() {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(dir).color(pal::TEXT_DIM).monospace());
+                        if ui.button("🗑").clicked() {
+                            app.project_dirs.retain(|d| d != dir);
+                            if app.active_project_dir.as_deref() == Some(dir.as_str()) {
+                                app.active_project_dir = None;
+                            }
+                            app.save_config();
+                        }
+                    });
+                }
+            }
+            ui.add_space(16.0);
+            ui.separator();
             ui.heading("Impl Workflow Settings");
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -484,20 +579,23 @@ pub fn render_debug_panel(app: &mut MergeApp, ui: &mut Ui) {
                             ui.label(RichText::new(workdir.to_string_lossy()).monospace());
                         });
                         report.push_str(&format!("Repo workdir: {}\n", workdir.to_string_lossy()));
+                        // Resolve relative paths against the active project's base_dir, never
+                        // against the OS process cwd — the process cwd is wherever the binary
+                        // happened to be launched from and has nothing to do with the active
+                        // project, so falling back to it here produced misleading diagnostics.
+                        let base_dir_path = std::path::Path::new(&app.base_dir);
                         let file_path = std::path::Path::new(&app.file_path);
                         let abs_file_path = if file_path.is_absolute() {
-                            file_path.to_path_buf()
-                        } else if let Ok(cwd) = std::env::current_dir() {
-                            cwd.join(file_path)
+                            Some(file_path.to_path_buf())
+                        } else if !app.file_path.is_empty() {
+                            Some(base_dir_path.join(file_path))
                         } else {
-                            file_path.to_path_buf()
+                            None
                         };
                         let abs_workdir = if workdir.is_absolute() {
                             workdir.to_path_buf()
-                        } else if let Ok(cwd) = std::env::current_dir() {
-                            cwd.join(workdir)
                         } else {
-                            workdir.to_path_buf()
+                            base_dir_path.join(workdir)
                         };
                         let clean_path = |p: &std::path::Path| -> String {
                             let s = p.to_string_lossy().replace('\\', "/");
@@ -507,20 +605,41 @@ pub fn render_debug_panel(app: &mut MergeApp, ui: &mut Ui) {
                                 s
                             }
                         };
-                        let clean_file = clean_path(&abs_file_path);
-                        let clean_work = clean_path(&abs_workdir);
-                        ui.horizontal(|ui| {
-                            ui.label("Normalized file path:");
-                            ui.label(RichText::new(&clean_file).monospace());
-                        });
-                        report.push_str(&format!("Normalized file path: {}\n", clean_file));
+                        let mut clean_work = clean_path(&abs_workdir);
+                        if !clean_work.ends_with('/') {
+                            clean_work.push('/');
+                        }
+                        if app.file_path.is_empty() {
+                            ui.horizontal(|ui| {
+                                ui.label("Normalized file path:");
+                                ui.label(
+                                    RichText::new("(no file loaded)").color(pal::TEXT_DIM).monospace(),
+                                );
+                            });
+                            report.push_str("Normalized file path: (no file loaded)\n");
+                        } else if let Some(abs_file_path) = &abs_file_path {
+                            let clean_file = clean_path(abs_file_path);
+                            ui.horizontal(|ui| {
+                                ui.label("Normalized file path:");
+                                ui.label(RichText::new(&clean_file).monospace());
+                            });
+                            report.push_str(&format!("Normalized file path: {}\n", clean_file));
+                        }
                         ui.horizontal(|ui| {
                             ui.label("Normalized workdir:");
                             ui.label(RichText::new(&clean_work).monospace());
                         });
                         report.push_str(&format!("Normalized workdir: {}\n", clean_work));
-                        if clean_file.starts_with(&clean_work) {
-                            let rel = &clean_file[clean_work.len()..].trim_start_matches('/');
+
+                        let clean_file = abs_file_path.as_deref().map(clean_path).unwrap_or_default();
+                        if app.file_path.is_empty() {
+                            ui.colored_label(
+                                Color32::from_rgb(230, 200, 100),
+                                "⚠ No file currently loaded.",
+                            );
+                            report.push_str("Relative path match: No file loaded\n");
+                        } else if clean_file.starts_with(&clean_work) {
+                            let rel = &clean_file[clean_work.len()..];
                             ui.colored_label(
                                 Color32::from_rgb(120, 220, 160),
                                 format!("✔ Relative path match: {}", rel),
