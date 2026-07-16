@@ -172,6 +172,59 @@ pub fn render_toolbar(app: &mut MergeApp, ctx: &Context) {
                 {
                     app.show_repos_window = !app.show_repos_window;
                 }
+                if !app.project_dirs.is_empty() {
+                    ui.add(Separator::default().vertical().spacing(12.0));
+                    ui.label(RichText::new("Project:").color(pal::TEXT_DIM).small());
+                    // Persisted via egui memory (shared id with the Settings panel picker)
+                    // so a dropdown click survives to the next frame instead of being
+                    // silently discarded before "Set Active" is pressed.
+                    let sel_id = Id::new("settings_project_dir_pending_selection");
+                    let mut selected_dir: String = ui
+                        .data(|d| d.get_temp(sel_id))
+                        .unwrap_or_else(|| app.active_project_dir.clone().unwrap_or_default());
+                    if !selected_dir.is_empty() && !app.project_dirs.contains(&selected_dir) {
+                        selected_dir = app.active_project_dir.clone().unwrap_or_default();
+                    }
+                    ComboBox::from_id_source("toolbar_project_dir_combo")
+                        .width(140.0)
+                        .selected_text(if selected_dir.is_empty() {
+                            "<None>".to_string()
+                        } else {
+                            std::path::Path::new(&selected_dir)
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_else(|| selected_dir.clone())
+                        })
+                        .show_ui(ui, |ui| {
+                            for dir in app.project_dirs.clone().iter() {
+                                if ui.selectable_label(*dir == selected_dir, dir).clicked() {
+                                    selected_dir = dir.clone();
+                                }
+                            }
+                        });
+                    ui.data_mut(|d| d.insert_temp(sel_id, selected_dir.clone()));
+                    let is_already_active =
+                        app.active_project_dir.as_deref() == Some(selected_dir.as_str());
+                    let set_active_btn = ui.add_enabled(
+                        !selected_dir.is_empty() && !is_already_active,
+                        Button::new("Set Active"),
+                    );
+                    if set_active_btn.clicked() {
+                        let dir = selected_dir;
+                        app.active_project_dir = Some(dir.clone());
+                        app.base_dir = dir.clone();
+                        app.start_pwd = dir.clone();
+                        app.start_pwd_is_repo = git2::Repository::discover(&dir).is_ok();
+                        app.save_config();
+                        app.reparse();
+                        app.git_log_entries =
+                            super::git_ops::get_git_log(std::path::Path::new(&app.base_dir));
+                        app.set_message(StatusMessage::success(format!(
+                            "Active project dir set to: {}",
+                            dir
+                        )));
+                    }
+                }
                 if ui.button("?").on_hover_text("Keyboard shortcuts").clicked() {
                     app.show_help = !app.show_help;
                 }
